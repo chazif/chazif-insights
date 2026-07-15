@@ -41,7 +41,9 @@ async def revalidate_assets(request: Request, call_next):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "chazif-insights", "version": "0.2.0"}
+    backend = _engine.dialect.name  # "postgresql" or "sqlite"
+    return {"ok": True, "service": "chazif-insights", "version": "0.3.0",
+            "db": backend, "persistent": backend != "sqlite"}
 
 
 # ---- clients -------------------------------------------------------------
@@ -61,6 +63,22 @@ def clients_create(body: ClientCreate):
         return service.create_client(body.name, client_id=body.client_id, engine=_engine)
     except ValueError as e:
         raise HTTPException(409, str(e))
+
+
+@app.get("/api/clients/{client_id}/config")
+def client_config_get(client_id: str):
+    cfg = service.get_config(client_id, engine=_engine)
+    if cfg is None:
+        raise HTTPException(404, f"unknown client '{client_id}'")
+    return cfg
+
+
+@app.put("/api/clients/{client_id}/config")
+def client_config_put(client_id: str, body: dict):
+    try:
+        return service.update_config(client_id, body, engine=_engine)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
 
 
 # ---- upload + inventory --------------------------------------------------

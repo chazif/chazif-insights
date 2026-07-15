@@ -9,6 +9,7 @@ dashboard seam for a real client.
 import calendar
 from sqlalchemy import text, select, func
 from ..ingest.store import get_engine, clients, uploads
+from ..ingest.service import get_config
 from ..analyze.analyzers import run_analyzers
 
 FULL_MONTHS = ["January", "February", "March", "April", "May", "June",
@@ -162,7 +163,8 @@ def build_bundle(client_id, engine=None):
             "SELECT COUNT(*) FROM raw_rows WHERE client_id=:c AND report_type='pmax_placements'"), {"c": client_id}).scalar())
 
     # ---- analyzers -> findings + recommendations (analyzers open their own connections) ----
-    analyzer_findings = run_analyzers(engine, client_id, cm) if cm else []
+    config = get_config(client_id, engine) or {}
+    analyzer_findings = run_analyzers(engine, client_id, cm, config) if cm else []
     findings = _to_overview_findings(analyzer_findings)
     recommendations = _to_recommendations(analyzer_findings)
 

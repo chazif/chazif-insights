@@ -2,10 +2,11 @@
 """Service layer between the HTTP API and the store: clients, uploads, inventory.
 Plain functions so they're verifiable without a running server."""
 import datetime, re
-from sqlalchemy import select, func, insert
+from sqlalchemy import select, func, insert, update
 from .store import get_engine, init_db, clients, uploads, raw_rows
 from .parser import EXPECTED_REPORTS
 from .load import load_folder
+from ..clientconfig import sanitize, merged
 
 
 def slug_client(name: str) -> str:
@@ -45,6 +46,34 @@ def create_client(name, client_id=None, engine=None):
             client_id=cid, name=name,
             created_at=datetime.datetime.now(datetime.timezone.utc), config=None))
     return dict(client_id=cid, name=name)
+
+
+def get_config(client_id, engine=None, with_defaults=True):
+    """Return the client's stored config (merged over defaults unless with_defaults=False)."""
+    engine = engine or get_engine(); init_db(engine)
+    with engine.connect() as c:
+        row = c.execute(select(clients.c.config).where(clients.c.client_id == client_id)).first()
+    if row is None:
+        return None
+    raw = row[0] or {}
+    if isinstance(raw, str):
+        import json
+        try:
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            raw = {}
+    return merged(raw) if with_defaults else raw
+
+
+def update_config(client_id, payload, engine=None):
+    """Sanitize and store a client's config; returns the merged effective config."""
+    engine = engine or get_engine(); init_db(engine)
+    if not get_client(engine, client_id):
+        raise ValueError(f"unknown client '{client_id}'")
+    clean = sanitize(payload or {})
+    with engine.begin() as c:
+        c.execute(update(clients).where(clients.c.client_id == client_id).values(config=clean))
+    return merged(clean)
 
 
 def inventory(client_id, engine=None):
