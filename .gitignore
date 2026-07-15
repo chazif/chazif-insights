@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Node / tooling (future)
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data — generated bundles are large and produced by the engine, not source.
+# The Mavis demo fixture is regenerated with tools/split_dashboard.py.
+data/clients/**/bundle.json
+
+# SQLite scratch
+*.db
+*.db-journal
