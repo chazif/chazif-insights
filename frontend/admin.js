@@ -230,6 +230,7 @@
       try { cfg = await api("GET", "/api/clients/" + encodeURIComponent(cid) + "/config"); }
       catch (e) { box.innerHTML = `<div class="ws-err">${esc(e.message)}</div>`; return; }
       const th = cfg.thresholds || {};
+      const seasonText = (cfg.seasonality || []).map(w => (w.label || "") + ": " + ((w.months || []).join(", "))).join("\n");
       box.innerHTML =
         ta("ctxBrand", "Brand terms", cfg.brand_terms, "chiarelli, chiarelli's") +
         ta("ctxFriendly", "Friendly competitors (never conquest/negate)", cfg.competitors_friendly, "Catholic Supply, St. Jude Shop") +
@@ -241,6 +242,8 @@
            ${nf("ctxLowSpend", "Low-volume spend $", th.low_vol_spend)}
            ${nf("ctxQs", "QS danger-zone ceiling", th.qs_floor)}
          </div>
+         <div style="margin-bottom:14px"><label class="ws-note" style="display:block;font-weight:600;margin-bottom:5px">Seasonality — suppress trend alarms in known troughs (one per line: <em>Label: Month, Month</em>)</label>
+           <textarea class="ws-input" id="ctxSeason" rows="2" style="width:100%;resize:vertical" placeholder="Post-Easter trough: May">${esc(seasonText)}</textarea></div>
          <div style="margin-bottom:14px"><label class="ws-note" style="display:block;font-weight:600;margin-bottom:5px">Notes</label>
            <textarea class="ws-input" id="ctxNotes" rows="2" style="width:100%;resize:vertical">${esc(cfg.notes || "")}</textarea></div>
          <div class="ws-row"><button class="ws-btn primary" id="ctxSave">Save context</button><span class="ws-note" id="ctxStatus"></span></div>
@@ -249,10 +252,17 @@
       el.querySelector("#ctxSave").addEventListener("click", async () => {
         const v = id => (el.querySelector(id).value || "").trim();
         const numOrNull = id => { const x = el.querySelector(id).value; return x === "" ? null : Number(x); };
+        const parseSeason = txt => (txt || "").split("\n").map(line => {
+          line = line.trim(); if (!line) return null;
+          const i = line.indexOf(":");
+          const label = i >= 0 ? line.slice(0, i).trim() : "Seasonal trough";
+          const months = (i >= 0 ? line.slice(i + 1) : line).split(",").map(s => s.trim()).filter(Boolean);
+          return months.length ? { label: label, months: months } : null;
+        }).filter(Boolean);
         const payload = {
           brand_terms: v("#ctxBrand"), competitors_friendly: v("#ctxFriendly"),
           competitors_conquest: v("#ctxConquest"), waste_exclusions: v("#ctxExcl"),
-          notes: v("#ctxNotes"),
+          seasonality: parseSeason(v("#ctxSeason")), notes: v("#ctxNotes"),
           thresholds: {
             smart_bidding_floor: numOrNull("#ctxFloor"), low_vol_conv: numOrNull("#ctxLowConv"),
             low_vol_spend: numOrNull("#ctxLowSpend"), qs_floor: numOrNull("#ctxQs"),

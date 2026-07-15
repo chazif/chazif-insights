@@ -11,6 +11,11 @@ from collections import defaultdict
 from sqlalchemy import text
 
 
+FULL_MONTHS = ["January", "February", "March", "April", "May", "June",
+               "July", "August", "September", "October", "November", "December"]
+_MONTH_NUM = {n.lower(): i + 1 for i, n in enumerate(FULL_MONTHS)}
+
+
 def _asdict(row):
     """raw_rows.row via a text() query can arrive as a JSON string (SQLite) or a
     dict (Postgres jsonb). Normalize to a dict."""
@@ -20,6 +25,19 @@ def _asdict(row):
         except (ValueError, TypeError):
             return {}
     return row or {}
+
+
+def _parse_ym(label):
+    """'June 2026' -> (2026, 6); None if unparseable."""
+    parts = str(label or "").split()
+    if len(parts) != 2:
+        return None
+    mo = _MONTH_NUM.get(parts[0].lower())
+    try:
+        yr = int(parts[1])
+    except ValueError:
+        return None
+    return (yr, mo) if mo else None
 
 SMART_BIDDING_FLOOR = 30      # conv/mo for standalone tCPA/tROAS
 LOW_VOL_CONV = 15
@@ -274,6 +292,56 @@ def _pmax(c, client_id):
         "HIGH", "M", "Week 2", "[ACTION REQUIRED]")]
 
 
+# ---------- D: month-over-month conversion trend (seasonality-aware) ----------
+def _trend(c, client_id, cm, seasonality):
+    rows = c.execute(text(
+        "SELECT date, SUM(conversions) conv FROM raw_rows WHERE client_id=:c "
+        "AND report_type='campaign_performance' AND date IS NOT NULL GROUP BY date"),
+        {"c": client_id}).all()
+    series = []
+    for date, conv in rows:
+        ym = _parse_ym(date)
+        if ym:
+            series.append((ym, _num(conv)))
+    series.sort()
+    series = [s for s in series if s[0] <= (cm["year"], cm["month"])]
+    if len(series) < 2:
+        return []
+    (_, cur_conv), (_, prior_conv) = series[-1], series[-2]
+    if prior_conv < 10:                     # too small to judge a % move
+        return []
+    drop = (cur_conv - prior_conv) / prior_conv
+    if drop >= -0.15:                       # no material decline
+        return []
+
+    month_name = FULL_MONTHS[cm["month"] - 1]
+    trough = None
+    for w in (seasonality or []):
+        months = [str(m).strip().lower() for m in (w.get("months") or [])]
+        if month_name.lower() in months or month_name[:3].lower() in months:
+            trough = w.get("label") or "seasonal trough"
+            break
+    pct = abs(drop) * 100
+    if trough:                              # suppressed: expected per business context
+        return [F(
+            "D", "PASS", f"Conversions down {pct:.0f}% MoM — expected seasonal trough",
+            f"{cm['abbr']} conversions {cur_conv:.0f} vs prior {prior_conv:.0f} ({drop*100:+.0f}%). "
+            f"{month_name} is a configured seasonal trough ({trough}).",
+            "Expected seasonal dip — suppressed",
+            "Matches the business-context seasonality window; not a performance problem.",
+            "Hold — expected seasonal dip; re-baseline after the trough.",
+            "Expected seasonal dip — monitor only", "LOW", "S", "Reference", "[PASS]")]
+    return [F(
+        "D", "CRITICAL" if drop <= -0.4 else "IMPORTANT",
+        f"Conversion decline — down {pct:.0f}% month-over-month",
+        f"{cm['abbr']} conversions {cur_conv:.0f} vs prior {prior_conv:.0f} ({drop*100:+.0f}%).",
+        f"{pct:.0f}% MoM conversion drop",
+        "A material month-over-month conversion drop needs a cause check (tracking break, budget cut, competition, or seasonality).",
+        "Pull Change History; verify conversion tracking fires; check budget/bid changes before restructuring.",
+        "Investigate the MoM conversion drop (tracking first)",
+        "HIGH" if drop <= -0.4 else "MEDIUM", "S", "Week 1", "[ACTION REQUIRED]")]
+
+
 def run_analyzers(engine, client_id, cm, config=None):
     """Run all analyzers; return a flat list of findings. `config` is the client's
     business-context config (brand/competitor terms, thresholds, overrides)."""
@@ -283,6 +351,7 @@ def run_analyzers(engine, client_id, cm, config=None):
     findings = []
     with engine.connect() as c:
         findings += _density(c, client_id, cm, th)
+        findings += _trend(c, client_id, cm, cfg["seasonality"])
         findings += _match_types(c, client_id)
         findings += _brand_split(c, client_id, cfg["brand_terms"])
         findings += _three_bucket(c, client_id, cfg)
