@@ -1,6 +1,13 @@
 // Auto-split from Mavis single-file dashboard. Data now arrives via the bundle loader.
 const DATA = window.__BUNDLE__;
 
+// Client-aware labels from the bundle meta (fall back to the Mavis demo defaults).
+const META = (DATA && DATA.meta) || {};
+const CLIENT_LABEL = META.name || 'Mavis Tire';
+const PERIOD_LABEL = (META.periods && META.periods.current) || 'March 2026';
+const PRIOR_LABEL  = (META.periods && META.periods.prior)   || 'Mar 2025';
+const CUR_LABEL    = (META.periods && META.periods.current) || 'Mar 2026';
+
 
 
 // ====== UTIL ======
@@ -222,8 +229,8 @@ function renderOverview(el) {
   el.innerHTML = `
     <div class="view-head">
       <div>
-        <h2>${useBrand ? BRAND : 'Mavis Tire'} · March 2026</h2>
-        <div class="muted">${useBrand ? `${BRAND} brand performance` : 'YoY performance across all 5 brands'} · All campaign types</div>
+        <h2>${useBrand ? BRAND : CLIENT_LABEL} · ${PERIOD_LABEL}</h2>
+        <div class="muted">${useBrand ? `${BRAND} brand performance` : (META.name ? 'Account performance overview' : 'YoY performance across all 5 brands')} · All campaign types</div>
       </div>
       <div>
         <span class="tag lime">${useBrand ? `Brand: ${BRAND}` : 'YoY Improving'}</span>
@@ -234,14 +241,14 @@ function renderOverview(el) {
 
     <div class="two-col">
       <div class="panel">
-        <h3>Spend &amp; Conversions — 15 months</h3>
+        <h3>Spend &amp; Conversions — ${trend.length} months</h3>
         <canvas id="ovTrend" height="180"></canvas>
       </div>
       <div class="panel">
         <h3>YoY KPI scorecard</h3>
         <div class="tbl-wrap">
           <table class="sortable">
-            <thead><tr><th>Metric</th><th class="num">Mar 2025</th><th class="num">Mar 2026</th><th class="num">YoY</th></tr></thead>
+            <thead><tr><th>Metric</th><th class="num">${PRIOR_LABEL}</th><th class="num">${CUR_LABEL}</th><th class="num">YoY</th></tr></thead>
             <tbody>
               ${k.map(r => {
                 const isCost = /CPA|CPC|Cost/.test(r.Metric);
@@ -300,7 +307,7 @@ function renderTrends(el) {
   const trend = useBrand ? DATA.brand_trends[BRAND] : DATA.total_trend;
   const months = trend.map(r=>r.Month);
   el.innerHTML = `
-    <div class="view-head"><div><h2>Monthly Trends</h2><div class="muted">15-month view across all metrics · ${useBrand ? BRAND+' brand' : 'All brands combined'}</div></div></div>
+    <div class="view-head"><div><h2>Monthly Trends</h2><div class="muted">${months.length}-month view across all metrics · ${useBrand ? BRAND+' brand' : (META.name || 'All brands combined')}</div></div></div>
     <div class="panel">
       <div class="toolbar">
         <label>Primary (left axis):</label>
