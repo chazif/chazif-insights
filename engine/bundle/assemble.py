@@ -6,8 +6,19 @@ real ingested data. The analyzers (density, n-gram waste, QS, three-bucket, PMax
 and the full view set land in later increments; this proves the raw -> bundle ->
 dashboard seam for a real client.
 """
-from sqlalchemy import text, select
-from ..ingest.store import get_engine, clients
+import calendar
+from sqlalchemy import text, select, func
+from ..ingest.store import get_engine, clients, uploads
+from ..analyze.analyzers import run_analyzers
+
+FULL_MONTHS = ["January", "February", "March", "April", "May", "June",
+               "July", "August", "September", "October", "November", "December"]
+SEV_ORDER = {"CRITICAL": 0, "IMPORTANT": 1, "OPPORTUNITY": 2, "PASS": 3}
+SEV_PRIORITY = {"CRITICAL": "High", "IMPORTANT": "Medium", "OPPORTUNITY": "Low", "PASS": "Low"}
+MOD_CATEGORY = {"D": "Data Density & Budget", "K": "Keywords & Negatives",
+                "Q": "Quality Score", "P": "Performance Max"}
+EFFORT_LABEL = {"S": "Low", "M": "Medium", "L": "High"}
+DOLLAR_LABEL = {"HIGH": "High", "MEDIUM": "Medium", "LOW": "Low"}
 
 MONTHS = {m: i for i, m in enumerate(
     ["january", "february", "march", "april", "may", "june", "july",
@@ -38,6 +49,47 @@ def _client_name(engine, client_id):
         return r[0] if r else client_id
 
 
+def _latest_complete_month(engine, client_id):
+    """From the export window_end, return the latest fully-covered month as
+    {year, month, ym, full, abbr}, or None. A window ending mid-month means that
+    month is partial, so we step back one."""
+    with engine.connect() as c:
+        we = c.execute(select(func.max(uploads.c.window_end)).where(
+            uploads.c.client_id == client_id)).scalar()
+    if not we:
+        return None
+    y, m = we.year, we.month
+    if we.day < calendar.monthrange(y, m)[1]:
+        m -= 1
+        if m == 0:
+            m, y = 12, y - 1
+    return {"year": y, "month": m, "ym": f"{y}-{m:02d}",
+            "full": f"{FULL_MONTHS[m-1]} {y}", "abbr": f"{MABBR[m-1]} {y}"}
+
+
+def _to_recommendations(findings):
+    recs = []
+    for f in sorted(findings, key=lambda x: SEV_ORDER.get(x["severity"], 9)):
+        if f["severity"] == "PASS":
+            continue
+        recs.append({
+            "Priority": SEV_PRIORITY.get(f["severity"], "Medium"),
+            "Category": MOD_CATEGORY.get(f["module"], f["module"]),
+            "Recommendation": f"{f['action']} {f['summary']}",
+            "Rationale": f"{f['observation']} {f['impact']}",
+            "Expected Impact": DOLLAR_LABEL.get(f["dollar"], f["dollar"]),
+            "Effort": EFFORT_LABEL.get(f["effort"], f["effort"]),
+        })
+    return recs
+
+
+def _to_overview_findings(findings):
+    out = [{"topic": f["title"], "detail": f["magnitude"]}
+           for f in sorted(findings, key=lambda x: SEV_ORDER.get(x["severity"], 9))
+           if f["severity"] != "PASS"]
+    return out[:6]
+
+
 def build_bundle(client_id, engine=None):
     """Return the DATA bundle dict for a client, or None if there's no campaign data."""
     engine = engine or get_engine()
@@ -58,6 +110,11 @@ def build_bundle(client_id, engine=None):
             if mk:
                 series.append((mk, float(cost or 0), float(clicks or 0), float(conv or 0)))
         series.sort(key=lambda x: (x[0][0], x[0][1]))
+
+        # keep only fully-covered months (drop the partial trailing export month)
+        cm = _latest_complete_month(engine, client_id)
+        if cm:
+            series = [s for s in series if (s[0][0], s[0][1]) <= (cm["year"], cm["month"])]
 
         total_trend = [{
             "Month": mk[2],
@@ -99,29 +156,15 @@ def build_bundle(client_id, engine=None):
                 krow("CVR (Main Conv)", cur_cvr, prior_cvr),
             ]
 
-        # ---- a couple of real findings ----
-        findings = []
-        waste = c.execute(text(
-            "SELECT COALESCE(SUM(cost),0) FROM raw_rows WHERE client_id=:c AND report_type='search_terms' "
-            "AND cost>0 AND (conversions=0 OR conversions IS NULL)"), {"c": client_id}).scalar() or 0
-        st_total = c.execute(text(
-            "SELECT COALESCE(SUM(cost),0) FROM raw_rows WHERE client_id=:c AND report_type='search_terms'"),
-            {"c": client_id}).scalar() or 0
-        if waste:
-            pct = (waste / st_total * 100) if st_total else 0
-            findings.append({"topic": "Zero-conversion search-term waste",
-                             "detail": f"${waste:,.0f} spent on search terms with no conversions "
-                                       f"({pct:.0f}% of search-term spend) — candidates for negative keywords."})
-        if total_trend:
-            last = total_trend[-1]
-            findings.append({"topic": f"Latest month ({meta_periods.get('current','')})",
-                             "detail": f"${last['Spend']:,.0f} spend, {last['Main Conv']:.0f} conversions "
-                                       f"at ${last['CPA']:,.2f} CPA."})
-
-        # ---- complexity profile (forward-looking; not yet consumed by the frontend) ----
+        # ---- complexity profile ----
         n_brands = 1
         has_pmax = bool(c.execute(text(
             "SELECT COUNT(*) FROM raw_rows WHERE client_id=:c AND report_type='pmax_placements'"), {"c": client_id}).scalar())
+
+    # ---- analyzers -> findings + recommendations (analyzers open their own connections) ----
+    analyzer_findings = run_analyzers(engine, client_id, cm) if cm else []
+    findings = _to_overview_findings(analyzer_findings)
+    recommendations = _to_recommendations(analyzer_findings)
 
     return {
         "meta": {
@@ -132,10 +175,11 @@ def build_bundle(client_id, engine=None):
             # Views this bundle populates. The frontend hides dashboard tabs not
             # listed here (workspace/admin tabs are always shown). Grows as later
             # increments populate more views.
-            "views": ["overview", "trends"],
+            "views": ["overview", "trends", "recs"],
             "generated_from": "warehouse",
         },
         "total_trend": total_trend,
         "kpis": kpis,
         "findings": findings,
+        "recommendations": recommendations,
     }
