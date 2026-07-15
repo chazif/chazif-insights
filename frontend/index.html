@@ -442,7 +442,11 @@
     .then(function (r) { if (!r.ok) throw new Error("bundle HTTP " + r.status); return r.json(); })
     .then(function (d) {
       window.__BUNDLE__ = d;
-      var s = document.createElement("script"); s.src = "app.js"; document.body.appendChild(s);
+      var s = document.createElement("script"); s.src = "app.js";
+      s.onload = function () {
+        var a = document.createElement("script"); a.src = "admin.js"; document.body.appendChild(a);
+      };
+      document.body.appendChild(s);
     })
     .catch(function (e) {
       document.body.insertAdjacentHTML("beforeend",
