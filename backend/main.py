@@ -10,7 +10,7 @@ Railway:      Procfile -> uvicorn backend.main:app --host 0.0.0.0 --port $PORT
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -26,6 +26,17 @@ UPLOADS = ROOT / "data" / "uploads"
 
 app = FastAPI(title="Chazif Insights", version="0.2.0")
 _engine = get_engine()
+
+
+@app.middleware("http")
+async def revalidate_assets(request: Request, call_next):
+    """Make browsers revalidate HTML/JS/CSS every load so deploys/edits show up
+    without a manual hard-refresh (still cached, but conditionally)."""
+    resp = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.endswith((".html", ".js", ".css")):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 
 @app.get("/api/health")

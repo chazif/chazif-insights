@@ -129,6 +129,10 @@ def build_bundle(client_id, engine=None):
             "name": _client_name(engine, client_id),
             "periods": meta_periods,
             "complexity": {"n_brands": n_brands, "has_pmax": has_pmax},
+            # Views this bundle populates. The frontend hides dashboard tabs not
+            # listed here (workspace/admin tabs are always shown). Grows as later
+            # increments populate more views.
+            "views": ["overview", "trends"],
             "generated_from": "warehouse",
         },
         "total_trend": total_trend,

@@ -336,7 +336,7 @@
       </div>
     </div>
     <h2>Sign in</h2>
-    <p class="muted">Client portal · Mavis Tire · March 2026 report</p>
+    <p class="muted" id="gateSub">Client portal · Mavis Tire · March 2026 report</p>
     <form id="gateForm" onsubmit="event.preventDefault(); unlock();">
       <div class="gate-field">
         <label for="gEmail">Email</label>
@@ -359,7 +359,7 @@
       <div class="brand-mark">C</div>
       <div>
         <div class="brand-text">Chazif Insights</div>
-        <div class="brand-sub">Mavis Tire · Mar 2026</div>
+        <div class="brand-sub" id="brandSub">Mavis Tire · Mar 2026</div>
       </div>
     </div>
     <div class="nav-section">Performance</div>
@@ -399,8 +399,8 @@
   <main id="main">
     <div class="topbar">
       <div class="topbar-left">
-        <span class="pill">Mar 2026</span>
-        <span class="breadcrumb">Mavis Tire › Paid Search › <strong id="crumb">Overview</strong></span>
+        <span class="pill" id="periodPill">Mar 2026</span>
+        <span class="breadcrumb"><span id="crumbClient">Mavis Tire</span> › Paid Search › <strong id="crumb">Overview</strong></span>
       </div>
       <div class="topbar-right">
         <div class="brand-filter" id="brandFilter">
@@ -426,8 +426,8 @@
     <div id="view-root"></div>
 
     <div class="footer">
-      <div class="wm">© 2026 <strong>Chazif LLC</strong> · Prepared for Mavis Tire · Confidential</div>
-      <div>Data through Mar 2026 · Rendered <span id="now"></span></div>
+      <div class="wm">© 2026 <strong>Chazif LLC</strong> · Prepared for <span id="footClient">Mavis Tire</span> · Confidential</div>
+      <div>Data through <span id="footPeriod">Mar 2026</span> · Rendered <span id="now"></span></div>
     </div>
   </main>
 </div>
@@ -444,7 +444,11 @@
       window.__BUNDLE__ = d;
       var s = document.createElement("script"); s.src = "app.js";
       s.onload = function () {
-        var a = document.createElement("script"); a.src = "admin.js"; document.body.appendChild(a);
+        var a = document.createElement("script"); a.src = "admin.js";
+        a.onload = function () {
+          var pr = document.createElement("script"); pr.src = "profile.js"; document.body.appendChild(pr);
+        };
+        document.body.appendChild(a);
       };
       document.body.appendChild(s);
     })
