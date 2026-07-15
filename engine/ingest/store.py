@@ -17,6 +17,14 @@ from sqlalchemy import (create_engine, MetaData, Table, Column, Integer, BigInte
 REPO = Path(__file__).resolve().parents[2]
 metadata = MetaData()
 
+clients = Table(
+    "clients", metadata,
+    Column("client_id", String(64), primary_key=True),   # slug, e.g. "chiarelli"
+    Column("name", String(256), nullable=False),          # display name
+    Column("created_at", DateTime),
+    Column("config", JSON),                               # business context + complexity profile (Phase 3)
+)
+
 uploads = Table(
     "uploads", metadata,
     Column("upload_id", Integer, primary_key=True, autoincrement=True),
