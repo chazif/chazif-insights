@@ -11,12 +11,13 @@ from pathlib import Path
 from typing import Optional, List
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from engine.ingest import service
 from engine.ingest.store import get_engine
+from engine.bundle.assemble import build_bundle
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "frontend"
@@ -89,10 +90,15 @@ def inventory(client: str = Query(...)):
 @app.get("/api/bundle")
 def bundle(client: str = Query("mavis"), period: str = Query("2026-03")):
     _safe_seg(client, period)
+    # Pre-baked bundle (e.g. the Mavis demo) wins if present.
     path = CLIENTS / client / period / "bundle.json"
-    if not path.is_file():
-        raise HTTPException(404, f"no bundle for {client}/{period}")
-    return FileResponse(path, media_type="application/json")
+    if path.is_file():
+        return FileResponse(path, media_type="application/json")
+    # Otherwise compute it from the warehouse.
+    computed = build_bundle(client, _engine)
+    if computed is None:
+        raise HTTPException(404, f"no data for client '{client}'")
+    return JSONResponse(computed)
 
 
 # Static frontend mounted last so /api/* routes win.
