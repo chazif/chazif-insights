@@ -42,7 +42,10 @@ def _num(v):
 
 
 # ---------- D: data density ----------
-def _density(c, client_id, cm):
+def _density(c, client_id, cm, th):
+    floor = int(th.get("smart_bidding_floor") or SMART_BIDDING_FLOOR)
+    lv_conv = th.get("low_vol_conv") or LOW_VOL_CONV
+    lv_spend = th.get("low_vol_spend") or LOW_VOL_SPEND
     findings = []
     rows = c.execute(text(
         "SELECT campaign, SUM(conversions) conv, SUM(cost) cost "
@@ -51,25 +54,25 @@ def _density(c, client_id, cm):
     if not rows:
         return findings
     camps = [(r[0], _num(r[1]), _num(r[2])) for r in rows]
-    above = [x for x in camps if x[1] >= SMART_BIDDING_FLOOR]
-    below = [x for x in camps if x[1] < SMART_BIDDING_FLOOR]
+    above = [x for x in camps if x[1] >= floor]
+    below = [x for x in camps if x[1] < floor]
     dens = "; ".join(f"{(nm or '').split('|')[-1].strip()[:22]}: {cv:.0f}" for nm, cv, co in sorted(camps, key=lambda x: -x[1])[:8])
     findings.append(F(
         "D", "CRITICAL" if len(below) > len(above) else "IMPORTANT",
         "Campaign conversion velocity vs Smart Bidding thresholds",
-        f"{cm['abbr']} conversions by campaign — {dens}. {len(above)} of {len(camps)} campaigns clear the {SMART_BIDDING_FLOOR}-conv/mo tCPA floor; {len(below)} are below it.",
+        f"{cm['abbr']} conversions by campaign — {dens}. {len(above)} of {len(camps)} campaigns clear the {floor}-conv/mo tCPA floor; {len(below)} are below it.",
         f"{len(above)} tCPA/tROAS-viable · {len(below)} below floor",
         "Sub-floor campaigns can't run Smart Bidding efficiently standalone — they spend without enough signal to optimize against.",
         "Aggregate low-volume campaigns into a Portfolio Bid Strategy (shared budget + pooled signal); let high-volume campaigns run independent tCPA/tROAS.",
         "Pool sub-floor campaigns into a portfolio; run high-volume ones on independent tCPA/tROAS",
         "HIGH", "M", "Week 1-2", "[ACTION REQUIRED]"))
 
-    lowv = [x for x in camps if x[1] < LOW_VOL_CONV and x[2] > LOW_VOL_SPEND]
+    lowv = [x for x in camps if x[1] < lv_conv and x[2] > lv_spend]
     if lowv:
         names = "; ".join(f"{(nm or '').split('|')[-1].strip()} ({cv:.0f} conv, ${co:,.0f})" for nm, cv, co in sorted(lowv, key=lambda x: -x[2]))
         findings.append(F(
             "D", "CRITICAL", "Campaigns below the Smart Bidding floor carrying material spend",
-            f"{cm['abbr']}: {names}. Each is under {LOW_VOL_CONV} conv/mo yet spending >${LOW_VOL_SPEND}.",
+            f"{cm['abbr']}: {names}. Each is under {lv_conv:.0f} conv/mo yet spending >${lv_spend:,.0f}.",
             f"{len(lowv)} campaigns below the floor with material spend",
             "Below-floor campaigns can't learn and tend to run high CPAs.",
             "Consolidate into a shared portfolio, tighten geo/audience, or pause the persistent bleeders and reallocate to efficient campaigns.",
@@ -107,7 +110,14 @@ def _match_types(c, client_id):
         "MEDIUM", "S", "Week 2", "[ACTION REQUIRED]")]
 
 
-def _three_bucket(c, client_id):
+def _three_bucket(c, client_id, cfg):
+    friendly = cfg.get("competitors_friendly", [])
+    conquest = cfg.get("competitors_conquest", [])
+    comp_note = ""
+    if conquest:
+        comp_note += f" Conquest targets: {', '.join(conquest[:5])}."
+    if friendly:
+        comp_note += f" Protect (never conquest/negate): {', '.join(friendly[:5])}."
     camps = [r[0] or "" for r in c.execute(text(
         "SELECT DISTINCT campaign FROM raw_rows WHERE client_id=:c AND report_type='campaign_performance'"),
         {"c": client_id}).all()]
@@ -123,38 +133,77 @@ def _three_bucket(c, client_id):
             f"Detected buckets: {', '.join(present)}." + (f" Missing: {', '.join(missing)}." if missing else ""),
             "Structure follows the Brand / Non-Brand / Conquest rule",
             "Clean separation keeps Smart Bidding signal uncontaminated and lets ad copy match intent.",
-            "Maintain the separation; keep brand terms out of non-brand campaigns via negatives.",
+            "Maintain the separation; keep brand terms out of non-brand campaigns via negatives." + comp_note,
             "Architecture is broadly correct — maintain it", "LOW", "S", "Reference", "[PASS]")]
     return [F(
         "K", "IMPORTANT", f"Architecture gap — missing {', '.join(missing)} separation",
         f"Detected buckets: {', '.join(present) or 'none'}. Missing: {', '.join(missing)}.",
         "Campaigns are not fully separated into Brand / Non-Brand / Conquest",
         "Blended buckets corrupt Smart Bidding signal and stop ad copy matching intent.",
-        "Rebuild into dedicated Brand Defense / Non-Brand (by category) / Conquest campaigns.",
+        "Rebuild into dedicated Brand Defense / Non-Brand (by category) / Conquest campaigns." + comp_note,
         "Separate into Brand / Non-Brand / Conquest campaigns",
         "MEDIUM", "L", "Month 2", "[BUILD REQUIRED]")]
 
 
-def _waste(c, client_id):
-    total = _num(c.execute(text("SELECT SUM(cost) FROM raw_rows WHERE client_id=:c AND report_type='search_terms'"), {"c": client_id}).scalar())
-    waste = _num(c.execute(text(
-        "SELECT SUM(cost) FROM raw_rows WHERE client_id=:c AND report_type='search_terms' "
-        "AND cost>0 AND (conversions=0 OR conversions IS NULL)"), {"c": client_id}).scalar())
-    if not waste:
+def _brand_split(c, client_id, brand_terms):
+    """Brand vs non-brand efficiency, using configured brand terms (not a heuristic)."""
+    if not brand_terms:
         return []
+    bt = [b.lower() for b in brand_terms]
+    rows = c.execute(text(
+        "SELECT cost, conversions, row FROM raw_rows WHERE client_id=:c AND report_type='search_keyword_qs'"),
+        {"c": client_id}).all()
+    if not rows:
+        return []
+    bc = bv = nc = nv = 0.0
+    for cost, conv, row in rows:
+        kw = (_asdict(row).get("search_keyword") or "").lower()
+        cost, conv = _num(cost), _num(conv)
+        if any(b in kw for b in bt):
+            bc += cost; bv += conv
+        else:
+            nc += cost; nv += conv
+    if not (bv or nv):
+        return []
+    bcpa = bc / bv if bv else 0
+    ncpa = nc / nv if nv else 0
+    gap = (ncpa / bcpa) if bcpa else 0
+    return [F(
+        "K", "OPPORTUNITY", f"Brand vs non-brand efficiency ({gap:.1f}× CPA gap)",
+        f"BRAND ({', '.join(brand_terms[:3])}): ${bc:,.0f} / {bv:.0f} conv / ${bcpa:,.2f} CPA. "
+        f"NON-BRAND: ${nc:,.0f} / {nv:.0f} conv / ${ncpa:,.2f} CPA.",
+        f"Brand = {(bv/(bv+nv)*100 if (bv+nv) else 0):.0f}% of conv on {(bc/(bc+nc)*100 if (bc+nc) else 0):.0f}% of spend",
+        "Brand is the efficiency anchor; non-brand carries growth at a higher CPA and should be measured on its own target.",
+        "Keep brand defended and cheap; trim non-brand low-QS bleeders; hold non-brand to its own CPA target.",
+        "Defend brand; measure non-brand on its own target", "MEDIUM", "M", "Month 2", "[ACTION REQUIRED]")]
+
+
+def _waste(c, client_id, cfg):
+    excl = [t.lower() for t in (cfg.get("brand_terms", []) + cfg.get("competitors_friendly", []) + cfg.get("waste_exclusions", []))]
+    total = _num(c.execute(text("SELECT SUM(cost) FROM raw_rows WHERE client_id=:c AND report_type='search_terms'"), {"c": client_id}).scalar())
     uni = defaultdict(float)
+    waste = protected = 0.0
     for term, cost in c.execute(text(
         "SELECT entity, cost FROM raw_rows WHERE client_id=:c AND report_type='search_terms' "
         "AND cost>0 AND (conversions=0 OR conversions IS NULL)"), {"c": client_id}).all():
-        for w in set(re.findall(r"[a-z0-9]+", (term or "").lower())):
+        tl = (term or "").lower()
+        cost = _num(cost)
+        if excl and any(x in tl for x in excl):   # brand / friendly-competitor / explicit exclusion -> protected
+            protected += cost
+            continue
+        waste += cost
+        for w in set(re.findall(r"[a-z0-9]+", tl)):
             if w in STOP or len(w) < 3:
                 continue
-            uni[w] += _num(cost)
+            uni[w] += cost
+    if not waste:
+        return []
     topuni = ", ".join(f"{w} (${v:,.0f})" for w, v in sorted(uni.items(), key=lambda x: -x[1])[:6])
     pct = (waste / total * 100) if total else 0
+    prot_note = f" (${protected:,.0f} in protected brand/competitor terms excluded)" if protected else ""
     return [F(
         "K", "CRITICAL" if pct >= 40 else "IMPORTANT", "Zero-conversion spend and thin negative shield",
-        f"${waste:,.0f} on zero-conversion search terms ({pct:.0f}% of search-term spend). Top wasted themes: {topuni}.",
+        f"${waste:,.0f} on zero-conversion search terms ({pct:.0f}% of search-term spend){prot_note}. Top wasted themes: {topuni}.",
         f"${waste:,.0f} zero-conv · {pct:.0f}% of search spend",
         "Without negatives the same non-converting queries keep firing every period.",
         "Build 3 account-level shared negative lists (brand-protection / intent filter / junk-geo); seed from the top wasted themes.",
@@ -163,7 +212,8 @@ def _waste(c, client_id):
 
 
 # ---------- Q: quality score ----------
-def _quality(c, client_id):
+def _quality(c, client_id, th):
+    qs_floor = int(th.get("qs_floor") or 3)
     rows = c.execute(text(
         "SELECT cost, row FROM raw_rows WHERE client_id=:c AND report_type='search_keyword_qs'"),
         {"c": client_id}).all()
@@ -182,7 +232,7 @@ def _quality(c, client_id):
         try:
             qsf = float(qs)
             qs_vals.append(qsf)
-            if qsf <= 3:
+            if qsf <= qs_floor:
                 qsdz_n += 1; qsdz_cost += cost
         except (TypeError, ValueError):
             pass
@@ -198,8 +248,8 @@ def _quality(c, client_id):
             "Rework highest-spend Below-Avg eCTR keywords", "MEDIUM", "M", "Week 1-2", "[ACTION REQUIRED]"))
     if qsdz_n:
         findings.append(F(
-            "Q", "IMPORTANT", f"QS 1-3 danger zone holds {qsdz_n} keywords (${qsdz_cost:,.0f})",
-            f"QS 1-3: {qsdz_n} keywords, ${qsdz_cost:,.0f} spend. Account avg QS ≈ {avgqs:.1f}.",
+            "Q", "IMPORTANT", f"QS 1-{qs_floor} danger zone holds {qsdz_n} keywords (${qsdz_cost:,.0f})",
+            f"QS 1-{qs_floor}: {qsdz_n} keywords, ${qsdz_cost:,.0f} spend. Account avg QS ≈ {avgqs:.1f}.",
             f"{qsdz_n} low-QS keywords paying CPC penalties",
             "Low-QS keywords pay CPC penalties; fixing or pausing frees budget for higher-QS terms.",
             "Pause QS 1-3 with Below-Avg eCTR and <2 conv; rework copy first for low-QS converters.",
@@ -224,14 +274,19 @@ def _pmax(c, client_id):
         "HIGH", "M", "Week 2", "[ACTION REQUIRED]")]
 
 
-def run_analyzers(engine, client_id, cm):
-    """Run all analyzers; return a flat list of findings."""
+def run_analyzers(engine, client_id, cm, config=None):
+    """Run all analyzers; return a flat list of findings. `config` is the client's
+    business-context config (brand/competitor terms, thresholds, overrides)."""
+    from ..clientconfig import merged
+    cfg = merged(config or {})
+    th = cfg["thresholds"]
     findings = []
     with engine.connect() as c:
-        findings += _density(c, client_id, cm)
+        findings += _density(c, client_id, cm, th)
         findings += _match_types(c, client_id)
-        findings += _three_bucket(c, client_id)
-        findings += _waste(c, client_id)
-        findings += _quality(c, client_id)
+        findings += _brand_split(c, client_id, cfg["brand_terms"])
+        findings += _three_bucket(c, client_id, cfg)
+        findings += _waste(c, client_id, cfg)
+        findings += _quality(c, client_id, th)
         findings += _pmax(c, client_id)
     return findings

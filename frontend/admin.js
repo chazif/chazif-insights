@@ -197,20 +197,97 @@
     load(sel.value);
   }
 
+  // ---------- Business Context ----------
+  async function renderWsContext(el) {
+    el.className = "view ws";
+    let clients = [];
+    try { clients = await api("GET", "/api/clients"); } catch (e) {}
+    if (!clients.length) {
+      el.innerHTML = `<div class="view-head"><div><h2>Business Context</h2></div></div>
+        <div class="ws-panel"><div class="ws-empty">Add a client on the <a href="#" id="goC">Clients</a> tab first.</div></div>`;
+      el.querySelector("#goC").addEventListener("click", e => { e.preventDefault(); setView("ws-clients"); });
+      return;
+    }
+    el.innerHTML = `<div class="view-head"><div><h2>Business Context</h2>
+        <div class="sub">Brand &amp; competitor knowledge and thresholds the analysis obeys — overrides the defaults.</div></div></div>
+      <div class="ws-panel">
+        <div class="ws-row" style="margin-bottom:16px">
+          <label class="ws-note">Client</label>
+          <select class="ws-select" id="wsCtxClient">${clients.map(c => `<option value="${esc(c.client_id)}">${esc(c.name)}</option>`).join("")}</select>
+        </div>
+        <div id="wsCtxForm" class="ws-note">Loading…</div>
+      </div>`;
+
+    const ta = (id, label, val, ph) => `<div style="margin-bottom:14px">
+        <label class="ws-note" style="display:block;font-weight:600;margin-bottom:5px">${label}</label>
+        <textarea class="ws-input" id="${id}" rows="2" style="width:100%;resize:vertical" placeholder="${ph||''}">${esc((val||[]).join(", "))}</textarea></div>`;
+    const nf = (id, label, val) => `<div><label class="ws-note" style="display:block;font-weight:600;margin-bottom:5px">${label}</label>
+        <input class="ws-input" id="${id}" type="number" step="any" value="${val==null?'':val}" style="width:120px"/></div>`;
+
+    async function load(cid) {
+      const box = el.querySelector("#wsCtxForm");
+      let cfg;
+      try { cfg = await api("GET", "/api/clients/" + encodeURIComponent(cid) + "/config"); }
+      catch (e) { box.innerHTML = `<div class="ws-err">${esc(e.message)}</div>`; return; }
+      const th = cfg.thresholds || {};
+      box.innerHTML =
+        ta("ctxBrand", "Brand terms", cfg.brand_terms, "chiarelli, chiarelli's") +
+        ta("ctxFriendly", "Friendly competitors (never conquest/negate)", cfg.competitors_friendly, "Catholic Supply, St. Jude Shop") +
+        ta("ctxConquest", "Conquest competitors (real targets)", cfg.competitors_conquest, "F.C. Ziegler, Autom") +
+        ta("ctxExcl", "Waste exclusions (terms never flagged as waste)", cfg.waste_exclusions, "hours, phone number") +
+        `<div class="ws-row" style="margin:6px 0 16px;gap:18px">
+           ${nf("ctxFloor", "Smart Bidding floor (conv/mo)", th.smart_bidding_floor)}
+           ${nf("ctxLowConv", "Low-volume conv", th.low_vol_conv)}
+           ${nf("ctxLowSpend", "Low-volume spend $", th.low_vol_spend)}
+           ${nf("ctxQs", "QS danger-zone ceiling", th.qs_floor)}
+         </div>
+         <div style="margin-bottom:14px"><label class="ws-note" style="display:block;font-weight:600;margin-bottom:5px">Notes</label>
+           <textarea class="ws-input" id="ctxNotes" rows="2" style="width:100%;resize:vertical">${esc(cfg.notes || "")}</textarea></div>
+         <div class="ws-row"><button class="ws-btn primary" id="ctxSave">Save context</button><span class="ws-note" id="ctxStatus"></span></div>
+         <div class="ws-err" id="ctxErr" style="display:none"></div>`;
+
+      el.querySelector("#ctxSave").addEventListener("click", async () => {
+        const v = id => (el.querySelector(id).value || "").trim();
+        const numOrNull = id => { const x = el.querySelector(id).value; return x === "" ? null : Number(x); };
+        const payload = {
+          brand_terms: v("#ctxBrand"), competitors_friendly: v("#ctxFriendly"),
+          competitors_conquest: v("#ctxConquest"), waste_exclusions: v("#ctxExcl"),
+          notes: v("#ctxNotes"),
+          thresholds: {
+            smart_bidding_floor: numOrNull("#ctxFloor"), low_vol_conv: numOrNull("#ctxLowConv"),
+            low_vol_spend: numOrNull("#ctxLowSpend"), qs_floor: numOrNull("#ctxQs"),
+          },
+        };
+        const st = el.querySelector("#ctxStatus"), er = el.querySelector("#ctxErr");
+        er.style.display = "none"; st.textContent = "Saving…";
+        try {
+          await api("PUT", "/api/clients/" + encodeURIComponent(cid) + "/config", { json: payload });
+          st.textContent = "Saved. Reload this client's dashboard to see the analysis update.";
+        } catch (e) { er.textContent = e.message; er.style.display = "block"; st.textContent = ""; }
+      });
+    }
+    const sel = el.querySelector("#wsCtxClient");
+    sel.addEventListener("change", () => load(sel.value));
+    load(sel.value);
+  }
+
   // ---- register views + labels + nav ----
   views["ws-clients"] = renderWsClients;
   views["ws-upload"] = renderWsUpload;
   views["ws-inventory"] = renderWsInventory;
+  views["ws-context"] = renderWsContext;
   labels["ws-clients"] = "Clients";
   labels["ws-upload"] = "Upload Data";
   labels["ws-inventory"] = "Data Inventory";
-  ["ws-clients", "ws-upload", "ws-inventory"].forEach(v => BRAND_FILTER_HIDDEN_VIEWS.add(v));
+  labels["ws-context"] = "Business Context";
+  ["ws-clients", "ws-upload", "ws-inventory", "ws-context"].forEach(v => BRAND_FILTER_HIDDEN_VIEWS.add(v));
 
   const sidebar = document.getElementById("sidebar");
   if (sidebar) {
     const first = sidebar.querySelector(".nav-section");
     const items = [
-      ["ws-clients", "Clients"], ["ws-upload", "Upload Data"], ["ws-inventory", "Data Inventory"],
+      ["ws-clients", "Clients"], ["ws-upload", "Upload Data"],
+      ["ws-inventory", "Data Inventory"], ["ws-context", "Business Context"],
     ];
     const nodes = [];
     const head = document.createElement("div"); head.className = "nav-section"; head.textContent = "Workspace"; nodes.push(head);
