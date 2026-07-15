@@ -18,6 +18,9 @@ Thumbs.db
 # The Mavis demo fixture is regenerated with tools/split_dashboard.py.
 data/clients/**/bundle.json
 
+# Uploaded CSVs (user data, not source)
+data/uploads/
+
 # SQLite scratch
 *.db
 *.db-journal
