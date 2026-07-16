@@ -90,6 +90,7 @@ def _to_recommendations(findings):
                 "magnitude": f["magnitude"],
                 "impact": f["impact"],
                 "timing": f["timing"],
+                "data": f.get("data"),
             },
         })
     return recs

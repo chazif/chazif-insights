@@ -412,12 +412,19 @@
       (all.length ? cards : `<div class="panel">No recommendations.</div>`);
     el.querySelectorAll("[data-ev]").forEach(b => b.addEventListener("click", () => {
       const r = all[+b.dataset.ev], ev = r.evidence || {};
+      const d = ev.data;
+      const cell = c => esc(typeof c === "number" ? c.toLocaleString() : c);
+      const dataTable = (d && d.rows && d.rows.length)
+        ? `<div class="tbl-wrap" style="max-height:360px;overflow:auto;border:1px solid var(--line,#eee);border-radius:8px">
+             <table class="ws-table" style="width:100%">
+               <thead><tr>${d.columns.map(c => `<th${d.columns.indexOf(c) > 0 ? ' class="ws-num"' : ""}>${esc(c)}</th>`).join("")}</tr></thead>
+               <tbody>${d.rows.map(row => `<tr>${row.map((c, i) => `<td${i > 0 ? ' class="ws-num"' : ""}>${cell(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>
+             <div class="muted" style="padding:8px 10px;font-size:11.5px">${d.rows.length} row${d.rows.length === 1 ? "" : "s"}</div></div>`
+        : `<div class="muted">No row-level data is attached to this recommendation.</div>`;
       showModal(r.Recommendation || "Recommendation",
-        `<div class="muted" style="margin-bottom:12px;font-size:13px">The data this recommendation is based on:</div>
-         <table class="ws-table" style="width:100%"><tbody>
-           ${evrow("Severity", ev.severity)}${evrow("Area", ev.module)}${evrow("What we found", ev.observation)}
-           ${evrow("Magnitude", ev.magnitude)}${evrow("Why it matters", ev.impact)}${evrow("Suggested timing", ev.timing)}
-         </tbody></table>`);
+        `<div class="muted" style="margin-bottom:12px;font-size:13px">${esc(ev.observation || "")}</div>
+         ${dataTable}
+         <div class="muted" style="margin-top:12px;font-size:12px">${esc(ev.magnitude || "")}${ev.timing ? " · " + esc(ev.timing) : ""}</div>`);
     }));
   }
 
