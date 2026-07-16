@@ -324,6 +324,22 @@
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
+  function renderLpCategory(el) {
+    el.className = "view"; const l = (typeof DATA !== "undefined" && DATA.landing_pages_section) || null;
+    const g = l && l.category_grid;
+    if (!g) { el.innerHTML = stHead("LP Category Grid", "") + `<div class="panel">No category data (set product categories in Business Context).</div>`; return; }
+    const rows = g.map(r => `<tr>
+        <td class="strong">${esc(r.category)}</td>
+        <td class="num" data-sort="${r.landing_pages}">${fmt.num(r.landing_pages)}</td>
+        <td class="num" data-sort="${r.clicks}">${fmt.num(r.clicks)}</td>
+        <td class="num" data-sort="${r.cost}">${fmt.money(r.cost)}</td></tr>`).join("");
+    el.innerHTML = stHead("LP Category Grid", "Landing-page spend by product category (derived from the LP URL)") +
+      `<div class="panel"><div class="tbl-wrap"><table class="sortable">
+        <thead><tr><th>Category</th><th class="num">Landing pages</th><th class="num">Clicks</th><th class="num">Cost</th></tr></thead>
+        <tbody>${rows}</tbody></table></div></div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+
   // ---- register renderers ----
   const REG = {
     "campaign-perf": ["Campaign Performance", renderCampaignPerf],
@@ -335,6 +351,7 @@
     "ad-copy": ["Ad Copy", renderAdCopy],
     "ad-lp": ["Ad ↔ LP Pairing", renderAdLp],
     "lp-perf": ["LP Performance", renderLpPerf],
+    "lp-category": ["LP Category Grid", renderLpCategory],
     "st-intent": ["Intent & Grades", renderStIntent],
     "st-relevant": ["Relevant Terms", renderStRelevant],
     "st-competitor": ["Competitor Terms", renderStCompetitor],
@@ -350,7 +367,7 @@
       ["Keyword", ["kw-deep-dive", "qs-detail", "qs-breakdown"]],
       ["Search Terms", ["st-intent", "st-relevant", "st-competitor", "st-flagged"]],
       ["Ad Copy", ["ad-copy", "ad-lp"]],
-      ["Landing Pages", ["lp-perf"]],
+      ["Landing Pages", ["lp-perf", "lp-category"]],
       ["Geo", ["geo-perf"]],
       ["", ["recs"]],
     ];
