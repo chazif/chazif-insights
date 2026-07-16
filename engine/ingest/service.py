@@ -3,7 +3,7 @@
 Plain functions so they're verifiable without a running server."""
 import datetime, re
 from sqlalchemy import select, func, insert, update
-from .store import get_engine, init_db, clients, uploads, raw_rows
+from .store import get_engine, init_db, clients, uploads, raw_rows, term_relevance
 from .parser import EXPECTED_REPORTS
 from .load import load_folder
 from ..clientconfig import sanitize, merged
@@ -66,14 +66,23 @@ def get_config(client_id, engine=None, with_defaults=True):
 
 
 def update_config(client_id, payload, engine=None):
-    """Sanitize and store a client's config; returns the merged effective config."""
+    """Merge the sanitized payload over the stored config (partial updates don't wipe
+    other fields); invalidate cached term relevance since the context changed."""
     engine = engine or get_engine(); init_db(engine)
     if not get_client(engine, client_id):
         raise ValueError(f"unknown client '{client_id}'")
+    existing = get_config(client_id, engine=engine, with_defaults=False) or {}
     clean = sanitize(payload or {})
+    stored = dict(existing)
+    for k, v in clean.items():
+        if k == "thresholds" and isinstance(existing.get("thresholds"), dict):
+            th = dict(existing["thresholds"]); th.update(v); stored["thresholds"] = th
+        else:
+            stored[k] = v
     with engine.begin() as c:
-        c.execute(update(clients).where(clients.c.client_id == client_id).values(config=clean))
-    return merged(clean)
+        c.execute(update(clients).where(clients.c.client_id == client_id).values(config=stored))
+        c.execute(term_relevance.delete().where(term_relevance.c.client_id == client_id))
+    return merged(stored)
 
 
 def inventory(client_id, engine=None):

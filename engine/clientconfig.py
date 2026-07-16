@@ -8,6 +8,7 @@ import copy
 DEFAULT_CONFIG = {
     # brand & competitor knowledge
     "brand_terms": [],              # e.g. ["chiarelli", "chiarelli's"]
+    "product_categories": [],       # what the business sells — the relevance signal
     "competitors_friendly": [],     # never conquest/negate (industry relationships)
     "competitors_conquest": [],     # real conquest targets
     # deterministic thresholds (override the analyzer defaults)
@@ -50,7 +51,7 @@ def sanitize(raw):
     """Coerce an incoming config payload into the stored shape (lists normalized,
     thresholds numeric). Unknown keys dropped."""
     out = {}
-    for key in ("brand_terms", "competitors_friendly", "competitors_conquest", "waste_exclusions"):
+    for key in ("brand_terms", "product_categories", "competitors_friendly", "competitors_conquest", "waste_exclusions"):
         if key in raw:
             out[key] = _norm_list(raw[key])
     if isinstance(raw.get("thresholds"), dict):

@@ -61,6 +61,18 @@ raw_rows = Table(
 )
 
 
+term_relevance = Table(
+    "term_relevance", metadata,
+    Column("client_id", String(64), primary_key=True),
+    Column("term", String(1024), primary_key=True),
+    Column("relevant", String(8)),      # "yes" / "no" (portable across dialects)
+    Column("category", String(64)),
+    Column("reason", String(512)),
+    Column("source", String(16)),       # "llm" | "heuristic"
+    Column("classified_at", DateTime),
+)
+
+
 def get_engine(url=None, echo=False):
     url = url or os.environ.get("DATABASE_URL")
     if url:
