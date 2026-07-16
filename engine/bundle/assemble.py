@@ -273,6 +273,170 @@ def _search_terms(engine, client_id, config):
     }
 
 
+def _grade_term(t):
+    if t["conv"] >= 1:
+        return "A — Converting"
+    if t["cost"] > 0 and t["conv"] == 0 and t["clicks"] >= 5:
+        return "F — No conversions"
+    if t["clicks"] < 5:
+        return "Low volume"
+    return "C — Traffic, no conv"
+
+
+def _keyword_section(engine, client_id):
+    """Keyword Deep Dive (top keywords) + QS component breakdown (eCTR / Ad relevance /
+    LP experience) with a modeled CPC-penalty savings estimate."""
+    from collections import Counter
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT cost, clicks, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='search_keyword_qs'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    kws = []
+    comp = {"exp_ctr": Counter(), "ad_relevance": Counter(), "landing_page_exp": Counter()}
+    comp_sp = {"exp_ctr": Counter(), "ad_relevance": Counter(), "landing_page_exp": Counter()}
+    below_ctr = 0.0
+    for cost, clicks, conv, row in rows:
+        d = _asdict(row); cost = _num(cost); clicks = _num(clicks); cv = _num(conv)
+        kws.append({"keyword": d.get("search_keyword", ""), "match": d.get("search_keyword_match_type", ""),
+                    "qs": d.get("quality_score"), "clicks": clicks, "cost": cost, "conv": cv})
+        for key in comp:
+            val = (d.get(key) or "").strip() or "—"
+            comp[key][val] += 1; comp_sp[key][val] += cost
+        if (d.get("exp_ctr") or "").lower() == "below average":
+            below_ctr += cost
+
+    dd = sorted(kws, key=lambda x: -x["cost"])[:40]
+    deep_dive = [{"keyword": k["keyword"], "match": k["match"], "qs": k["qs"],
+                  "clicks": round(k["clicks"]), "cost": round(k["cost"], 2), "conv": round(k["conv"], 1),
+                  "cpa": round(k["cost"] / k["conv"], 2) if k["conv"] else 0} for k in dd]
+
+    def comp_rows(key):
+        order = ["Above average", "Average", "Below average", "—"]
+        return [{"rating": r, "keywords": comp[key][r], "cost": round(comp_sp[key][r], 2)}
+                for r in order if r in comp[key]]
+    return {
+        "deep_dive": deep_dive,
+        "components": {"Expected CTR": comp_rows("exp_ctr"),
+                       "Ad relevance": comp_rows("ad_relevance"),
+                       "Landing page exp.": comp_rows("landing_page_exp")},
+        "below_ctr_spend": round(below_ctr, 2),
+        "savings_estimate": round(below_ctr * 0.33, 2),
+    }
+
+
+def _ads_section(engine, client_id):
+    """RSA inventory + performance (Ad Copy) and ad → landing-page pairing."""
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT clicks, impressions, cost, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='ads_performance'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    ads = []
+    for clicks, impr, cost, conv, row in rows:
+        d = _asdict(row)
+        hn = sum(1 for i in range(1, 16) if (d.get(f"headline_{i}") or "").strip())
+        dn = sum(1 for i in range(1, 6) if (d.get(f"description_{i}") or "").strip())
+        clicks, impr, cost, cv = _num(clicks), _num(impr), _num(cost), _num(conv)
+        if impr <= 0 and cost <= 0:
+            continue
+        ads.append({"campaign": d.get("campaign", ""), "ad_group": d.get("ad_group", ""),
+                    "type": d.get("ad_type", ""), "final_url": d.get("ad_final_url") or d.get("final_url") or "",
+                    "headlines": hn, "descriptions": dn, "clicks": round(clicks), "impr": round(impr),
+                    "cost": round(cost, 2), "conv": round(cv, 1), "ctr": round(clicks / impr, 4) if impr else 0})
+    if not ads:
+        return None
+    ads.sort(key=lambda x: -x["cost"])
+    return {"count": len(ads), "ads": ads[:40]}
+
+
+def _landing_pages(engine, client_id):
+    """Landing-page performance (clicks/cost/CTR + mobile speed). The LP export has no
+    conversion column, so no CVR here."""
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT entity, clicks, impressions, cost, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='landing_pages'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    agg = defaultdict(lambda: [0.0, 0.0, 0.0, None])
+    for lp, clicks, impr, cost, row in rows:
+        d = agg[lp or "(unknown)"]
+        d[0] += _num(clicks); d[1] += _num(impr); d[2] += _num(cost)
+        if d[3] is None:
+            d[3] = _asdict(row).get("mobile_speed_score")
+    out = [{"url": url, "clicks": round(cl), "impr": round(im), "cost": round(co, 2),
+            "ctr": round(cl / im, 4) if im else 0, "speed": sp}
+           for url, (cl, im, co, sp) in sorted(agg.items(), key=lambda kv: -kv[1][2])]
+    return {"count": len(out), "rows": out[:50]}
+
+
+def _search_terms_section(engine, client_id, config):
+    """Full Search Terms section: Intent & Grades, Relevant, Competitor, Flagged."""
+    from collections import Counter
+    from ..llm.relevance import get_or_classify
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT entity, clicks, cost, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='search_terms'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    terms = []
+    for term, clicks, cost, conv, row in rows:
+        t = {"term": term or "", "match": _asdict(row).get("search_terms_match_type", ""),
+             "clicks": _num(clicks), "cost": _num(cost), "conv": _num(conv)}
+        t["grade"] = _grade_term(t)
+        terms.append(t)
+
+    top = sorted(terms, key=lambda x: -x["cost"])[:60]
+    context = {"product_categories": config.get("product_categories", []),
+               "brand_terms": config.get("brand_terms", []),
+               "competitors_conquest": config.get("competitors_conquest", [])}
+    cls = get_or_classify(engine, client_id, [t["term"] for t in top], context)
+    for t in terms:
+        r = cls.get(t["term"])
+        t["intent"] = r["category"] if r else None
+        t["relevant"] = r["relevant"] if r else None
+
+    gc, gs = Counter(), Counter()
+    for t in terms:
+        gc[t["grade"]] += 1; gs[t["grade"]] += t["cost"]
+    grade_order = ["A — Converting", "C — Traffic, no conv", "F — No conversions", "Low volume"]
+    grade_summary = [{"grade": g, "terms": gc[g], "cost": round(gs[g], 2)} for g in grade_order if g in gc]
+
+    ic, isp = Counter(), Counter()
+    for t in top:
+        cat = (cls.get(t["term"]) or {}).get("category", "unclassified")
+        ic[cat] += 1; isp[cat] += t["cost"]
+    intent_summary = [{"intent": k, "terms": ic[k], "cost": round(isp[k], 2)} for k in sorted(ic, key=lambda x: -isp[x])]
+
+    comps = [x.lower() for x in (config.get("competitors_conquest", []) + config.get("competitors_friendly", []))]
+
+    def trow(t):
+        return {"term": t["term"], "match": t["match"], "clicks": round(t["clicks"]),
+                "cost": round(t["cost"], 2), "conv": round(t["conv"], 1),
+                "grade": t["grade"], "intent": t.get("intent"), "relevant": t.get("relevant")}
+
+    relevant = [t for t in top if (cls.get(t["term"]) or {}).get("relevant")]
+    competitor = sorted([t for t in terms if comps and any(cx in t["term"].lower() for cx in comps)],
+                        key=lambda x: -x["cost"])[:25]
+    flagged = sorted([t for t in top if t["conv"] == 0 and
+                      (t["grade"].startswith("F") or (cls.get(t["term"]) or {}).get("relevant") is False)],
+                     key=lambda x: -x["cost"])[:30]
+    return {
+        "source": next((v["source"] for v in cls.values()), "none"),
+        "total_terms": len(terms),
+        "grade_summary": grade_summary,
+        "intent_summary": intent_summary,
+        "top_graded": [trow(t) for t in sorted(terms, key=lambda x: -x["cost"])[:40]],
+        "relevant": [trow(t) for t in sorted(relevant, key=lambda x: -x["cost"])[:25]],
+        "competitor": [trow(t) for t in competitor],
+        "flagged": [trow(t) for t in flagged],
+    }
+
+
 def _to_overview_findings(findings):
     out = [{"topic": f["title"], "detail": f["magnitude"]}
            for f in sorted(findings, key=lambda x: SEV_ORDER.get(x["severity"], 9))
@@ -360,15 +524,30 @@ def build_bundle(client_id, engine=None):
     geo = _geo(engine, client_id)
     budget = _budget(engine, client_id, cm, config) if cm else None
     qscore = _quality_score(engine, client_id)
-    search_terms = _search_terms(engine, client_id, config)
+    keyword = _keyword_section(engine, client_id)
+    st = _search_terms_section(engine, client_id, config)
+    ads = _ads_section(engine, client_id)
+    lps = _landing_pages(engine, client_id)
 
     view_list = ["overview", "trends", "campaign-perf", "budget-pacing"]
-    if geo:
-        view_list.append("geo-perf")
+    if keyword:
+        view_list.append("kw-deep-dive")
     if qscore:
         view_list.append("qs-detail")
-    if search_terms:
-        view_list.append("search-terms")
+    if keyword:
+        view_list.append("qs-breakdown")
+    if st:
+        view_list += ["st-intent", "st-relevant"]
+        if st["competitor"]:
+            view_list.append("st-competitor")
+        if st["flagged"]:
+            view_list.append("st-flagged")
+    if ads:
+        view_list += ["ad-copy", "ad-lp"]
+    if lps:
+        view_list.append("lp-perf")
+    if geo:
+        view_list.append("geo-perf")
     view_list.append("recs")
 
     return {
@@ -391,5 +570,8 @@ def build_bundle(client_id, engine=None):
         "geo_performance": geo,
         "budget_pacing": budget,
         "quality_score": qscore,
-        "search_terms": search_terms,
+        "keyword_section": keyword,
+        "search_terms_section": st,
+        "ads_section": ads,
+        "landing_pages_section": lps,
     }

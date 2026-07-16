@@ -187,29 +187,194 @@
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
+  // ---------- Search Terms section (shared helpers) ----------
+  const gradeCls = g => (g && g[0] === "A") ? "up" : (g && g[0] === "F") ? "dn" : "";
+  const intentCell = t => t.relevant == null ? `<td>—</td>` : `<td class="chg ${t.relevant ? "up" : "dn"}">${esc(t.intent || "")}</td>`;
+  const termTable = (rows, withIntent) => `<div class="tbl-wrap"><table class="sortable">
+      <thead><tr><th>Search term</th><th>Match</th><th class="num">Clicks</th><th class="num">Cost</th>
+        <th class="num">Conv</th><th>Grade</th>${withIntent ? "<th>Intent</th>" : ""}</tr></thead>
+      <tbody>${rows.map(t => `<tr>
+        <td class="strong">${esc(t.term)}</td><td>${esc(t.match)}</td>
+        <td class="num" data-sort="${t.clicks}">${fmt.num(t.clicks)}</td>
+        <td class="num" data-sort="${t.cost}">${fmt.money(t.cost)}</td>
+        <td class="num" data-sort="${t.conv}">${fmt.num(t.conv, 1)}</td>
+        <td class="chg ${gradeCls(t.grade)}">${esc(t.grade)}</td>
+        ${withIntent ? intentCell(t) : ""}</tr>`).join("")}</tbody></table></div>`;
+  const stData = () => (typeof DATA !== "undefined" && DATA.search_terms_section) || null;
+  const stHead = (title, sub) => `<div class="view-head"><div><h2>${title}</h2><div class="muted">${sub}</div></div></div>`;
+
+  function renderStIntent(el) {
+    el.className = "view"; const s = stData();
+    if (!s) { el.innerHTML = stHead("Intent &amp; Grades", "") + `<div class="panel">No search-term data.</div>`; return; }
+    const grades = s.grade_summary.map(g => `<div class="stat"><div class="stat-label">${esc(g.grade)}</div><div class="stat-value">${fmt.num(g.terms)}</div><div class="stat-chg">${fmt.money(g.cost)}</div></div>`).join("");
+    const intents = s.intent_summary.map(i => `<tr><td class="strong">${esc(i.intent)}</td><td class="num">${i.terms}</td><td class="num">${fmt.money(i.cost)}</td></tr>`).join("");
+    el.innerHTML = stHead("Intent &amp; Grades", `${fmt.num(s.total_terms)} terms · intent via ${esc(s.source)}`) +
+      `<div class="stat-grid">${grades}</div>
+       <div class="two-col">
+         <div class="panel"><h3>Intent mix (top terms by spend)</h3><div class="tbl-wrap"><table>
+           <thead><tr><th>Intent</th><th class="num">Terms</th><th class="num">Cost</th></tr></thead><tbody>${intents}</tbody></table></div></div>
+         <div class="panel"><h3>Top terms by spend</h3>${termTable(s.top_graded, true)}</div></div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+  function renderStRelevant(el) {
+    el.className = "view"; const s = stData();
+    if (!s) { el.innerHTML = stHead("Relevant Terms", "") + `<div class="panel">No data.</div>`; return; }
+    el.innerHTML = stHead("Relevant Terms", `Terms relevant to the business (${esc(s.source)}), by spend`) +
+      `<div class="panel">${termTable(s.relevant, true)}</div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+  function renderStCompetitor(el) {
+    el.className = "view"; const s = stData();
+    if (!s) { el.innerHTML = stHead("Competitor Terms", "") + `<div class="panel">No data.</div>`; return; }
+    el.innerHTML = stHead("Competitor Terms", `Search terms matching configured competitor names`) +
+      `<div class="panel">${s.competitor.length ? termTable(s.competitor, false) : '<div class="ws-empty" style="padding:24px;text-align:center;color:var(--grey)">No competitor terms — add competitors in Business Context.</div>'}</div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+  function renderStFlagged(el) {
+    el.className = "view"; const s = stData();
+    if (!s) { el.innerHTML = stHead("Flagged / Review", "") + `<div class="panel">No data.</div>`; return; }
+    el.innerHTML = stHead("Flagged / Review", `Zero-conversion or irrelevant terms — negative-keyword candidates`) +
+      `<div class="panel">${termTable(s.flagged, true)}</div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+
+  // ---------- Keyword section ----------
+  function renderKwDeepDive(el) {
+    el.className = "view"; const k = (typeof DATA !== "undefined" && DATA.keyword_section) || null;
+    if (!k) { el.innerHTML = stHead("Keyword Deep Dive", "") + `<div class="panel">No keyword data.</div>`; return; }
+    const rows = k.deep_dive.map(d => `<tr>
+        <td class="strong">${esc(d.keyword)}</td><td>${esc(d.match)}</td>
+        <td class="num" data-sort="${d.qs || 0}">${d.qs || "—"}</td>
+        <td class="num" data-sort="${d.clicks}">${fmt.num(d.clicks)}</td>
+        <td class="num" data-sort="${d.cost}">${fmt.money(d.cost)}</td>
+        <td class="num" data-sort="${d.conv}">${fmt.num(d.conv, 1)}</td>
+        <td class="num" data-sort="${d.cpa}">${fmt.money(d.cpa, 2)}</td></tr>`).join("");
+    el.innerHTML = stHead("Keyword Deep Dive", "Top keywords by spend") +
+      `<div class="panel"><div class="tbl-wrap"><table class="sortable">
+        <thead><tr><th>Keyword</th><th>Match</th><th class="num">QS</th><th class="num">Clicks</th>
+          <th class="num">Cost</th><th class="num">Conv</th><th class="num">CPA</th></tr></thead>
+        <tbody>${rows}</tbody></table></div></div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+  function renderQsBreakdown(el) {
+    el.className = "view"; const k = (typeof DATA !== "undefined" && DATA.keyword_section) || null;
+    if (!k) { el.innerHTML = stHead("QS Breakdown", "") + `<div class="panel">No data.</div>`; return; }
+    const panels = Object.keys(k.components).map(name => {
+      const rows = k.components[name].map(r => {
+        const cls = r.rating === "Above average" ? "up" : r.rating === "Below average" ? "dn" : "";
+        return `<tr><td class="chg ${cls}">${esc(r.rating)}</td><td class="num">${fmt.num(r.keywords)}</td><td class="num">${fmt.money(r.cost)}</td></tr>`;
+      }).join("");
+      return `<div class="panel"><h3>${esc(name)}</h3><div class="tbl-wrap"><table>
+        <thead><tr><th>Rating</th><th class="num">Keywords</th><th class="num">Cost</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    }).join("");
+    const banner = k.below_ctr_spend ? `<div class="panel" style="background:#FCFEF0"><strong>Modeled savings:</strong> ${fmt.money(k.below_ctr_spend)} runs on Below-average expected CTR → ~${fmt.money(k.savings_estimate)} modeled CPC penalty. Rework these keywords to cut it.</div>` : "";
+    el.innerHTML = stHead("QS Breakdown", "Quality Score components across keywords") + banner +
+      `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px">${panels}</div>`;
+  }
+
+  // ---------- Ad Copy section ----------
+  function renderAdCopy(el) {
+    el.className = "view"; const a = (typeof DATA !== "undefined" && DATA.ads_section) || null;
+    if (!a) { el.innerHTML = stHead("Ad Copy", "") + `<div class="panel">No ad data.</div>`; return; }
+    const rows = a.ads.map(d => `<tr>
+        <td class="strong">${esc(d.campaign)}</td><td>${esc(d.ad_group)}</td><td>${esc(d.type)}</td>
+        <td class="num chg ${d.headlines < 8 ? "dn" : d.headlines >= 11 ? "up" : ""}">${d.headlines}</td>
+        <td class="num chg ${d.descriptions < 3 ? "dn" : ""}">${d.descriptions}</td>
+        <td class="num" data-sort="${d.clicks}">${fmt.num(d.clicks)}</td>
+        <td class="num" data-sort="${d.ctr}">${fmt.pct(d.ctr, 2)}</td>
+        <td class="num" data-sort="${d.cost}">${fmt.money(d.cost)}</td>
+        <td class="num" data-sort="${d.conv}">${fmt.num(d.conv, 1)}</td></tr>`).join("");
+    el.innerHTML = stHead("Ad Copy", `${a.count} ads · headline/description counts flag RSA asset coverage`) +
+      `<div class="panel"><div class="tbl-wrap"><table class="sortable">
+        <thead><tr><th>Campaign</th><th>Ad group</th><th>Type</th><th class="num">Headlines</th>
+          <th class="num">Descr.</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Cost</th><th class="num">Conv</th></tr></thead>
+        <tbody>${rows}</tbody></table></div></div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+  function renderAdLp(el) {
+    el.className = "view"; const a = (typeof DATA !== "undefined" && DATA.ads_section) || null;
+    if (!a) { el.innerHTML = stHead("Ad &harr; LP Pairing", "") + `<div class="panel">No ad data.</div>`; return; }
+    const rows = a.ads.map(d => { const u = d.final_url || ""; return `<tr>
+        <td class="strong">${esc(d.campaign)}</td><td>${esc(d.ad_group)}</td>
+        <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a>` : "—"}</td>
+        <td class="num">${fmt.num(d.clicks)}</td><td class="num">${fmt.money(d.cost)}</td><td class="num">${fmt.num(d.conv, 1)}</td></tr>`; }).join("");
+    el.innerHTML = stHead("Ad &harr; LP Pairing", "Each ad and the landing page it points to") +
+      `<div class="panel"><div class="tbl-wrap"><table class="sortable">
+        <thead><tr><th>Campaign</th><th>Ad group</th><th>Landing page</th><th class="num">Clicks</th><th class="num">Cost</th><th class="num">Conv</th></tr></thead>
+        <tbody>${rows}</tbody></table></div></div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+
+  // ---------- Landing Pages section ----------
+  function renderLpPerf(el) {
+    el.className = "view"; const l = (typeof DATA !== "undefined" && DATA.landing_pages_section) || null;
+    if (!l) { el.innerHTML = stHead("LP Performance", "") + `<div class="panel">No landing-page data.</div>`; return; }
+    const rows = l.rows.map(r => { const u = r.url || ""; return `<tr>
+        <td class="strong" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a>` : "—"}</td>
+        <td class="num" data-sort="${r.clicks}">${fmt.num(r.clicks)}</td>
+        <td class="num" data-sort="${r.impr}">${fmt.num(r.impr)}</td>
+        <td class="num" data-sort="${r.ctr}">${fmt.pct(r.ctr, 2)}</td>
+        <td class="num" data-sort="${r.cost}">${fmt.money(r.cost)}</td>
+        <td class="num">${r.speed == null ? "—" : r.speed}</td></tr>`; }).join("");
+    el.innerHTML = stHead("LP Performance", `${l.count} landing pages · by spend (LP export has no conversion column)`) +
+      `<div class="panel"><div class="tbl-wrap"><table class="sortable">
+        <thead><tr><th>Landing page</th><th class="num">Clicks</th><th class="num">Impr</th>
+          <th class="num">CTR</th><th class="num">Cost</th><th class="num">Mobile speed</th></tr></thead>
+        <tbody>${rows}</tbody></table></div></div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+
   // ---- register renderers ----
   const REG = {
     "campaign-perf": ["Campaign Performance", renderCampaignPerf],
     "budget-pacing": ["Budget & Pacing", renderBudgetPacing],
     "geo-perf": ["Geo Performance", renderGeoPerf],
-    "qs-detail": ["Quality Score", renderQsDetail],
-    "search-terms": ["Search Terms", renderSearchTerms],
+    "qs-detail": ["QS Overview", renderQsDetail],
+    "kw-deep-dive": ["Keyword Deep Dive", renderKwDeepDive],
+    "qs-breakdown": ["QS Breakdown", renderQsBreakdown],
+    "ad-copy": ["Ad Copy", renderAdCopy],
+    "ad-lp": ["Ad ↔ LP Pairing", renderAdLp],
+    "lp-perf": ["LP Performance", renderLpPerf],
+    "st-intent": ["Intent & Grades", renderStIntent],
+    "st-relevant": ["Relevant Terms", renderStRelevant],
+    "st-competitor": ["Competitor Terms", renderStCompetitor],
+    "st-flagged": ["Flagged / Review", renderStFlagged],
   };
   Object.keys(REG).forEach(v => { views[v] = REG[v][1]; labels[v] = REG[v][0]; });
 
-  // ---- insert nav items for views this bundle populates, after "Monthly Trends" ----
+  // ---- rebuild a sectioned dashboard nav for computed clients (mirrors the reference) ----
   const meta = (window.__BUNDLE__ && window.__BUNDLE__.meta) || null;
   if (meta && Array.isArray(meta.views)) {
+    const SECTIONS = [
+      ["Performance", ["overview", "trends", "campaign-perf", "budget-pacing"]],
+      ["Keyword", ["kw-deep-dive", "qs-detail", "qs-breakdown"]],
+      ["Search Terms", ["st-intent", "st-relevant", "st-competitor", "st-flagged"]],
+      ["Ad Copy", ["ad-copy", "ad-lp"]],
+      ["Landing Pages", ["lp-perf"]],
+      ["Geo", ["geo-perf"]],
+      ["", ["recs"]],
+    ];
     const sidebar = document.getElementById("sidebar");
-    let anchor = sidebar && sidebar.querySelector('.nav-item[data-view="trends"]');
-    ["campaign-perf", "budget-pacing", "geo-perf", "qs-detail", "search-terms"].forEach(v => {
-      if (meta.views.indexOf(v) < 0 || !anchor) return;
-      const d = document.createElement("div");
-      d.className = "nav-item"; d.dataset.view = v;
-      d.innerHTML = `<span class="nav-dot"></span>${labels[v]}`;
-      d.addEventListener("click", () => setView(v));
-      anchor.parentNode.insertBefore(d, anchor.nextSibling);
-      anchor = d;  // keep order for subsequent inserts
+    // clear the static (Mavis-demo) dashboard nav; keep the Workspace admin section
+    Array.prototype.slice.call(sidebar.querySelectorAll(".nav-section, .nav-item")).forEach(n => {
+      if (n.classList.contains("nav-item") && (n.dataset.view || "").indexOf("ws-") === 0) return;
+      if (n.classList.contains("nav-section") && n.textContent === "Workspace") return;
+      n.remove();
+    });
+    const allow = {}; meta.views.forEach(v => allow[v] = true);
+    SECTIONS.forEach(([title, keys]) => {
+      const items = keys.filter(v => allow[v]);
+      if (!items.length) return;
+      if (title) {
+        const h = document.createElement("div"); h.className = "nav-section"; h.textContent = title;
+        sidebar.appendChild(h);
+      }
+      items.forEach(v => {
+        const d = document.createElement("div"); d.className = "nav-item"; d.dataset.view = v;
+        d.innerHTML = `<span class="nav-dot"></span>${labels[v] || v}`;
+        d.addEventListener("click", () => setView(v));
+        sidebar.appendChild(d);
+      });
     });
   }
 })();
