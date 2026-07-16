@@ -446,7 +446,11 @@
       s.onload = function () {
         var a = document.createElement("script"); a.src = "admin.js";
         a.onload = function () {
-          var pr = document.createElement("script"); pr.src = "profile.js"; document.body.appendChild(pr);
+          var dv = document.createElement("script"); dv.src = "dashviews.js";
+          dv.onload = function () {
+            var pr = document.createElement("script"); pr.src = "profile.js"; document.body.appendChild(pr);
+          };
+          document.body.appendChild(dv);
         };
         document.body.appendChild(a);
       };
