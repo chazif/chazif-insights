@@ -326,6 +326,53 @@ def _keyword_section(engine, client_id):
     }
 
 
+def _ads_section(engine, client_id):
+    """RSA inventory + performance (Ad Copy) and ad → landing-page pairing."""
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT clicks, impressions, cost, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='ads_performance'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    ads = []
+    for clicks, impr, cost, conv, row in rows:
+        d = _asdict(row)
+        hn = sum(1 for i in range(1, 16) if (d.get(f"headline_{i}") or "").strip())
+        dn = sum(1 for i in range(1, 6) if (d.get(f"description_{i}") or "").strip())
+        clicks, impr, cost, cv = _num(clicks), _num(impr), _num(cost), _num(conv)
+        if impr <= 0 and cost <= 0:
+            continue
+        ads.append({"campaign": d.get("campaign", ""), "ad_group": d.get("ad_group", ""),
+                    "type": d.get("ad_type", ""), "final_url": d.get("ad_final_url") or d.get("final_url") or "",
+                    "headlines": hn, "descriptions": dn, "clicks": round(clicks), "impr": round(impr),
+                    "cost": round(cost, 2), "conv": round(cv, 1), "ctr": round(clicks / impr, 4) if impr else 0})
+    if not ads:
+        return None
+    ads.sort(key=lambda x: -x["cost"])
+    return {"count": len(ads), "ads": ads[:40]}
+
+
+def _landing_pages(engine, client_id):
+    """Landing-page performance (clicks/cost/CTR + mobile speed). The LP export has no
+    conversion column, so no CVR here."""
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT entity, clicks, impressions, cost, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='landing_pages'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    agg = defaultdict(lambda: [0.0, 0.0, 0.0, None])
+    for lp, clicks, impr, cost, row in rows:
+        d = agg[lp or "(unknown)"]
+        d[0] += _num(clicks); d[1] += _num(impr); d[2] += _num(cost)
+        if d[3] is None:
+            d[3] = _asdict(row).get("mobile_speed_score")
+    out = [{"url": url, "clicks": round(cl), "impr": round(im), "cost": round(co, 2),
+            "ctr": round(cl / im, 4) if im else 0, "speed": sp}
+           for url, (cl, im, co, sp) in sorted(agg.items(), key=lambda kv: -kv[1][2])]
+    return {"count": len(out), "rows": out[:50]}
+
+
 def _search_terms_section(engine, client_id, config):
     """Full Search Terms section: Intent & Grades, Relevant, Competitor, Flagged."""
     from collections import Counter
@@ -479,6 +526,8 @@ def build_bundle(client_id, engine=None):
     qscore = _quality_score(engine, client_id)
     keyword = _keyword_section(engine, client_id)
     st = _search_terms_section(engine, client_id, config)
+    ads = _ads_section(engine, client_id)
+    lps = _landing_pages(engine, client_id)
 
     view_list = ["overview", "trends", "campaign-perf", "budget-pacing"]
     if keyword:
@@ -493,6 +542,10 @@ def build_bundle(client_id, engine=None):
             view_list.append("st-competitor")
         if st["flagged"]:
             view_list.append("st-flagged")
+    if ads:
+        view_list += ["ad-copy", "ad-lp"]
+    if lps:
+        view_list.append("lp-perf")
     if geo:
         view_list.append("geo-perf")
     view_list.append("recs")
@@ -519,4 +572,6 @@ def build_bundle(client_id, engine=None):
         "quality_score": qscore,
         "keyword_section": keyword,
         "search_terms_section": st,
+        "ads_section": ads,
+        "landing_pages_section": lps,
     }
