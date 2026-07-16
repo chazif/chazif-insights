@@ -7,6 +7,7 @@ and the full view set land in later increments; this proves the raw -> bundle ->
 dashboard seam for a real client.
 """
 import calendar
+import re
 from collections import defaultdict
 from sqlalchemy import text, select, func
 from ..ingest.store import get_engine, clients, uploads
@@ -352,9 +353,30 @@ def _ads_section(engine, client_id):
     return {"count": len(ads), "ads": ads[:40]}
 
 
-def _landing_pages(engine, client_id):
-    """Landing-page performance (clicks/cost/CTR + mobile speed). The LP export has no
-    conversion column, so no CVR here."""
+def _lp_categories(lps, product_categories):
+    """Category grid derived from the LP URL (matched to configured product categories),
+    since the LP export has no category column. None if nothing categorizes."""
+    if not product_categories:
+        return None
+    catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4] for c in product_categories}
+    grid = defaultdict(lambda: [0.0, 0.0, 0])
+    for r in lps:
+        url = (r["url"] or "").lower()
+        matched = None
+        for c, kws in catkw.items():
+            if c.lower() in url or any(kw in url for kw in kws):
+                matched = c
+                break
+        g = grid[matched or "Other / uncategorized"]
+        g[0] += r["clicks"]; g[1] += r["cost"]; g[2] += 1
+    out = [{"category": c, "landing_pages": g[2], "clicks": round(g[0]), "cost": round(g[1], 2)}
+           for c, g in sorted(grid.items(), key=lambda kv: -kv[1][1])]
+    return out if any(not c["category"].startswith("Other") for c in out) else None
+
+
+def _landing_pages(engine, client_id, config):
+    """Landing-page performance (clicks/cost/CTR + mobile speed) + a URL-derived category
+    grid. The LP export has no conversion or device column, so no CVR / device grid."""
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT entity, clicks, impressions, cost, row FROM raw_rows "
@@ -367,10 +389,11 @@ def _landing_pages(engine, client_id):
         d[0] += _num(clicks); d[1] += _num(impr); d[2] += _num(cost)
         if d[3] is None:
             d[3] = _asdict(row).get("mobile_speed_score")
-    out = [{"url": url, "clicks": round(cl), "impr": round(im), "cost": round(co, 2),
-            "ctr": round(cl / im, 4) if im else 0, "speed": sp}
-           for url, (cl, im, co, sp) in sorted(agg.items(), key=lambda kv: -kv[1][2])]
-    return {"count": len(out), "rows": out[:50]}
+    full = [{"url": url, "clicks": round(cl), "impr": round(im), "cost": round(co, 2),
+             "ctr": round(cl / im, 4) if im else 0, "speed": sp}
+            for url, (cl, im, co, sp) in sorted(agg.items(), key=lambda kv: -kv[1][2])]
+    return {"count": len(full), "rows": full[:50],
+            "category_grid": _lp_categories(full, config.get("product_categories", []))}
 
 
 def _search_terms_section(engine, client_id, config):
@@ -527,7 +550,7 @@ def build_bundle(client_id, engine=None):
     keyword = _keyword_section(engine, client_id)
     st = _search_terms_section(engine, client_id, config)
     ads = _ads_section(engine, client_id)
-    lps = _landing_pages(engine, client_id)
+    lps = _landing_pages(engine, client_id, config)
 
     view_list = ["overview", "trends", "campaign-perf", "budget-pacing"]
     if keyword:
@@ -546,6 +569,8 @@ def build_bundle(client_id, engine=None):
         view_list += ["ad-copy", "ad-lp"]
     if lps:
         view_list.append("lp-perf")
+        if lps.get("category_grid"):
+            view_list.append("lp-category")
     if geo:
         view_list.append("geo-perf")
     view_list.append("recs")
