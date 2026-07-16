@@ -46,10 +46,11 @@ STOP = set("a an the of for for to in on at and or near me my i you your with by
            "is are best top buy shop store online".split())
 
 
-def F(module, sev, title, obs, mag, impact, rec, summary, dollar, effort, timing, action):
+def F(module, sev, title, obs, mag, impact, rec, summary, dollar, effort, timing, action, data=None):
+    # data: {"columns": [...], "rows": [[...], ...]} — the actual records behind the finding
     return dict(module=module, severity=sev, title=title, observation=obs, magnitude=mag,
                 impact=impact, recommendation=rec, summary=summary, dollar=dollar,
-                effort=effort, timing=timing, action=action)
+                effort=effort, timing=timing, action=action, data=data)
 
 
 def _num(v):
@@ -75,6 +76,9 @@ def _density(c, client_id, cm, th):
     above = [x for x in camps if x[1] >= floor]
     below = [x for x in camps if x[1] < floor]
     dens = "; ".join(f"{(nm or '').split('|')[-1].strip()[:22]}: {cv:.0f}" for nm, cv, co in sorted(camps, key=lambda x: -x[1])[:8])
+    d1_data = {"columns": ["Campaign", f"Conversions ({cm['abbr']})", "Cost", "Clears floor?"],
+               "rows": [[nm, round(cv, 1), round(co, 2), "yes" if cv >= floor else "no"]
+                        for nm, cv, co in sorted(camps, key=lambda x: -x[1])]}
     findings.append(F(
         "D", "CRITICAL" if len(below) > len(above) else "IMPORTANT",
         "Campaign conversion velocity vs Smart Bidding thresholds",
@@ -83,11 +87,13 @@ def _density(c, client_id, cm, th):
         "Sub-floor campaigns can't run Smart Bidding efficiently standalone — they spend without enough signal to optimize against.",
         "Aggregate low-volume campaigns into a Portfolio Bid Strategy (shared budget + pooled signal); let high-volume campaigns run independent tCPA/tROAS.",
         "Pool sub-floor campaigns into a portfolio; run high-volume ones on independent tCPA/tROAS",
-        "HIGH", "M", "Week 1-2", "[ACTION REQUIRED]"))
+        "HIGH", "M", "Week 1-2", "[ACTION REQUIRED]", d1_data))
 
     lowv = [x for x in camps if x[1] < lv_conv and x[2] > lv_spend]
     if lowv:
         names = "; ".join(f"{(nm or '').split('|')[-1].strip()} ({cv:.0f} conv, ${co:,.0f})" for nm, cv, co in sorted(lowv, key=lambda x: -x[2]))
+        lowv_data = {"columns": ["Campaign", "Conversions", "Cost"],
+                     "rows": [[nm, round(cv, 1), round(co, 2)] for nm, cv, co in sorted(lowv, key=lambda x: -x[2])]}
         findings.append(F(
             "D", "CRITICAL", "Campaigns below the Smart Bidding floor carrying material spend",
             f"{cm['abbr']}: {names}. Each is under {lv_conv:.0f} conv/mo yet spending >${lv_spend:,.0f}.",
@@ -95,7 +101,7 @@ def _density(c, client_id, cm, th):
             "Below-floor campaigns can't learn and tend to run high CPAs.",
             "Consolidate into a shared portfolio, tighten geo/audience, or pause the persistent bleeders and reallocate to efficient campaigns.",
             "Consolidate/tighten or pause below-floor campaigns; reallocate to efficient ones",
-            "HIGH", "S", "Week 1-2", "[ACTION REQUIRED]"))
+            "HIGH", "S", "Week 1-2", "[ACTION REQUIRED]", lowv_data))
     return findings
 
 
@@ -118,6 +124,9 @@ def _match_types(c, client_id):
     idle = [k for k in ("Phrase", "Broad", "Exact") if agg.get(k, [0, 0, 0])[0] > 0 and agg[k][1] < 1]
     parts = ". ".join(f"{k}: {v[0]} kw / ${v[1]:,.0f} / {v[2]:.0f} conv" for k, v in
                       sorted(agg.items(), key=lambda kv: -kv[1][1]) if k != "Other")
+    mt_data = {"columns": ["Match type", "Keywords", "Cost", "Conversions"],
+               "rows": [[k, v[0], round(v[1], 2), round(v[2], 1)]
+                        for k, v in sorted(agg.items(), key=lambda kv: -kv[1][1])]}
     return [F(
         "K", "IMPORTANT", "Match-type allocation and idle inventory",
         f"{parts}. Most spend runs on {dom}." + (f" Idle inventory: {', '.join(idle)} (keywords present, ~$0 spend)." if idle else ""),
@@ -125,7 +134,7 @@ def _match_types(c, client_id):
         "Idle match-type layers contribute no Smart Bidding signal; an over-broad layer without a dense negative shield leaks spend.",
         "Right-size the tri-layer: Exact as the vault, Phrase as the factory, Broad only with Smart Bidding + a dense negative shield. Delete or re-activate idle inventory.",
         "Right-size Exact/Phrase/Broad; delete or re-activate idle inventory",
-        "MEDIUM", "S", "Week 2", "[ACTION REQUIRED]")]
+        "MEDIUM", "S", "Week 2", "[ACTION REQUIRED]", mt_data)]
 
 
 def _three_bucket(c, client_id, cfg):
@@ -186,6 +195,9 @@ def _brand_split(c, client_id, brand_terms):
     bcpa = bc / bv if bv else 0
     ncpa = nc / nv if nv else 0
     gap = (ncpa / bcpa) if bcpa else 0
+    bs_data = {"columns": ["Segment", "Spend", "Conversions", "CPA"],
+               "rows": [["Brand", round(bc, 2), round(bv, 1), round(bcpa, 2)],
+                        ["Non-brand", round(nc, 2), round(nv, 1), round(ncpa, 2)]]}
     return [F(
         "K", "OPPORTUNITY", f"Brand vs non-brand efficiency ({gap:.1f}× CPA gap)",
         f"BRAND ({', '.join(brand_terms[:3])}): ${bc:,.0f} / {bv:.0f} conv / ${bcpa:,.2f} CPA. "
@@ -193,13 +205,14 @@ def _brand_split(c, client_id, brand_terms):
         f"Brand = {(bv/(bv+nv)*100 if (bv+nv) else 0):.0f}% of conv on {(bc/(bc+nc)*100 if (bc+nc) else 0):.0f}% of spend",
         "Brand is the efficiency anchor; non-brand carries growth at a higher CPA and should be measured on its own target.",
         "Keep brand defended and cheap; trim non-brand low-QS bleeders; hold non-brand to its own CPA target.",
-        "Defend brand; measure non-brand on its own target", "MEDIUM", "M", "Month 2", "[ACTION REQUIRED]")]
+        "Defend brand; measure non-brand on its own target", "MEDIUM", "M", "Month 2", "[ACTION REQUIRED]", bs_data)]
 
 
 def _waste(c, client_id, cfg):
     excl = [t.lower() for t in (cfg.get("brand_terms", []) + cfg.get("competitors_friendly", []) + cfg.get("waste_exclusions", []))]
     total = _num(c.execute(text("SELECT SUM(cost) FROM raw_rows WHERE client_id=:c AND report_type='search_terms'"), {"c": client_id}).scalar())
     uni = defaultdict(float)
+    waste_terms = []
     waste = protected = 0.0
     for term, cost in c.execute(text(
         "SELECT entity, cost FROM raw_rows WHERE client_id=:c AND report_type='search_terms' "
@@ -210,6 +223,7 @@ def _waste(c, client_id, cfg):
             protected += cost
             continue
         waste += cost
+        waste_terms.append((term, cost))
         for w in set(re.findall(r"[a-z0-9]+", tl)):
             if w in STOP or len(w) < 3:
                 continue
@@ -218,6 +232,8 @@ def _waste(c, client_id, cfg):
         return []
     topuni = ", ".join(f"{w} (${v:,.0f})" for w, v in sorted(uni.items(), key=lambda x: -x[1])[:6])
     pct = (waste / total * 100) if total else 0
+    waste_data = {"columns": ["Search term (0 conversions)", "Cost"],
+                  "rows": [[t, round(co, 2)] for t, co in sorted(waste_terms, key=lambda x: -x[1])[:30]]}
     prot_note = f" (${protected:,.0f} in protected brand/competitor terms excluded)" if protected else ""
     return [F(
         "K", "CRITICAL" if pct >= 40 else "IMPORTANT", "Zero-conversion spend and thin negative shield",
@@ -226,7 +242,7 @@ def _waste(c, client_id, cfg):
         "Without negatives the same non-converting queries keep firing every period.",
         "Build 3 account-level shared negative lists (brand-protection / intent filter / junk-geo); seed from the top wasted themes.",
         "Build a 3-tier negative shield seeded from the waste themes",
-        "HIGH" if pct >= 40 else "MEDIUM", "M", "Week 2", "[BUILD REQUIRED]")]
+        "HIGH" if pct >= 40 else "MEDIUM", "M", "Week 2", "[BUILD REQUIRED]", waste_data)]
 
 
 # ---------- Q: quality score ----------
@@ -238,40 +254,44 @@ def _quality(c, client_id, th):
     if not rows:
         return []
     findings = []
-    be_n = be_cost = 0
-    qsdz_n = qsdz_cost = 0
-    qs_vals = []
+    be_cost = qsdz_cost = 0
+    be_kws, dz_kws, qs_vals = [], [], []
     for cost, row in rows:
         row = _asdict(row)
         cost = _num(cost)
+        kw = row.get("search_keyword", "")
         if (row.get("exp_ctr") or "").lower() == "below average":
-            be_n += 1; be_cost += cost
+            be_cost += cost; be_kws.append((kw, row.get("quality_score"), cost))
         qs = row.get("quality_score")
         try:
             qsf = float(qs)
             qs_vals.append(qsf)
             if qsf <= qs_floor:
-                qsdz_n += 1; qsdz_cost += cost
+                qsdz_cost += cost; dz_kws.append((kw, qsf, cost))
         except (TypeError, ValueError):
             pass
     avgqs = sum(qs_vals) / len(qs_vals) if qs_vals else 0
     if be_cost:
         overpay = be_cost * 0.33
+        be_data = {"columns": ["Keyword", "QS", "Cost"],
+                   "rows": [[k, q, round(co, 2)] for k, q, co in sorted(be_kws, key=lambda x: -x[2])[:30]]}
         findings.append(F(
             "Q", "IMPORTANT", f"Below-average expected CTR on ${be_cost:,.0f} of spend",
-            f"{be_n} keywords carry Below-Avg expected CTR (${be_cost:,.0f} spend). Account avg QS ≈ {avgqs:.1f}.",
+            f"{len(be_kws)} keywords carry Below-Avg expected CTR (${be_cost:,.0f} spend). Account avg QS ≈ {avgqs:.1f}.",
             f"${be_cost:,.0f} on Below-Avg eCTR → ~${overpay:,.0f} modeled CPC penalty",
             "Below-Avg eCTR carries a CPC premium — the weakest QS lever.",
             "Rework the highest-spend Below-Avg eCTR keywords (exact term in H1, tighter benefit/CTA); A/B via Ad Variations.",
-            "Rework highest-spend Below-Avg eCTR keywords", "MEDIUM", "M", "Week 1-2", "[ACTION REQUIRED]"))
-    if qsdz_n:
+            "Rework highest-spend Below-Avg eCTR keywords", "MEDIUM", "M", "Week 1-2", "[ACTION REQUIRED]", be_data))
+    if dz_kws:
+        dz_data = {"columns": ["Keyword", "QS", "Cost"],
+                   "rows": [[k, q, round(co, 2)] for k, q, co in sorted(dz_kws, key=lambda x: -x[2])[:30]]}
         findings.append(F(
-            "Q", "IMPORTANT", f"QS 1-{qs_floor} danger zone holds {qsdz_n} keywords (${qsdz_cost:,.0f})",
-            f"QS 1-{qs_floor}: {qsdz_n} keywords, ${qsdz_cost:,.0f} spend. Account avg QS ≈ {avgqs:.1f}.",
-            f"{qsdz_n} low-QS keywords paying CPC penalties",
+            "Q", "IMPORTANT", f"QS 1-{qs_floor} danger zone holds {len(dz_kws)} keywords (${qsdz_cost:,.0f})",
+            f"QS 1-{qs_floor}: {len(dz_kws)} keywords, ${qsdz_cost:,.0f} spend. Account avg QS ≈ {avgqs:.1f}.",
+            f"{len(dz_kws)} low-QS keywords paying CPC penalties",
             "Low-QS keywords pay CPC penalties; fixing or pausing frees budget for higher-QS terms.",
             "Pause QS 1-3 with Below-Avg eCTR and <2 conv; rework copy first for low-QS converters.",
-            "Pause/rework the QS 1-3 danger-zone keywords", "MEDIUM", "M", "Month 2", "[ACTION REQUIRED]"))
+            "Pause/rework the QS 1-3 danger-zone keywords", "MEDIUM", "M", "Month 2", "[ACTION REQUIRED]", dz_data))
     return findings
 
 
@@ -282,6 +302,10 @@ def _pmax(c, client_id):
         return []
     served = c.execute(text("SELECT COUNT(*) FROM raw_rows WHERE client_id=:c AND report_type='pmax_placements' AND impressions>=2"), {"c": client_id}).scalar() or 0
     one = c.execute(text("SELECT COUNT(*) FROM raw_rows WHERE client_id=:c AND report_type='pmax_placements' AND impressions<=1"), {"c": client_id}).scalar() or 0
+    top = c.execute(text("SELECT entity, impressions FROM raw_rows WHERE client_id=:c AND report_type='pmax_placements' "
+                         "AND impressions>=2 ORDER BY impressions DESC"), {"c": client_id}).fetchmany(25)
+    pmax_data = {"columns": ["Top served placements", "Impressions"],
+                 "rows": [[p or "(unknown)", round(_num(im))] for p, im in top]}
     return [F(
         "P", "CRITICAL", f"PMax spray — only {served/total*100:.1f}% of placements served ≥2 impressions",
         f"{total:,} placement candidates; {served:,} ({served/total*100:.1f}%) served ≥2 impressions, {one:,} ({one/total*100:.0f}%) got ≤1.",
@@ -289,7 +313,7 @@ def _pmax(c, client_id):
         "A long tail of one-impression placements (often foreign-language / junk / video reach) dilutes budget and pollutes brand safety.",
         "Apply account-level placement exclusions (non-English locales, sensitive categories); disable PMax video/display reach if not core; tighten geo/audience signals.",
         "Add placement exclusions + tighten signals to stop the PMax spray",
-        "HIGH", "M", "Week 2", "[ACTION REQUIRED]")]
+        "HIGH", "M", "Week 2", "[ACTION REQUIRED]", pmax_data)]
 
 
 # ---------- D: month-over-month conversion trend (seasonality-aware) ----------
@@ -331,6 +355,8 @@ def _trend(c, client_id, cm, seasonality):
             "Matches the business-context seasonality window; not a performance problem.",
             "Hold — expected seasonal dip; re-baseline after the trough.",
             "Expected seasonal dip — monitor only", "LOW", "S", "Reference", "[PASS]")]
+    trend_data = {"columns": ["Month", "Conversions"],
+                  "rows": [[FULL_MONTHS[mo - 1] + " " + str(yr), round(cv, 1)] for (yr, mo), cv in series[-8:]]}
     return [F(
         "D", "CRITICAL" if drop <= -0.4 else "IMPORTANT",
         f"Conversion decline — down {pct:.0f}% month-over-month",
@@ -339,7 +365,7 @@ def _trend(c, client_id, cm, seasonality):
         "A material month-over-month conversion drop needs a cause check (tracking break, budget cut, competition, or seasonality).",
         "Pull Change History; verify conversion tracking fires; check budget/bid changes before restructuring.",
         "Investigate the MoM conversion drop (tracking first)",
-        "HIGH" if drop <= -0.4 else "MEDIUM", "S", "Week 1", "[ACTION REQUIRED]")]
+        "HIGH" if drop <= -0.4 else "MEDIUM", "S", "Week 1", "[ACTION REQUIRED]", trend_data)]
 
 
 def run_analyzers(engine, client_id, cm, config=None):
