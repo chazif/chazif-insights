@@ -2,6 +2,14 @@
 // If the bundle has no `meta` (e.g. the Mavis demo), everything is left as-is.
 (function () {
   "use strict";
+  // Auto-skip the demo gate right after an in-app "Open dashboard" navigation.
+  try {
+    if (sessionStorage.getItem("chz_nav") === "1") {
+      sessionStorage.removeItem("chz_nav");
+      if (typeof unlock === "function") unlock();
+    }
+  } catch (e) {}
+
   var META = (window.__BUNDLE__ && window.__BUNDLE__.meta) || null;
   if (!META) return; // pre-baked bundle -> keep original chrome
 
