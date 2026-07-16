@@ -85,13 +85,11 @@
         box.innerHTML = list.length === 0
           ? `<div class="ws-empty">No clients yet — add your first one above.</div>`
           : `<table class="ws-table"><thead><tr><th>Name</th><th>ID</th>
-               <th class="ws-num">Reports</th><th>Last upload</th><th></th></tr></thead><tbody>${
+               <th class="ws-num">Reports</th><th>Last upload</th></tr></thead><tbody>${
               list.map(c => `<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.client_id)}</td>
                 <td class="ws-num">${c.reports_loaded}/${REPORT_COUNT}</td>
-                <td>${c.last_upload ? esc(c.last_upload.slice(0, 16).replace("T", " ")) : "—"}</td>
-                <td>${c.reports_loaded > 0 ? `<button class="ws-btn primary" data-open="${esc(c.client_id)}">Open dashboard →</button>` : `<span class="ws-note">upload data first</span>`}</td></tr>`).join("")
+                <td>${c.last_upload ? esc(c.last_upload.slice(0, 16).replace("T", " ")) : "—"}</td></tr>`).join("")
             }</tbody></table>`;
-        box.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", () => openDash(b.dataset.open)));
       } catch (e) { el.querySelector("#wsList").innerHTML = `<div class="ws-err">${esc(e.message)}</div>`; }
     }
     const errEl = el.querySelector("#wsAddErr");
@@ -308,7 +306,7 @@
       ["ws-inventory", "Data Inventory"], ["ws-context", "Business Context"],
     ];
     const nodes = [];
-    const head = document.createElement("div"); head.className = "nav-section"; head.textContent = "Workspace"; nodes.push(head);
+    const head = document.createElement("div"); head.className = "nav-section"; head.textContent = "Settings"; nodes.push(head);
     items.forEach(([v, label]) => {
       const d = document.createElement("div");
       d.className = "nav-item"; d.dataset.view = v;

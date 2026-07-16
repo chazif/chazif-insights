@@ -362,8 +362,68 @@
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
+  // ---------- Recommendations (custom, with "See data" evidence modal) ----------
+  (function injectModalStyle() {
+    const s = document.createElement("style");
+    s.textContent = `
+      #chzModal .mb{position:fixed;inset:0;background:rgba(20,24,12,.55);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px}
+      #chzModal .mc{background:#fff;border-radius:14px;max-width:640px;width:100%;max-height:82vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+      #chzModal .mh{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line,#eee);position:sticky;top:0;background:#fff}
+      #chzModal .mh strong{font-size:15px;flex:1;color:var(--ink,#1a1a1a)}
+      #chzModal .mx{border:none;background:none;font-size:22px;line-height:1;cursor:pointer;color:var(--grey,#888)}
+      #chzModal .mbody{padding:18px 20px}`;
+    document.head.appendChild(s);
+  })();
+  function closeModal() { const w = document.getElementById("chzModal"); if (w) w.remove(); document.removeEventListener("keydown", escClose); }
+  function escClose(e) { if (e.key === "Escape") closeModal(); }
+  function showModal(title, bodyHtml) {
+    closeModal();
+    const w = document.createElement("div"); w.id = "chzModal";
+    w.innerHTML = `<div class="mb"><div class="mc"><div class="mh"><strong>${esc(title)}</strong><button class="mx" aria-label="Close">&times;</button></div><div class="mbody">${bodyHtml}</div></div></div>`;
+    document.body.appendChild(w);
+    w.querySelector(".mx").addEventListener("click", closeModal);
+    w.querySelector(".mb").addEventListener("click", e => { if (e.target.classList.contains("mb")) closeModal(); });
+    document.addEventListener("keydown", escClose);
+  }
+  const recTag = p => {
+    const s = String(p || "").toLowerCase();
+    if (s.includes("high") || s.includes("p1")) return '<span class="tag bad">High</span>';
+    if (s.includes("medium") || s.includes("p2")) return '<span class="tag warn">Medium</span>';
+    if (s.includes("low") || s.includes("p3")) return '<span class="tag info">Low</span>';
+    return `<span class="tag">${esc(p || "—")}</span>`;
+  };
+  function renderRecs(el) {
+    el.className = "view";
+    const all = (typeof DATA !== "undefined" && DATA.recommendations) || [];
+    const evrow = (k, v) => v ? `<tr><td style="width:140px;color:var(--grey,#888);vertical-align:top;padding:8px 10px">${esc(k)}</td><td style="padding:8px 10px"><strong>${esc(v)}</strong></td></tr>` : "";
+    const cards = all.map((r, i) => {
+      const impact = r["Expected Impact"] || r.Impact || "", effort = r.Effort || "", hasEv = !!r.evidence;
+      return `<div class="rec">
+        <div class="rec-head">${recTag(r.Priority)}<div class="rec-title">${esc(r.Recommendation || r.title || "")}</div><div class="rec-meta">${esc(r.Category || "")}</div></div>
+        <p>${esc(r.Rationale || r.Description || "")}</p>
+        ${(impact || effort || hasEv) ? `<div class="rec-foot muted" style="margin-top:10px;font-size:12px;display:flex;align-items:center;gap:14px">
+          ${impact ? `<span><strong style="color:var(--ink)">Impact:</strong> ${esc(impact)}</span>` : ""}
+          ${effort ? `<span><strong style="color:var(--ink)">Effort:</strong> ${esc(effort)}</span>` : ""}
+          ${hasEv ? `<button class="ws-btn" data-ev="${i}" style="margin-left:auto;padding:5px 12px">See data</button>` : ""}
+        </div>` : ""}
+      </div>`;
+    }).join("");
+    el.innerHTML = `<div class="view-head"><div><h2>Recommendations</h2><div class="muted">${all.length} recommendations · prioritized</div></div></div>` +
+      (all.length ? cards : `<div class="panel">No recommendations.</div>`);
+    el.querySelectorAll("[data-ev]").forEach(b => b.addEventListener("click", () => {
+      const r = all[+b.dataset.ev], ev = r.evidence || {};
+      showModal(r.Recommendation || "Recommendation",
+        `<div class="muted" style="margin-bottom:12px;font-size:13px">The data this recommendation is based on:</div>
+         <table class="ws-table" style="width:100%"><tbody>
+           ${evrow("Severity", ev.severity)}${evrow("Area", ev.module)}${evrow("What we found", ev.observation)}
+           ${evrow("Magnitude", ev.magnitude)}${evrow("Why it matters", ev.impact)}${evrow("Suggested timing", ev.timing)}
+         </tbody></table>`);
+    }));
+  }
+
   // ---- register renderers ----
   const REG = {
+    "recs": ["Recommendations", renderRecs],
     "campaign-perf": ["Campaign Performance", renderCampaignPerf],
     "budget-pacing": ["Budget & Pacing", renderBudgetPacing],
     "geo-perf": ["Geo Performance", renderGeoPerf],
@@ -397,7 +457,7 @@
     // clear the static (Mavis-demo) dashboard nav; keep the Workspace admin section
     Array.prototype.slice.call(sidebar.querySelectorAll(".nav-section, .nav-item")).forEach(n => {
       if (n.classList.contains("nav-item") && (n.dataset.view || "").indexOf("ws-") === 0) return;
-      if (n.classList.contains("nav-section") && n.textContent === "Workspace") return;
+      if (n.classList.contains("nav-section") && n.textContent === "Settings") return;
       n.remove();
     });
     const allow = {}; meta.views.forEach(v => allow[v] = true);
