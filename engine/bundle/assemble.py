@@ -7,10 +7,11 @@ and the full view set land in later increments; this proves the raw -> bundle ->
 dashboard seam for a real client.
 """
 import calendar
+from collections import defaultdict
 from sqlalchemy import text, select, func
 from ..ingest.store import get_engine, clients, uploads
 from ..ingest.service import get_config
-from ..analyze.analyzers import run_analyzers
+from ..analyze.analyzers import run_analyzers, _asdict, _num
 
 FULL_MONTHS = ["January", "February", "March", "April", "May", "June",
                "July", "August", "September", "October", "November", "December"]
@@ -82,6 +83,113 @@ def _to_recommendations(findings):
             "Effort": EFFORT_LABEL.get(f["effort"], f["effort"]),
         })
     return recs
+
+
+def _prior_month(cm):
+    pm, py = cm["month"] - 1, cm["year"]
+    if pm == 0:
+        pm, py = 12, py - 1
+    return {"full": f"{FULL_MONTHS[pm-1]} {py}", "abbr": f"{MABBR[pm-1]} {py}"}
+
+
+def _campaigns(engine, client_id, cm):
+    """Per-campaign snapshot for the latest complete month + month-over-month deltas."""
+    prior = _prior_month(cm)
+
+    def month_map(label):
+        out = {}
+        with engine.connect() as c:
+            for camp, clicks, cost, conv, row in c.execute(text(
+                "SELECT campaign, clicks, cost, conversions, row FROM raw_rows "
+                "WHERE client_id=:c AND report_type='campaign_performance' AND date=:d"),
+                {"c": client_id, "d": label}):
+                out[camp] = {"clicks": _num(clicks), "cost": _num(cost), "conv": _num(conv),
+                             "type": _asdict(row).get("campaign_type", "")}
+        return out
+
+    cur, pri = month_map(cm["full"]), month_map(prior["full"])
+    total_cost = sum(v["cost"] for v in cur.values())
+    rows = []
+    for camp, d in sorted(cur.items(), key=lambda kv: -kv[1]["cost"]):
+        pconv = pri.get(camp, {}).get("conv")
+        dconv = ((d["conv"] - pconv) / pconv) if pconv else None
+        rows.append({
+            "campaign": (camp or "").split("|")[-1].strip() or camp,
+            "type": d["type"], "clicks": round(d["clicks"]), "cost": round(d["cost"], 2),
+            "conv": round(d["conv"], 1),
+            "cpa": round(d["cost"] / d["conv"], 2) if d["conv"] else 0,
+            "cvr": round(d["conv"] / d["clicks"], 4) if d["clicks"] else 0,
+            "share": round(d["cost"] / total_cost, 4) if total_cost else 0,
+            "prior_conv": round(pconv, 1) if pconv is not None else None,
+            "d_conv": round(dconv, 4) if dconv is not None else None,
+        })
+    return {"month": cm["abbr"], "prior_month": prior["abbr"], "rows": rows,
+            "totals": {"clicks": round(sum(v["clicks"] for v in cur.values())),
+                       "cost": round(total_cost, 2),
+                       "conv": round(sum(v["conv"] for v in cur.values()), 1)}}
+
+
+def _geo(engine, client_id):
+    """Performance by geographic location (whatever grain the export carries — State
+    for most single-market accounts). Cost derived from Cost/conv since the Geographic
+    export has no Cost column. Returns None if no geo data."""
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT entity, clicks, impressions, conversions, conv_value, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='geographic'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    agg = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0, 0.0])  # clicks, impr, conv, conv_value, cost
+    for ent, clicks, impr, conv, cval, row in rows:
+        loc = ent or "(not set)"
+        d = agg[loc]
+        cv = _num(conv)
+        d[0] += _num(clicks); d[1] += _num(impr); d[2] += cv; d[3] += _num(cval)
+        cpc = _num(_asdict(row).get("cost_conv"))     # Cost / conv.
+        d[4] += cpc * cv if cpc else 0.0
+    out = []
+    for loc, (cl, im, cv, cval, cost) in sorted(agg.items(), key=lambda kv: -kv[1][4] or -kv[1][0]):
+        out.append({"location": loc, "clicks": round(cl), "impr": round(im),
+                    "conv": round(cv, 1), "conv_value": round(cval, 2), "cost": round(cost, 2),
+                    "cpa": round(cost / cv, 2) if cv else 0,
+                    "cvr": round(cv / cl, 4) if cl else 0,
+                    "ctr": round(cl / im, 4) if im else 0})
+    tot = [sum(x) for x in zip(*[[r["clicks"], r["impr"], r["conv"], r["conv_value"], r["cost"]] for r in out])]
+    return {"dimension": "State", "rows": out[:60],
+            "totals": {"clicks": round(tot[0]), "impr": round(tot[1]), "conv": round(tot[2], 1),
+                       "conv_value": round(tot[3], 2), "cost": round(tot[4], 2)}}
+
+
+def _budget(engine, client_id, cm, config):
+    """Monthly spend vs a configured monthly budget. Intra-month (daily) pacing needs
+    day-segmented exports; this reports monthly adherence and latest-month variance."""
+    budget = (config.get("thresholds") or {}).get("monthly_budget")
+    budget = float(budget) if budget else None
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT date, SUM(cost) FROM raw_rows WHERE client_id=:c "
+            "AND report_type='campaign_performance' AND date IS NOT NULL GROUP BY date"),
+            {"c": client_id}).all()
+    series = []
+    for date, cost in rows:
+        mk = _month_key(date)
+        if mk:
+            series.append((mk, _num(cost)))
+    series.sort(key=lambda x: (x[0][0], x[0][1]))
+    series = [s for s in series if (s[0][0], s[0][1]) <= (cm["year"], cm["month"])]
+    months = [{
+        "month": mk[3], "spend": round(cost, 2),
+        "budget": round(budget, 2) if budget else None,
+        "variance": round(cost - budget, 2) if budget else None,
+        "pct": round(cost / budget, 4) if budget else None,
+    } for (mk, cost) in series[-12:]]
+    latest = months[-1] if months else None
+    status = None
+    if latest and budget:
+        p = latest["pct"]
+        status = "over" if p > 1.05 else "under" if p < 0.9 else "on-track"
+    return {"monthly_budget": round(budget, 2) if budget else None,
+            "months": months, "latest": latest, "status": status}
 
 
 def _to_overview_findings(findings):
@@ -167,6 +275,14 @@ def build_bundle(client_id, engine=None):
     analyzer_findings = run_analyzers(engine, client_id, cm, config) if cm else []
     findings = _to_overview_findings(analyzer_findings)
     recommendations = _to_recommendations(analyzer_findings)
+    campaigns = _campaigns(engine, client_id, cm) if cm else None
+    geo = _geo(engine, client_id)
+    budget = _budget(engine, client_id, cm, config) if cm else None
+
+    view_list = ["overview", "trends", "campaign-perf", "budget-pacing"]
+    if geo:
+        view_list.append("geo-perf")
+    view_list.append("recs")
 
     return {
         "meta": {
@@ -177,11 +293,14 @@ def build_bundle(client_id, engine=None):
             # Views this bundle populates. The frontend hides dashboard tabs not
             # listed here (workspace/admin tabs are always shown). Grows as later
             # increments populate more views.
-            "views": ["overview", "trends", "recs"],
+            "views": view_list,
             "generated_from": "warehouse",
         },
         "total_trend": total_trend,
         "kpis": kpis,
         "findings": findings,
         "recommendations": recommendations,
+        "campaigns": campaigns,
+        "geo_performance": geo,
+        "budget_pacing": budget,
     }
