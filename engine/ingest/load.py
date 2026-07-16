@@ -9,13 +9,22 @@ Usage:
   py -m engine.ingest.load --client chiarelli --dir "C:\\path\\to\\csv folder"
   # DATABASE_URL env -> Postgres; unset -> local data/dev.db (SQLite)
 """
-import argparse, datetime, glob, os
+import argparse, datetime, glob, json, os
 from sqlalchemy import delete, select, func
 
 from .parser import parse_csv, to_number, CORE_METRICS, ENTITY_COL, DATE_COL, EXPECTED_REPORTS
 from .store import get_engine, init_db, uploads, raw_rows
 
 CHUNK = 5000
+
+# Fields that must NOT be overwritten on re-upload — Quality Score and its components
+# are point-in-time; we keep the earliest measured value so QS history isn't lost.
+PRESERVE_ON_REUPLOAD = {"search_keyword_qs": ["quality_score", "exp_ctr", "ad_relevance", "landing_page_exp"]}
+
+
+def _kw_key(row):
+    return (row.get("search_keyword"), row.get("search_keyword_match_type"),
+            row.get("campaign"), row.get("ad_group"))
 
 
 def _row_record(client_id, upload_id, rtype, idx, row):
@@ -47,10 +56,22 @@ def load_folder(client_id, folder, engine=None):
             continue
         rtype, rows = parsed["report_type"], parsed["rows"]
 
+        preserve_fields = PRESERVE_ON_REUPLOAD.get(rtype)
         with engine.begin() as conn:
             # snapshot replace for this client + report
             old = conn.execute(select(uploads.c.upload_id).where(
                 (uploads.c.client_id == client_id) & (uploads.c.report_type == rtype))).scalars().all()
+
+            # capture QS-component values from the EXISTING rows before we delete them,
+            # so a fresh export can't overwrite the earlier measured Quality Score.
+            preserve = {}
+            if preserve_fields and old:
+                for (rj,) in conn.execute(select(raw_rows.c.row).where(raw_rows.c.upload_id.in_(old))):
+                    d = rj if isinstance(rj, dict) else (json.loads(rj) if rj else {})
+                    kept = {f: d.get(f) for f in preserve_fields if d.get(f) is not None}
+                    if kept:
+                        preserve[_kw_key(d)] = kept
+
             if old:
                 conn.execute(delete(raw_rows).where(raw_rows.c.upload_id.in_(old)))
                 conn.execute(delete(uploads).where(uploads.c.upload_id.in_(old)))
@@ -63,6 +84,10 @@ def load_folder(client_id, folder, engine=None):
 
             batch = []
             for i, row in enumerate(rows):
+                if preserve:                       # carry forward the earlier QS values
+                    ov = preserve.get(_kw_key(row))
+                    if ov:
+                        row = dict(row); row.update(ov)
                 batch.append(_row_record(client_id, upload_id, rtype, i, row))
                 if len(batch) >= CHUNK:
                     conn.execute(raw_rows.insert(), batch); batch = []
