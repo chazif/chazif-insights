@@ -273,6 +273,80 @@ def _search_terms(engine, client_id, config):
     }
 
 
+def _grade_term(t):
+    if t["conv"] >= 1:
+        return "A — Converting"
+    if t["cost"] > 0 and t["conv"] == 0 and t["clicks"] >= 5:
+        return "F — No conversions"
+    if t["clicks"] < 5:
+        return "Low volume"
+    return "C — Traffic, no conv"
+
+
+def _search_terms_section(engine, client_id, config):
+    """Full Search Terms section: Intent & Grades, Relevant, Competitor, Flagged."""
+    from collections import Counter
+    from ..llm.relevance import get_or_classify
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT entity, clicks, cost, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='search_terms'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    terms = []
+    for term, clicks, cost, conv, row in rows:
+        t = {"term": term or "", "match": _asdict(row).get("search_terms_match_type", ""),
+             "clicks": _num(clicks), "cost": _num(cost), "conv": _num(conv)}
+        t["grade"] = _grade_term(t)
+        terms.append(t)
+
+    top = sorted(terms, key=lambda x: -x["cost"])[:60]
+    context = {"product_categories": config.get("product_categories", []),
+               "brand_terms": config.get("brand_terms", []),
+               "competitors_conquest": config.get("competitors_conquest", [])}
+    cls = get_or_classify(engine, client_id, [t["term"] for t in top], context)
+    for t in terms:
+        r = cls.get(t["term"])
+        t["intent"] = r["category"] if r else None
+        t["relevant"] = r["relevant"] if r else None
+
+    gc, gs = Counter(), Counter()
+    for t in terms:
+        gc[t["grade"]] += 1; gs[t["grade"]] += t["cost"]
+    grade_order = ["A — Converting", "C — Traffic, no conv", "F — No conversions", "Low volume"]
+    grade_summary = [{"grade": g, "terms": gc[g], "cost": round(gs[g], 2)} for g in grade_order if g in gc]
+
+    ic, isp = Counter(), Counter()
+    for t in top:
+        cat = (cls.get(t["term"]) or {}).get("category", "unclassified")
+        ic[cat] += 1; isp[cat] += t["cost"]
+    intent_summary = [{"intent": k, "terms": ic[k], "cost": round(isp[k], 2)} for k in sorted(ic, key=lambda x: -isp[x])]
+
+    comps = [x.lower() for x in (config.get("competitors_conquest", []) + config.get("competitors_friendly", []))]
+
+    def trow(t):
+        return {"term": t["term"], "match": t["match"], "clicks": round(t["clicks"]),
+                "cost": round(t["cost"], 2), "conv": round(t["conv"], 1),
+                "grade": t["grade"], "intent": t.get("intent"), "relevant": t.get("relevant")}
+
+    relevant = [t for t in top if (cls.get(t["term"]) or {}).get("relevant")]
+    competitor = sorted([t for t in terms if comps and any(cx in t["term"].lower() for cx in comps)],
+                        key=lambda x: -x["cost"])[:25]
+    flagged = sorted([t for t in top if t["conv"] == 0 and
+                      (t["grade"].startswith("F") or (cls.get(t["term"]) or {}).get("relevant") is False)],
+                     key=lambda x: -x["cost"])[:30]
+    return {
+        "source": next((v["source"] for v in cls.values()), "none"),
+        "total_terms": len(terms),
+        "grade_summary": grade_summary,
+        "intent_summary": intent_summary,
+        "top_graded": [trow(t) for t in sorted(terms, key=lambda x: -x["cost"])[:40]],
+        "relevant": [trow(t) for t in sorted(relevant, key=lambda x: -x["cost"])[:25]],
+        "competitor": [trow(t) for t in competitor],
+        "flagged": [trow(t) for t in flagged],
+    }
+
+
 def _to_overview_findings(findings):
     out = [{"topic": f["title"], "detail": f["magnitude"]}
            for f in sorted(findings, key=lambda x: SEV_ORDER.get(x["severity"], 9))
@@ -360,15 +434,19 @@ def build_bundle(client_id, engine=None):
     geo = _geo(engine, client_id)
     budget = _budget(engine, client_id, cm, config) if cm else None
     qscore = _quality_score(engine, client_id)
-    search_terms = _search_terms(engine, client_id, config)
+    st = _search_terms_section(engine, client_id, config)
 
     view_list = ["overview", "trends", "campaign-perf", "budget-pacing"]
-    if geo:
-        view_list.append("geo-perf")
     if qscore:
         view_list.append("qs-detail")
-    if search_terms:
-        view_list.append("search-terms")
+    if st:
+        view_list += ["st-intent", "st-relevant"]
+        if st["competitor"]:
+            view_list.append("st-competitor")
+        if st["flagged"]:
+            view_list.append("st-flagged")
+    if geo:
+        view_list.append("geo-perf")
     view_list.append("recs")
 
     return {
@@ -391,5 +469,5 @@ def build_bundle(client_id, engine=None):
         "geo_performance": geo,
         "budget_pacing": budget,
         "quality_score": qscore,
-        "search_terms": search_terms,
+        "search_terms_section": st,
     }

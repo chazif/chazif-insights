@@ -187,29 +187,101 @@
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
+  // ---------- Search Terms section (shared helpers) ----------
+  const gradeCls = g => (g && g[0] === "A") ? "up" : (g && g[0] === "F") ? "dn" : "";
+  const intentCell = t => t.relevant == null ? `<td>—</td>` : `<td class="chg ${t.relevant ? "up" : "dn"}">${esc(t.intent || "")}</td>`;
+  const termTable = (rows, withIntent) => `<div class="tbl-wrap"><table class="sortable">
+      <thead><tr><th>Search term</th><th>Match</th><th class="num">Clicks</th><th class="num">Cost</th>
+        <th class="num">Conv</th><th>Grade</th>${withIntent ? "<th>Intent</th>" : ""}</tr></thead>
+      <tbody>${rows.map(t => `<tr>
+        <td class="strong">${esc(t.term)}</td><td>${esc(t.match)}</td>
+        <td class="num" data-sort="${t.clicks}">${fmt.num(t.clicks)}</td>
+        <td class="num" data-sort="${t.cost}">${fmt.money(t.cost)}</td>
+        <td class="num" data-sort="${t.conv}">${fmt.num(t.conv, 1)}</td>
+        <td class="chg ${gradeCls(t.grade)}">${esc(t.grade)}</td>
+        ${withIntent ? intentCell(t) : ""}</tr>`).join("")}</tbody></table></div>`;
+  const stData = () => (typeof DATA !== "undefined" && DATA.search_terms_section) || null;
+  const stHead = (title, sub) => `<div class="view-head"><div><h2>${title}</h2><div class="muted">${sub}</div></div></div>`;
+
+  function renderStIntent(el) {
+    el.className = "view"; const s = stData();
+    if (!s) { el.innerHTML = stHead("Intent &amp; Grades", "") + `<div class="panel">No search-term data.</div>`; return; }
+    const grades = s.grade_summary.map(g => `<div class="stat"><div class="stat-label">${esc(g.grade)}</div><div class="stat-value">${fmt.num(g.terms)}</div><div class="stat-chg">${fmt.money(g.cost)}</div></div>`).join("");
+    const intents = s.intent_summary.map(i => `<tr><td class="strong">${esc(i.intent)}</td><td class="num">${i.terms}</td><td class="num">${fmt.money(i.cost)}</td></tr>`).join("");
+    el.innerHTML = stHead("Intent &amp; Grades", `${fmt.num(s.total_terms)} terms · intent via ${esc(s.source)}`) +
+      `<div class="stat-grid">${grades}</div>
+       <div class="two-col">
+         <div class="panel"><h3>Intent mix (top terms by spend)</h3><div class="tbl-wrap"><table>
+           <thead><tr><th>Intent</th><th class="num">Terms</th><th class="num">Cost</th></tr></thead><tbody>${intents}</tbody></table></div></div>
+         <div class="panel"><h3>Top terms by spend</h3>${termTable(s.top_graded, true)}</div></div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+  function renderStRelevant(el) {
+    el.className = "view"; const s = stData();
+    if (!s) { el.innerHTML = stHead("Relevant Terms", "") + `<div class="panel">No data.</div>`; return; }
+    el.innerHTML = stHead("Relevant Terms", `Terms relevant to the business (${esc(s.source)}), by spend`) +
+      `<div class="panel">${termTable(s.relevant, true)}</div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+  function renderStCompetitor(el) {
+    el.className = "view"; const s = stData();
+    if (!s) { el.innerHTML = stHead("Competitor Terms", "") + `<div class="panel">No data.</div>`; return; }
+    el.innerHTML = stHead("Competitor Terms", `Search terms matching configured competitor names`) +
+      `<div class="panel">${s.competitor.length ? termTable(s.competitor, false) : '<div class="ws-empty" style="padding:24px;text-align:center;color:var(--grey)">No competitor terms — add competitors in Business Context.</div>'}</div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+  function renderStFlagged(el) {
+    el.className = "view"; const s = stData();
+    if (!s) { el.innerHTML = stHead("Flagged / Review", "") + `<div class="panel">No data.</div>`; return; }
+    el.innerHTML = stHead("Flagged / Review", `Zero-conversion or irrelevant terms — negative-keyword candidates`) +
+      `<div class="panel">${termTable(s.flagged, true)}</div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+
   // ---- register renderers ----
   const REG = {
     "campaign-perf": ["Campaign Performance", renderCampaignPerf],
     "budget-pacing": ["Budget & Pacing", renderBudgetPacing],
     "geo-perf": ["Geo Performance", renderGeoPerf],
-    "qs-detail": ["Quality Score", renderQsDetail],
-    "search-terms": ["Search Terms", renderSearchTerms],
+    "qs-detail": ["QS Overview", renderQsDetail],
+    "st-intent": ["Intent & Grades", renderStIntent],
+    "st-relevant": ["Relevant Terms", renderStRelevant],
+    "st-competitor": ["Competitor Terms", renderStCompetitor],
+    "st-flagged": ["Flagged / Review", renderStFlagged],
   };
   Object.keys(REG).forEach(v => { views[v] = REG[v][1]; labels[v] = REG[v][0]; });
 
-  // ---- insert nav items for views this bundle populates, after "Monthly Trends" ----
+  // ---- rebuild a sectioned dashboard nav for computed clients (mirrors the reference) ----
   const meta = (window.__BUNDLE__ && window.__BUNDLE__.meta) || null;
   if (meta && Array.isArray(meta.views)) {
+    const SECTIONS = [
+      ["Performance", ["overview", "trends", "campaign-perf", "budget-pacing"]],
+      ["Keyword", ["qs-detail"]],
+      ["Search Terms", ["st-intent", "st-relevant", "st-competitor", "st-flagged"]],
+      ["Geo", ["geo-perf"]],
+      ["", ["recs"]],
+    ];
     const sidebar = document.getElementById("sidebar");
-    let anchor = sidebar && sidebar.querySelector('.nav-item[data-view="trends"]');
-    ["campaign-perf", "budget-pacing", "geo-perf", "qs-detail", "search-terms"].forEach(v => {
-      if (meta.views.indexOf(v) < 0 || !anchor) return;
-      const d = document.createElement("div");
-      d.className = "nav-item"; d.dataset.view = v;
-      d.innerHTML = `<span class="nav-dot"></span>${labels[v]}`;
-      d.addEventListener("click", () => setView(v));
-      anchor.parentNode.insertBefore(d, anchor.nextSibling);
-      anchor = d;  // keep order for subsequent inserts
+    // clear the static (Mavis-demo) dashboard nav; keep the Workspace admin section
+    Array.prototype.slice.call(sidebar.querySelectorAll(".nav-section, .nav-item")).forEach(n => {
+      if (n.classList.contains("nav-item") && (n.dataset.view || "").indexOf("ws-") === 0) return;
+      if (n.classList.contains("nav-section") && n.textContent === "Workspace") return;
+      n.remove();
+    });
+    const allow = {}; meta.views.forEach(v => allow[v] = true);
+    SECTIONS.forEach(([title, keys]) => {
+      const items = keys.filter(v => allow[v]);
+      if (!items.length) return;
+      if (title) {
+        const h = document.createElement("div"); h.className = "nav-section"; h.textContent = title;
+        sidebar.appendChild(h);
+      }
+      items.forEach(v => {
+        const d = document.createElement("div"); d.className = "nav-item"; d.dataset.view = v;
+        d.innerHTML = `<span class="nav-dot"></span>${labels[v] || v}`;
+        d.addEventListener("click", () => setView(v));
+        sidebar.appendChild(d);
+      });
     });
   }
 })();
