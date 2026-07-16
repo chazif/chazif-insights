@@ -10,6 +10,26 @@
     return `<td class="num chg ${cls}">${(v >= 0 ? "+" : "") + (v * 100).toFixed(0)}%</td>`;
   };
 
+  // ---- chart helpers (Chart.js is loaded by the page; match the reference style) ----
+  const PALETTE = ["#CFFF04", "#1A1A1A", "#2F7D4F", "#dc2626", "#9CA3AF", "#6366f1", "#f59e0b", "#0ea5e9", "#a855f7", "#14b8a6"];
+  function donut(id, labels, data) {
+    const c = document.getElementById(id);
+    if (!c || typeof Chart === "undefined") return;
+    new Chart(c, { type: "doughnut",
+      data: { labels, datasets: [{ data, backgroundColor: PALETTE, borderWidth: 1, borderColor: "#fff" }] },
+      options: { responsive: true, maintainAspectRatio: true, cutout: "58%",
+        plugins: { legend: { position: "right", labels: { color: "#1A1A1A", font: { family: "Inter", size: 11 }, boxWidth: 10, padding: 8 } } } } });
+  }
+  function bars(id, labels, data, label, color) {
+    const c = document.getElementById(id);
+    if (!c || typeof Chart === "undefined") return;
+    const opt = (typeof chartOpts === "function") ? chartOpts({}) : { responsive: true, maintainAspectRatio: true };
+    if (opt.plugins && opt.plugins.legend) opt.plugins.legend.display = false;
+    new Chart(c, { type: "bar",
+      data: { labels, datasets: [{ label: label || "", data, backgroundColor: color || "#CFFF04", borderColor: "#1A1A1A", borderWidth: 1 }] },
+      options: opt });
+  }
+
   // ---------- Campaign Performance ----------
   function renderCampaignPerf(el) {
     el.className = "view";
@@ -31,6 +51,7 @@
     el.innerHTML = `
       <div class="view-head"><div><h2>Campaign Performance</h2>
         <div class="muted">${esc(cp.month)} snapshot · Δ Conv vs ${esc(cp.prior_month)}</div></div></div>
+      <div class="panel"><h3>Spend by campaign · ${esc(cp.month)}</h3><canvas id="campChart" height="170"></canvas></div>
       <div class="panel"><div class="tbl-wrap"><table class="sortable">
         <thead><tr><th>Campaign</th><th>Type</th><th class="num">Clicks</th><th class="num">Cost</th>
           <th class="num">Conv</th><th class="num">CPA</th><th class="num">CVR</th>
@@ -42,6 +63,7 @@
             <td class="num">${fmt.num(cp.totals.conv, 1)}</td>
             <td></td><td></td><td class="num">100%</td><td></td></tr>
         </tbody></table></div></div>`;
+    bars("campChart", cp.rows.map(r => r.campaign), cp.rows.map(r => r.cost), "Cost");
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
@@ -120,11 +142,6 @@
     el.className = "view";
     const q = (typeof DATA !== "undefined" && DATA.quality_score) || null;
     if (!q) { el.innerHTML = `<div class="view-head"><div><h2>Quality Score</h2></div></div><div class="panel">No Quality Score data.</div>`; return; }
-    const maxk = Math.max.apply(null, q.distribution.map(d => d.keywords)) || 1;
-    const dist = q.distribution.map(d => `<tr>
-        <td class="strong">QS ${d.qs}</td>
-        <td style="width:38%"><div style="background:var(--lime);height:12px;border-radius:6px;width:${(d.keywords / maxk * 100).toFixed(0)}%"></div></td>
-        <td class="num">${d.keywords}</td><td class="num">${fmt.money(d.cost)}</td></tr>`).join("");
     const buckets = q.buckets.map(b => `<div class="stat">
         <div class="stat-label">${esc(b.label)}</div><div class="stat-value">${b.keywords}</div>
         <div class="stat-chg">${fmt.money(b.cost)}</div></div>`).join("");
@@ -134,17 +151,16 @@
         <td class="num" data-sort="${k.clicks}">${fmt.num(k.clicks)}</td>
         <td class="num" data-sort="${k.cost}">${fmt.money(k.cost)}</td></tr>`).join("");
     el.innerHTML = `
-      <div class="view-head"><div><h2>Quality Score</h2>
+      <div class="view-head"><div><h2>QS Overview</h2>
         <div class="muted">Account avg QS ${q.avg_qs} · ${q.total_keywords} keywords with a Quality Score</div></div></div>
       <div class="stat-grid">${buckets}</div>
       <div class="two-col">
-        <div class="panel"><h3>QS distribution</h3><div class="tbl-wrap"><table>
-          <thead><tr><th>QS</th><th></th><th class="num">Keywords</th><th class="num">Cost</th></tr></thead>
-          <tbody>${dist}</tbody></table></div></div>
+        <div class="panel"><h3>QS distribution · keywords</h3><canvas id="qsDistChart" height="210"></canvas></div>
         <div class="panel"><h3>Lowest-QS keywords by spend</h3><div class="tbl-wrap"><table class="sortable">
           <thead><tr><th>Keyword</th><th>Match</th><th class="num">QS</th><th class="num">Clicks</th><th class="num">Cost</th></tr></thead>
           <tbody>${low}</tbody></table></div></div>
       </div>`;
+    bars("qsDistChart", q.distribution.map(d => "QS " + d.qs), q.distribution.map(d => d.keywords), "Keywords");
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
@@ -207,13 +223,15 @@
     el.className = "view"; const s = stData();
     if (!s) { el.innerHTML = stHead("Intent &amp; Grades", "") + `<div class="panel">No search-term data.</div>`; return; }
     const grades = s.grade_summary.map(g => `<div class="stat"><div class="stat-label">${esc(g.grade)}</div><div class="stat-value">${fmt.num(g.terms)}</div><div class="stat-chg">${fmt.money(g.cost)}</div></div>`).join("");
-    const intents = s.intent_summary.map(i => `<tr><td class="strong">${esc(i.intent)}</td><td class="num">${i.terms}</td><td class="num">${fmt.money(i.cost)}</td></tr>`).join("");
     el.innerHTML = stHead("Intent &amp; Grades", `${fmt.num(s.total_terms)} terms · intent via ${esc(s.source)}`) +
-      `<div class="stat-grid">${grades}</div>
-       <div class="two-col">
-         <div class="panel"><h3>Intent mix (top terms by spend)</h3><div class="tbl-wrap"><table>
-           <thead><tr><th>Intent</th><th class="num">Terms</th><th class="num">Cost</th></tr></thead><tbody>${intents}</tbody></table></div></div>
-         <div class="panel"><h3>Top terms by spend</h3>${termTable(s.top_graded, true)}</div></div>`;
+      `<div class="two-col">
+         <div class="panel"><h3>Performance grades · term counts</h3><canvas id="stGradeChart" height="210"></canvas></div>
+         <div class="panel"><h3>Intent mix · spend</h3><canvas id="stIntentChart" height="210"></canvas></div>
+       </div>
+       <div class="stat-grid">${grades}</div>
+       <div class="panel"><h3>Top terms by spend</h3>${termTable(s.top_graded, true)}</div>`;
+    donut("stGradeChart", s.grade_summary.map(g => g.grade), s.grade_summary.map(g => g.terms));
+    donut("stIntentChart", s.intent_summary.map(i => i.intent), s.intent_summary.map(i => Math.round(i.cost)));
     if (typeof enableSortable === "function") enableSortable(el);
   }
   function renderStRelevant(el) {
@@ -334,9 +352,13 @@
         <td class="num" data-sort="${r.clicks}">${fmt.num(r.clicks)}</td>
         <td class="num" data-sort="${r.cost}">${fmt.money(r.cost)}</td></tr>`).join("");
     el.innerHTML = stHead("LP Category Grid", "Landing-page spend by product category (derived from the LP URL)") +
-      `<div class="panel"><div class="tbl-wrap"><table class="sortable">
-        <thead><tr><th>Category</th><th class="num">Landing pages</th><th class="num">Clicks</th><th class="num">Cost</th></tr></thead>
-        <tbody>${rows}</tbody></table></div></div>`;
+      `<div class="two-col">
+        <div class="panel"><h3>Spend by category</h3><canvas id="lpCatChart" height="210"></canvas></div>
+        <div class="panel"><div class="tbl-wrap"><table class="sortable">
+          <thead><tr><th>Category</th><th class="num">Landing pages</th><th class="num">Clicks</th><th class="num">Cost</th></tr></thead>
+          <tbody>${rows}</tbody></table></div></div>
+      </div>`;
+    donut("lpCatChart", g.map(r => r.category), g.map(r => Math.round(r.cost)));
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
