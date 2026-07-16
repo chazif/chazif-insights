@@ -14,15 +14,23 @@ import os
 import re
 import json
 import datetime
+import urllib.request
 from sqlalchemy import select, insert
 from ..ingest.store import term_relevance
 
-RELEVANCE_MODEL = os.environ.get("RELEVANCE_MODEL", "claude-haiku-4-5-20251001")
+# Providers, in priority order: DeepSeek (OpenAI-compatible) -> Anthropic -> heuristic.
+ANTHROPIC_MODEL = os.environ.get("RELEVANCE_MODEL", "claude-haiku-4-5-20251001")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+DEEPSEEK_URL = os.environ.get("DEEPSEEK_URL", "https://api.deepseek.com/chat/completions")
 MAX_TERMS = 40  # bound the classification set per build (cost/latency)
 
 
-def _have_llm():
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+def _provider():
+    if os.environ.get("DEEPSEEK_API_KEY"):
+        return "deepseek"
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    return None
 
 
 def _keywords(categories):
@@ -57,12 +65,11 @@ def _classify_heuristic(terms, context):
     return out
 
 
-def _classify_llm(terms, context):
-    import anthropic  # lazy; only needed when a key is present
+def _build_prompt(terms, context):
     cats = ", ".join(context.get("product_categories", [])) or "(not specified)"
     brand = ", ".join(context.get("brand_terms", [])) or "(none)"
     listing = "\n".join(f"- {t}" for t in terms)
-    prompt = (
+    return (
         "You classify Google Ads search terms as relevant or not to a business, to decide "
         "negative keywords. Be strict: a term is relevant only if someone searching it could "
         "plausibly buy from this business.\n\n"
@@ -71,10 +78,9 @@ def _classify_llm(terms, context):
         '[{"term":"<verbatim>","relevant":true|false,"category":"product|brand|competitor|unrelated","reason":"<max 8 words>"}]\n\n'
         f"Terms:\n{listing}"
     )
-    client = anthropic.Anthropic()
-    msg = client.messages.create(model=RELEVANCE_MODEL, max_tokens=2000,
-                                 messages=[{"role": "user", "content": prompt}])
-    text = "".join(getattr(b, "text", "") for b in msg.content)
+
+
+def _parse_response(text, terms, context, source):
     m = re.search(r"\[.*\]", text, re.S)
     data = json.loads(m.group(0) if m else text)
     out = {}
@@ -84,20 +90,43 @@ def _classify_llm(terms, context):
             continue
         out[term] = {"relevant": bool(row.get("relevant")),
                      "category": str(row.get("category", "unrelated"))[:64],
-                     "reason": str(row.get("reason", ""))[:512], "source": "llm"}
-    # any term the model dropped -> heuristic backfill
-    missing = [t for t in terms if t not in out]
+                     "reason": str(row.get("reason", ""))[:512], "source": source}
+    missing = [t for t in terms if t not in out]   # anything the model dropped
     if missing:
         out.update(_classify_heuristic(missing, context))
     return out
 
 
+def _classify_deepseek(terms, context):
+    key = os.environ["DEEPSEEK_API_KEY"]
+    body = json.dumps({"model": DEEPSEEK_MODEL, "temperature": 0, "max_tokens": 2000,
+                       "messages": [{"role": "user", "content": _build_prompt(terms, context)}]}).encode("utf-8")
+    req = urllib.request.Request(DEEPSEEK_URL, data=body, method="POST",
+                                 headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    text = payload["choices"][0]["message"]["content"]
+    return _parse_response(text, terms, context, "deepseek")
+
+
+def _classify_anthropic(terms, context):
+    import anthropic  # lazy; only when a key is present
+    client = anthropic.Anthropic()
+    msg = client.messages.create(model=ANTHROPIC_MODEL, max_tokens=2000,
+                                 messages=[{"role": "user", "content": _build_prompt(terms, context)}])
+    text = "".join(getattr(b, "text", "") for b in msg.content)
+    return _parse_response(text, terms, context, "llm")
+
+
 def classify_terms(terms, context):
-    if _have_llm():
-        try:
-            return _classify_llm(terms, context)
-        except Exception:
-            pass  # any LLM error -> deterministic fallback
+    p = _provider()
+    try:
+        if p == "deepseek":
+            return _classify_deepseek(terms, context)
+        if p == "anthropic":
+            return _classify_anthropic(terms, context)
+    except Exception:
+        pass  # any LLM / network error -> deterministic fallback
     return _classify_heuristic(terms, context)
 
 
