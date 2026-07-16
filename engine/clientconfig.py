@@ -16,6 +16,7 @@ DEFAULT_CONFIG = {
         "low_vol_conv": 15,
         "low_vol_spend": 100,
         "qs_floor": 3,              # QS danger-zone ceiling
+        "monthly_budget": None,     # target monthly spend, for Budget & Pacing
     },
     # "override the math" inputs
     "waste_exclusions": [],         # term substrings never flagged as waste

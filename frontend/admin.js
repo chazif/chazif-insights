@@ -241,6 +241,7 @@
            ${nf("ctxLowConv", "Low-volume conv", th.low_vol_conv)}
            ${nf("ctxLowSpend", "Low-volume spend $", th.low_vol_spend)}
            ${nf("ctxQs", "QS danger-zone ceiling", th.qs_floor)}
+           ${nf("ctxBudget", "Monthly budget $", th.monthly_budget)}
          </div>
          <div style="margin-bottom:14px"><label class="ws-note" style="display:block;font-weight:600;margin-bottom:5px">Seasonality — suppress trend alarms in known troughs (one per line: <em>Label: Month, Month</em>)</label>
            <textarea class="ws-input" id="ctxSeason" rows="2" style="width:100%;resize:vertical" placeholder="Post-Easter trough: May">${esc(seasonText)}</textarea></div>
@@ -266,6 +267,7 @@
           thresholds: {
             smart_bidding_floor: numOrNull("#ctxFloor"), low_vol_conv: numOrNull("#ctxLowConv"),
             low_vol_spend: numOrNull("#ctxLowSpend"), qs_floor: numOrNull("#ctxQs"),
+            monthly_budget: numOrNull("#ctxBudget"),
           },
         };
         const st = el.querySelector("#ctxStatus"), er = el.querySelector("#ctxErr");

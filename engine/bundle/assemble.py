@@ -160,6 +160,38 @@ def _geo(engine, client_id):
                        "conv_value": round(tot[3], 2), "cost": round(tot[4], 2)}}
 
 
+def _budget(engine, client_id, cm, config):
+    """Monthly spend vs a configured monthly budget. Intra-month (daily) pacing needs
+    day-segmented exports; this reports monthly adherence and latest-month variance."""
+    budget = (config.get("thresholds") or {}).get("monthly_budget")
+    budget = float(budget) if budget else None
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT date, SUM(cost) FROM raw_rows WHERE client_id=:c "
+            "AND report_type='campaign_performance' AND date IS NOT NULL GROUP BY date"),
+            {"c": client_id}).all()
+    series = []
+    for date, cost in rows:
+        mk = _month_key(date)
+        if mk:
+            series.append((mk, _num(cost)))
+    series.sort(key=lambda x: (x[0][0], x[0][1]))
+    series = [s for s in series if (s[0][0], s[0][1]) <= (cm["year"], cm["month"])]
+    months = [{
+        "month": mk[3], "spend": round(cost, 2),
+        "budget": round(budget, 2) if budget else None,
+        "variance": round(cost - budget, 2) if budget else None,
+        "pct": round(cost / budget, 4) if budget else None,
+    } for (mk, cost) in series[-12:]]
+    latest = months[-1] if months else None
+    status = None
+    if latest and budget:
+        p = latest["pct"]
+        status = "over" if p > 1.05 else "under" if p < 0.9 else "on-track"
+    return {"monthly_budget": round(budget, 2) if budget else None,
+            "months": months, "latest": latest, "status": status}
+
+
 def _to_overview_findings(findings):
     out = [{"topic": f["title"], "detail": f["magnitude"]}
            for f in sorted(findings, key=lambda x: SEV_ORDER.get(x["severity"], 9))
@@ -245,8 +277,9 @@ def build_bundle(client_id, engine=None):
     recommendations = _to_recommendations(analyzer_findings)
     campaigns = _campaigns(engine, client_id, cm) if cm else None
     geo = _geo(engine, client_id)
+    budget = _budget(engine, client_id, cm, config) if cm else None
 
-    view_list = ["overview", "trends", "campaign-perf"]
+    view_list = ["overview", "trends", "campaign-perf", "budget-pacing"]
     if geo:
         view_list.append("geo-perf")
     view_list.append("recs")
@@ -269,4 +302,5 @@ def build_bundle(client_id, engine=None):
         "recommendations": recommendations,
         "campaigns": campaigns,
         "geo_performance": geo,
+        "budget_pacing": budget,
     }
