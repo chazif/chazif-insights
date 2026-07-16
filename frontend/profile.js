@@ -27,6 +27,25 @@
   setText("gateSub", "Client portal" + (name ? " · " + name : "") + (cur ? " · " + cur + " report" : ""));
   if (name) document.title = "Chazif Insights · " + name;
 
+  // Client selector in the sidebar brand area (replaces the client-name line).
+  (function () {
+    var host = document.getElementById("brandSub");
+    if (!host || !META.client_id) return;
+    fetch("/api/clients").then(function (r) { return r.json(); }).then(function (list) {
+      var withData = (list || []).filter(function (c) { return c.reports_loaded > 0; });
+      if (!withData.length) return;
+      var opts = withData.map(function (c) {
+        var nm = String(c.name || c.client_id).replace(/</g, "&lt;");
+        return '<option value="' + c.client_id + '"' + (c.client_id === META.client_id ? " selected" : "") + ">" + nm + "</option>";
+      }).join("");
+      host.innerHTML = '<select id="clientSel" title="Switch client" style="width:100%;max-width:186px;background:rgba(255,255,255,0.06);color:#e5e7eb;border:1px solid rgba(255,255,255,0.18);border-radius:6px;font-size:11.5px;padding:3px 6px;font-family:inherit;cursor:pointer">' + opts + "</select>";
+      document.getElementById("clientSel").addEventListener("change", function () {
+        try { sessionStorage.setItem("chz_nav", "1"); } catch (e) {}
+        location.href = "/?client=" + encodeURIComponent(this.value);
+      });
+    }).catch(function () {});
+  })();
+
   // ---- single-brand: drop the brand filter (and keep it dropped across views) ----
   var nBrands = (META.complexity && META.complexity.n_brands) || 1;
   if (nBrands <= 1) {

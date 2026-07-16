@@ -82,6 +82,15 @@ def _to_recommendations(findings):
             "Rationale": f"{f['observation']} {f['impact']}",
             "Expected Impact": DOLLAR_LABEL.get(f["dollar"], f["dollar"]),
             "Effort": EFFORT_LABEL.get(f["effort"], f["effort"]),
+            # the data the recommendation is based on (shown by the "See data" button)
+            "evidence": {
+                "severity": f["severity"],
+                "module": MOD_CATEGORY.get(f["module"], f["module"]),
+                "observation": f["observation"],
+                "magnitude": f["magnitude"],
+                "impact": f["impact"],
+                "timing": f["timing"],
+            },
         })
     return recs
 
