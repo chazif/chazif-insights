@@ -238,12 +238,48 @@
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
+  // ---------- Keyword section ----------
+  function renderKwDeepDive(el) {
+    el.className = "view"; const k = (typeof DATA !== "undefined" && DATA.keyword_section) || null;
+    if (!k) { el.innerHTML = stHead("Keyword Deep Dive", "") + `<div class="panel">No keyword data.</div>`; return; }
+    const rows = k.deep_dive.map(d => `<tr>
+        <td class="strong">${esc(d.keyword)}</td><td>${esc(d.match)}</td>
+        <td class="num" data-sort="${d.qs || 0}">${d.qs || "—"}</td>
+        <td class="num" data-sort="${d.clicks}">${fmt.num(d.clicks)}</td>
+        <td class="num" data-sort="${d.cost}">${fmt.money(d.cost)}</td>
+        <td class="num" data-sort="${d.conv}">${fmt.num(d.conv, 1)}</td>
+        <td class="num" data-sort="${d.cpa}">${fmt.money(d.cpa, 2)}</td></tr>`).join("");
+    el.innerHTML = stHead("Keyword Deep Dive", "Top keywords by spend") +
+      `<div class="panel"><div class="tbl-wrap"><table class="sortable">
+        <thead><tr><th>Keyword</th><th>Match</th><th class="num">QS</th><th class="num">Clicks</th>
+          <th class="num">Cost</th><th class="num">Conv</th><th class="num">CPA</th></tr></thead>
+        <tbody>${rows}</tbody></table></div></div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+  function renderQsBreakdown(el) {
+    el.className = "view"; const k = (typeof DATA !== "undefined" && DATA.keyword_section) || null;
+    if (!k) { el.innerHTML = stHead("QS Breakdown", "") + `<div class="panel">No data.</div>`; return; }
+    const panels = Object.keys(k.components).map(name => {
+      const rows = k.components[name].map(r => {
+        const cls = r.rating === "Above average" ? "up" : r.rating === "Below average" ? "dn" : "";
+        return `<tr><td class="chg ${cls}">${esc(r.rating)}</td><td class="num">${fmt.num(r.keywords)}</td><td class="num">${fmt.money(r.cost)}</td></tr>`;
+      }).join("");
+      return `<div class="panel"><h3>${esc(name)}</h3><div class="tbl-wrap"><table>
+        <thead><tr><th>Rating</th><th class="num">Keywords</th><th class="num">Cost</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    }).join("");
+    const banner = k.below_ctr_spend ? `<div class="panel" style="background:#FCFEF0"><strong>Modeled savings:</strong> ${fmt.money(k.below_ctr_spend)} runs on Below-average expected CTR → ~${fmt.money(k.savings_estimate)} modeled CPC penalty. Rework these keywords to cut it.</div>` : "";
+    el.innerHTML = stHead("QS Breakdown", "Quality Score components across keywords") + banner +
+      `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px">${panels}</div>`;
+  }
+
   // ---- register renderers ----
   const REG = {
     "campaign-perf": ["Campaign Performance", renderCampaignPerf],
     "budget-pacing": ["Budget & Pacing", renderBudgetPacing],
     "geo-perf": ["Geo Performance", renderGeoPerf],
     "qs-detail": ["QS Overview", renderQsDetail],
+    "kw-deep-dive": ["Keyword Deep Dive", renderKwDeepDive],
+    "qs-breakdown": ["QS Breakdown", renderQsBreakdown],
     "st-intent": ["Intent & Grades", renderStIntent],
     "st-relevant": ["Relevant Terms", renderStRelevant],
     "st-competitor": ["Competitor Terms", renderStCompetitor],
@@ -256,7 +292,7 @@
   if (meta && Array.isArray(meta.views)) {
     const SECTIONS = [
       ["Performance", ["overview", "trends", "campaign-perf", "budget-pacing"]],
-      ["Keyword", ["qs-detail"]],
+      ["Keyword", ["kw-deep-dive", "qs-detail", "qs-breakdown"]],
       ["Search Terms", ["st-intent", "st-relevant", "st-competitor", "st-flagged"]],
       ["Geo", ["geo-perf"]],
       ["", ["recs"]],

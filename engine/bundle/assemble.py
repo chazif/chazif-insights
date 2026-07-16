@@ -283,6 +283,49 @@ def _grade_term(t):
     return "C — Traffic, no conv"
 
 
+def _keyword_section(engine, client_id):
+    """Keyword Deep Dive (top keywords) + QS component breakdown (eCTR / Ad relevance /
+    LP experience) with a modeled CPC-penalty savings estimate."""
+    from collections import Counter
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT cost, clicks, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='search_keyword_qs'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    kws = []
+    comp = {"exp_ctr": Counter(), "ad_relevance": Counter(), "landing_page_exp": Counter()}
+    comp_sp = {"exp_ctr": Counter(), "ad_relevance": Counter(), "landing_page_exp": Counter()}
+    below_ctr = 0.0
+    for cost, clicks, conv, row in rows:
+        d = _asdict(row); cost = _num(cost); clicks = _num(clicks); cv = _num(conv)
+        kws.append({"keyword": d.get("search_keyword", ""), "match": d.get("search_keyword_match_type", ""),
+                    "qs": d.get("quality_score"), "clicks": clicks, "cost": cost, "conv": cv})
+        for key in comp:
+            val = (d.get(key) or "").strip() or "—"
+            comp[key][val] += 1; comp_sp[key][val] += cost
+        if (d.get("exp_ctr") or "").lower() == "below average":
+            below_ctr += cost
+
+    dd = sorted(kws, key=lambda x: -x["cost"])[:40]
+    deep_dive = [{"keyword": k["keyword"], "match": k["match"], "qs": k["qs"],
+                  "clicks": round(k["clicks"]), "cost": round(k["cost"], 2), "conv": round(k["conv"], 1),
+                  "cpa": round(k["cost"] / k["conv"], 2) if k["conv"] else 0} for k in dd]
+
+    def comp_rows(key):
+        order = ["Above average", "Average", "Below average", "—"]
+        return [{"rating": r, "keywords": comp[key][r], "cost": round(comp_sp[key][r], 2)}
+                for r in order if r in comp[key]]
+    return {
+        "deep_dive": deep_dive,
+        "components": {"Expected CTR": comp_rows("exp_ctr"),
+                       "Ad relevance": comp_rows("ad_relevance"),
+                       "Landing page exp.": comp_rows("landing_page_exp")},
+        "below_ctr_spend": round(below_ctr, 2),
+        "savings_estimate": round(below_ctr * 0.33, 2),
+    }
+
+
 def _search_terms_section(engine, client_id, config):
     """Full Search Terms section: Intent & Grades, Relevant, Competitor, Flagged."""
     from collections import Counter
@@ -434,11 +477,16 @@ def build_bundle(client_id, engine=None):
     geo = _geo(engine, client_id)
     budget = _budget(engine, client_id, cm, config) if cm else None
     qscore = _quality_score(engine, client_id)
+    keyword = _keyword_section(engine, client_id)
     st = _search_terms_section(engine, client_id, config)
 
     view_list = ["overview", "trends", "campaign-perf", "budget-pacing"]
+    if keyword:
+        view_list.append("kw-deep-dive")
     if qscore:
         view_list.append("qs-detail")
+    if keyword:
+        view_list.append("qs-breakdown")
     if st:
         view_list += ["st-intent", "st-relevant"]
         if st["competitor"]:
@@ -469,5 +517,6 @@ def build_bundle(client_id, engine=None):
         "geo_performance": geo,
         "budget_pacing": budget,
         "quality_score": qscore,
+        "keyword_section": keyword,
         "search_terms_section": st,
     }
