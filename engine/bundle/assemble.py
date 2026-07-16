@@ -229,8 +229,11 @@ def _quality_score(engine, client_id):
     }
 
 
-def _search_terms(engine, client_id):
-    """Top zero-conversion (waste) and top converting search terms."""
+def _search_terms(engine, client_id, config):
+    """Top zero-conversion (waste) and top converting terms, with LLM/heuristic
+    relevance on the top waste terms to separate confirmed-irrelevant waste (negate)
+    from relevant-but-not-converting terms (fix quality, don't negate)."""
+    from ..llm.relevance import get_or_classify
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT entity, clicks, cost, conversions, row FROM raw_rows "
@@ -246,10 +249,25 @@ def _search_terms(engine, client_id):
         elif cv > 0:
             conv.append((term, clicks, cost, cv))
     waste.sort(key=lambda x: -x[3]); conv.sort(key=lambda x: -x[3])
+
+    context = {"product_categories": config.get("product_categories", []),
+               "brand_terms": config.get("brand_terms", []),
+               "competitors_conquest": config.get("competitors_conquest", [])}
+    classified = get_or_classify(engine, client_id, [t for (t, m, cl, co) in waste[:40]], context)
+    irrelevant = round(sum(co for (t, m, cl, co) in waste[:40] if t in classified and not classified[t]["relevant"]), 2)
+    relevant = round(sum(co for (t, m, cl, co) in waste[:40] if t in classified and classified[t]["relevant"]), 2)
+    src = next((v["source"] for v in classified.values()), "none")
+
+    def wrow(t, m, cl, co):
+        r = classified.get(t)
+        return {"term": t, "match": m, "clicks": round(cl), "cost": round(co, 2),
+                "relevant": r["relevant"] if r else None, "category": r["category"] if r else None}
     return {
         "total_terms": len(rows),
         "waste_total": round(sum(x[3] for x in waste), 2),
-        "top_waste": [{"term": t, "match": m, "clicks": round(cl), "cost": round(co, 2)} for (t, m, cl, co) in waste[:20]],
+        "relevance": {"classified": len(classified), "source": src,
+                      "irrelevant_waste": irrelevant, "relevant_waste": relevant},
+        "top_waste": [wrow(t, m, cl, co) for (t, m, cl, co) in waste[:20]],
         "top_converting": [{"term": t, "clicks": round(cl), "cost": round(co, 2), "conv": round(cv, 1),
                             "cpa": round(co / cv, 2) if cv else 0} for (t, cl, co, cv) in conv[:20]],
     }
@@ -342,7 +360,7 @@ def build_bundle(client_id, engine=None):
     geo = _geo(engine, client_id)
     budget = _budget(engine, client_id, cm, config) if cm else None
     qscore = _quality_score(engine, client_id)
-    search_terms = _search_terms(engine, client_id)
+    search_terms = _search_terms(engine, client_id, config)
 
     view_list = ["overview", "trends", "campaign-perf", "budget-pacing"]
     if geo:

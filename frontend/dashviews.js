@@ -153,21 +153,33 @@
     el.className = "view";
     const s = (typeof DATA !== "undefined" && DATA.search_terms) || null;
     if (!s) { el.innerHTML = `<div class="view-head"><div><h2>Search Terms</h2></div></div><div class="panel">No search-term data.</div>`; return; }
+    const relCell = t => {
+      if (t.relevant == null) return `<td>—</td>`;
+      return `<td class="chg ${t.relevant ? "up" : "dn"}">${t.relevant ? "Relevant" : "Irrelevant"}<span class="muted" style="font-weight:400"> · ${esc(t.category || "")}</span></td>`;
+    };
     const waste = s.top_waste.map(t => `<tr>
         <td class="strong">${esc(t.term)}</td><td>${esc(t.match)}</td>
         <td class="num" data-sort="${t.clicks}">${fmt.num(t.clicks)}</td>
-        <td class="num" data-sort="${t.cost}">${fmt.money(t.cost)}</td></tr>`).join("");
+        <td class="num" data-sort="${t.cost}">${fmt.money(t.cost)}</td>
+        ${relCell(t)}</tr>`).join("");
     const conv = s.top_converting.map(t => `<tr>
         <td class="strong">${esc(t.term)}</td>
         <td class="num" data-sort="${t.clicks}">${fmt.num(t.clicks)}</td>
         <td class="num" data-sort="${t.cost}">${fmt.money(t.cost)}</td>
         <td class="num" data-sort="${t.conv}">${fmt.num(t.conv, 1)}</td>
         <td class="num" data-sort="${t.cpa}">${fmt.money(t.cpa, 2)}</td></tr>`).join("");
+    const rel = s.relevance;
+    const relBanner = rel ? `<div class="panel" style="background:#FCFEF0">
+        <strong>Relevance (${esc(rel.source)}):</strong>
+        ${fmt.money(rel.irrelevant_waste)} confirmed irrelevant → <span class="chg dn">negate</span> ·
+        ${fmt.money(rel.relevant_waste)} relevant but not converting → <span class="chg up">fix quality, don't negate</span>
+        <span class="muted"> (top ${rel.classified} waste terms classified)</span></div>` : "";
     el.innerHTML = `
       <div class="view-head"><div><h2>Search Terms</h2>
         <div class="muted">${fmt.num(s.total_terms)} terms · ${fmt.money(s.waste_total)} on zero-conversion terms</div></div></div>
+      ${relBanner}
       <div class="panel"><h3>Top zero-conversion terms — negative-keyword candidates</h3><div class="tbl-wrap"><table class="sortable">
-        <thead><tr><th>Search term</th><th>Match</th><th class="num">Clicks</th><th class="num">Cost</th></tr></thead>
+        <thead><tr><th>Search term</th><th>Match</th><th class="num">Clicks</th><th class="num">Cost</th><th>Relevance</th></tr></thead>
         <tbody>${waste}</tbody></table></div></div>
       <div class="panel"><h3>Top converting terms</h3><div class="tbl-wrap"><table class="sortable">
         <thead><tr><th>Search term</th><th class="num">Clicks</th><th class="num">Cost</th><th class="num">Conv</th><th class="num">CPA</th></tr></thead>

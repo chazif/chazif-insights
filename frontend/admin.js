@@ -237,6 +237,7 @@
       const seasonText = (cfg.seasonality || []).map(w => (w.label || "") + ": " + ((w.months || []).join(", "))).join("\n");
       box.innerHTML =
         ta("ctxBrand", "Brand terms", cfg.brand_terms, "chiarelli, chiarelli's") +
+        ta("ctxProducts", "Product categories (what you sell — drives search-term relevance)", cfg.product_categories, "candles, incense, rosaries, communion wafers") +
         ta("ctxFriendly", "Friendly competitors (never conquest/negate)", cfg.competitors_friendly, "Catholic Supply, St. Jude Shop") +
         ta("ctxConquest", "Conquest competitors (real targets)", cfg.competitors_conquest, "F.C. Ziegler, Autom") +
         ta("ctxExcl", "Waste exclusions (terms never flagged as waste)", cfg.waste_exclusions, "hours, phone number") +
@@ -265,7 +266,8 @@
           return months.length ? { label: label, months: months } : null;
         }).filter(Boolean);
         const payload = {
-          brand_terms: v("#ctxBrand"), competitors_friendly: v("#ctxFriendly"),
+          brand_terms: v("#ctxBrand"), product_categories: v("#ctxProducts"),
+          competitors_friendly: v("#ctxFriendly"),
           competitors_conquest: v("#ctxConquest"), waste_exclusions: v("#ctxExcl"),
           seasonality: parseSeason(v("#ctxSeason")), notes: v("#ctxNotes"),
           thresholds: {
