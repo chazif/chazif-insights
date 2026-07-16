@@ -115,11 +115,73 @@
     if (go) go.addEventListener("click", e => { e.preventDefault(); setView("ws-context"); });
   }
 
+  // ---------- Quality Score ----------
+  function renderQsDetail(el) {
+    el.className = "view";
+    const q = (typeof DATA !== "undefined" && DATA.quality_score) || null;
+    if (!q) { el.innerHTML = `<div class="view-head"><div><h2>Quality Score</h2></div></div><div class="panel">No Quality Score data.</div>`; return; }
+    const maxk = Math.max.apply(null, q.distribution.map(d => d.keywords)) || 1;
+    const dist = q.distribution.map(d => `<tr>
+        <td class="strong">QS ${d.qs}</td>
+        <td style="width:38%"><div style="background:var(--lime);height:12px;border-radius:6px;width:${(d.keywords / maxk * 100).toFixed(0)}%"></div></td>
+        <td class="num">${d.keywords}</td><td class="num">${fmt.money(d.cost)}</td></tr>`).join("");
+    const buckets = q.buckets.map(b => `<div class="stat">
+        <div class="stat-label">${esc(b.label)}</div><div class="stat-value">${b.keywords}</div>
+        <div class="stat-chg">${fmt.money(b.cost)}</div></div>`).join("");
+    const low = q.top_low.map(k => `<tr>
+        <td class="strong">${esc(k.keyword)}</td><td>${esc(k.match)}</td>
+        <td class="num" data-sort="${k.qs}">${k.qs}</td>
+        <td class="num" data-sort="${k.clicks}">${fmt.num(k.clicks)}</td>
+        <td class="num" data-sort="${k.cost}">${fmt.money(k.cost)}</td></tr>`).join("");
+    el.innerHTML = `
+      <div class="view-head"><div><h2>Quality Score</h2>
+        <div class="muted">Account avg QS ${q.avg_qs} · ${q.total_keywords} keywords with a Quality Score</div></div></div>
+      <div class="stat-grid">${buckets}</div>
+      <div class="two-col">
+        <div class="panel"><h3>QS distribution</h3><div class="tbl-wrap"><table>
+          <thead><tr><th>QS</th><th></th><th class="num">Keywords</th><th class="num">Cost</th></tr></thead>
+          <tbody>${dist}</tbody></table></div></div>
+        <div class="panel"><h3>Lowest-QS keywords by spend</h3><div class="tbl-wrap"><table class="sortable">
+          <thead><tr><th>Keyword</th><th>Match</th><th class="num">QS</th><th class="num">Clicks</th><th class="num">Cost</th></tr></thead>
+          <tbody>${low}</tbody></table></div></div>
+      </div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+
+  // ---------- Search Terms ----------
+  function renderSearchTerms(el) {
+    el.className = "view";
+    const s = (typeof DATA !== "undefined" && DATA.search_terms) || null;
+    if (!s) { el.innerHTML = `<div class="view-head"><div><h2>Search Terms</h2></div></div><div class="panel">No search-term data.</div>`; return; }
+    const waste = s.top_waste.map(t => `<tr>
+        <td class="strong">${esc(t.term)}</td><td>${esc(t.match)}</td>
+        <td class="num" data-sort="${t.clicks}">${fmt.num(t.clicks)}</td>
+        <td class="num" data-sort="${t.cost}">${fmt.money(t.cost)}</td></tr>`).join("");
+    const conv = s.top_converting.map(t => `<tr>
+        <td class="strong">${esc(t.term)}</td>
+        <td class="num" data-sort="${t.clicks}">${fmt.num(t.clicks)}</td>
+        <td class="num" data-sort="${t.cost}">${fmt.money(t.cost)}</td>
+        <td class="num" data-sort="${t.conv}">${fmt.num(t.conv, 1)}</td>
+        <td class="num" data-sort="${t.cpa}">${fmt.money(t.cpa, 2)}</td></tr>`).join("");
+    el.innerHTML = `
+      <div class="view-head"><div><h2>Search Terms</h2>
+        <div class="muted">${fmt.num(s.total_terms)} terms · ${fmt.money(s.waste_total)} on zero-conversion terms</div></div></div>
+      <div class="panel"><h3>Top zero-conversion terms — negative-keyword candidates</h3><div class="tbl-wrap"><table class="sortable">
+        <thead><tr><th>Search term</th><th>Match</th><th class="num">Clicks</th><th class="num">Cost</th></tr></thead>
+        <tbody>${waste}</tbody></table></div></div>
+      <div class="panel"><h3>Top converting terms</h3><div class="tbl-wrap"><table class="sortable">
+        <thead><tr><th>Search term</th><th class="num">Clicks</th><th class="num">Cost</th><th class="num">Conv</th><th class="num">CPA</th></tr></thead>
+        <tbody>${conv}</tbody></table></div></div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+
   // ---- register renderers ----
   const REG = {
     "campaign-perf": ["Campaign Performance", renderCampaignPerf],
     "budget-pacing": ["Budget & Pacing", renderBudgetPacing],
     "geo-perf": ["Geo Performance", renderGeoPerf],
+    "qs-detail": ["Quality Score", renderQsDetail],
+    "search-terms": ["Search Terms", renderSearchTerms],
   };
   Object.keys(REG).forEach(v => { views[v] = REG[v][1]; labels[v] = REG[v][0]; });
 
@@ -128,7 +190,7 @@
   if (meta && Array.isArray(meta.views)) {
     const sidebar = document.getElementById("sidebar");
     let anchor = sidebar && sidebar.querySelector('.nav-item[data-view="trends"]');
-    ["campaign-perf", "budget-pacing", "geo-perf"].forEach(v => {
+    ["campaign-perf", "budget-pacing", "geo-perf", "qs-detail", "search-terms"].forEach(v => {
       if (meta.views.indexOf(v) < 0 || !anchor) return;
       const d = document.createElement("div");
       d.className = "nav-item"; d.dataset.view = v;

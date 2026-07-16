@@ -192,6 +192,69 @@ def _budget(engine, client_id, cm, config):
             "months": months, "latest": latest, "status": status}
 
 
+def _quality_score(engine, client_id):
+    """QS distribution, buckets, and top low-QS keywords from the Search Keyword + QS report."""
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT cost, clicks, row FROM raw_rows WHERE client_id=:c AND report_type='search_keyword_qs'"),
+            {"c": client_id}).all()
+    if not rows:
+        return None
+    dist = {i: [0, 0.0] for i in range(1, 11)}
+    qs_vals, kws = [], []
+    for cost, clicks, row in rows:
+        d = _asdict(row); cost = _num(cost); clicks = _num(clicks)
+        try:
+            q = int(float(d.get("quality_score")))
+        except (TypeError, ValueError):
+            continue
+        if 1 <= q <= 10:
+            dist[q][0] += 1; dist[q][1] += cost; qs_vals.append(q)
+            kws.append((d.get("search_keyword", ""), d.get("search_keyword_match_type", ""), q, cost, clicks))
+    if not qs_vals:
+        return None
+
+    def bucket(lo, hi):
+        return sum(dist[i][0] for i in range(lo, hi + 1)), round(sum(dist[i][1] for i in range(lo, hi + 1)), 2)
+    lk, lc = bucket(1, 4); mk, mc = bucket(5, 7); hk, hc = bucket(8, 10)
+    top_low = sorted([k for k in kws if k[2] <= 5], key=lambda x: -x[3])[:15]
+    return {
+        "avg_qs": round(sum(qs_vals) / len(qs_vals), 1),
+        "total_keywords": len(qs_vals),
+        "distribution": [{"qs": i, "keywords": dist[i][0], "cost": round(dist[i][1], 2)} for i in range(1, 11)],
+        "buckets": [{"label": "Low (1-4)", "keywords": lk, "cost": lc},
+                    {"label": "Mid (5-7)", "keywords": mk, "cost": mc},
+                    {"label": "High (8-10)", "keywords": hk, "cost": hc}],
+        "top_low": [{"keyword": k[0], "match": k[1], "qs": k[2], "cost": round(k[3], 2), "clicks": round(k[4])} for k in top_low],
+    }
+
+
+def _search_terms(engine, client_id):
+    """Top zero-conversion (waste) and top converting search terms."""
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT entity, clicks, cost, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='search_terms'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    waste, conv = [], []
+    for term, clicks, cost, conversions, row in rows:
+        cost = _num(cost); clicks = _num(clicks); cv = _num(conversions)
+        mt = _asdict(row).get("search_terms_match_type", "")
+        if cost > 0 and cv <= 0:
+            waste.append((term, mt, clicks, cost))
+        elif cv > 0:
+            conv.append((term, clicks, cost, cv))
+    waste.sort(key=lambda x: -x[3]); conv.sort(key=lambda x: -x[3])
+    return {
+        "total_terms": len(rows),
+        "waste_total": round(sum(x[3] for x in waste), 2),
+        "top_waste": [{"term": t, "match": m, "clicks": round(cl), "cost": round(co, 2)} for (t, m, cl, co) in waste[:20]],
+        "top_converting": [{"term": t, "clicks": round(cl), "cost": round(co, 2), "conv": round(cv, 1),
+                            "cpa": round(co / cv, 2) if cv else 0} for (t, cl, co, cv) in conv[:20]],
+    }
+
+
 def _to_overview_findings(findings):
     out = [{"topic": f["title"], "detail": f["magnitude"]}
            for f in sorted(findings, key=lambda x: SEV_ORDER.get(x["severity"], 9))
@@ -278,10 +341,16 @@ def build_bundle(client_id, engine=None):
     campaigns = _campaigns(engine, client_id, cm) if cm else None
     geo = _geo(engine, client_id)
     budget = _budget(engine, client_id, cm, config) if cm else None
+    qscore = _quality_score(engine, client_id)
+    search_terms = _search_terms(engine, client_id)
 
     view_list = ["overview", "trends", "campaign-perf", "budget-pacing"]
     if geo:
         view_list.append("geo-perf")
+    if qscore:
+        view_list.append("qs-detail")
+    if search_terms:
+        view_list.append("search-terms")
     view_list.append("recs")
 
     return {
@@ -303,4 +372,6 @@ def build_bundle(client_id, engine=None):
         "campaigns": campaigns,
         "geo_performance": geo,
         "budget_pacing": budget,
+        "quality_score": qscore,
+        "search_terms": search_terms,
     }

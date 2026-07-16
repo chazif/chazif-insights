@@ -435,31 +435,45 @@
 <script>
 (function () {
   var p = new URLSearchParams(location.search);
-  var client = p.get("client") || "mavis";
   var period = p.get("period") || "2026-03";
-  var url = window.BUNDLE_URL || ("/api/bundle?client=" + encodeURIComponent(client) + "&period=" + encodeURIComponent(period));
-  fetch(url)
-    .then(function (r) { if (!r.ok) throw new Error("bundle HTTP " + r.status); return r.json(); })
-    .then(function (d) {
-      window.__BUNDLE__ = d;
-      var s = document.createElement("script"); s.src = "app.js";
-      s.onload = function () {
-        var a = document.createElement("script"); a.src = "admin.js";
-        a.onload = function () {
-          var dv = document.createElement("script"); dv.src = "dashviews.js";
-          dv.onload = function () {
-            var pr = document.createElement("script"); pr.src = "profile.js"; document.body.appendChild(pr);
+
+  function boot(client) {
+    var url = window.BUNDLE_URL || ("/api/bundle?client=" + encodeURIComponent(client) + "&period=" + encodeURIComponent(period));
+    fetch(url)
+      .then(function (r) { if (!r.ok) throw new Error("bundle HTTP " + r.status); return r.json(); })
+      .then(function (d) {
+        window.__BUNDLE__ = d;
+        var s = document.createElement("script"); s.src = "app.js";
+        s.onload = function () {
+          var a = document.createElement("script"); a.src = "admin.js";
+          a.onload = function () {
+            var dv = document.createElement("script"); dv.src = "dashviews.js";
+            dv.onload = function () {
+              var pr = document.createElement("script"); pr.src = "profile.js"; document.body.appendChild(pr);
+            };
+            document.body.appendChild(dv);
           };
-          document.body.appendChild(dv);
+          document.body.appendChild(a);
         };
-        document.body.appendChild(a);
-      };
-      document.body.appendChild(s);
+        document.body.appendChild(s);
+      })
+      .catch(function (e) {
+        document.body.insertAdjacentHTML("beforeend",
+          "<pre style=\"padding:24px;font-family:ui-monospace,monospace;color:#b00\">Could not load data bundle: " + e.message + "</pre>");
+      });
+  }
+
+  var client = p.get("client");
+  if (client) { boot(client); return; }
+  // No client in the URL: open the most recently updated real client, else the Mavis demo.
+  fetch("/api/clients")
+    .then(function (r) { return r.json(); })
+    .then(function (list) {
+      var withData = (list || []).filter(function (c) { return c.reports_loaded > 0; });
+      withData.sort(function (a, b) { return String(b.last_upload || "").localeCompare(String(a.last_upload || "")); });
+      boot(withData.length ? withData[0].client_id : "mavis");
     })
-    .catch(function (e) {
-      document.body.insertAdjacentHTML("beforeend",
-        "<pre style=\"padding:24px;font-family:ui-monospace,monospace;color:#b00\">Could not load data bundle: " + e.message + "</pre>");
-    });
+    .catch(function () { boot("mavis"); });
 })();
 </script>
 </body>
