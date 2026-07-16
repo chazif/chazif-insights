@@ -77,26 +77,26 @@
     }
     const body = g.rows.map(r => `<tr>
         <td class="strong">${esc(r.location)}</td>
-        <td class="num" data-sort="${r.clicks}">${fmt.num(r.clicks)}</td>
+        <td class="num" data-sort="${r.cost}">${fmt.money(r.cost)}</td>
         <td class="num" data-sort="${r.impr}">${fmt.num(r.impr)}</td>
+        <td class="num" data-sort="${r.clicks}">${fmt.num(r.clicks)}</td>
         <td class="num" data-sort="${r.ctr}">${fmt.pct(r.ctr, 2)}</td>
         <td class="num" data-sort="${r.conv}">${fmt.num(r.conv, 1)}</td>
-        <td class="num" data-sort="${r.conv_value}">${fmt.money(r.conv_value)}</td>
-        <td class="num" data-sort="${r.cost}">${fmt.money(r.cost)}</td>
-        <td class="num" data-sort="${r.cpa}">${fmt.money(r.cpa, 2)}</td></tr>`).join("");
+        <td class="num" data-sort="${r.cpa}">${fmt.money(r.cpa, 2)}</td>
+        <td class="num" data-sort="${r.conv_value}">${fmt.money(r.conv_value)}</td></tr>`).join("");
     const t = g.totals || {};
     el.innerHTML = `
       <div class="view-head"><div><h2>Geo Performance</h2>
         <div class="muted">By ${esc(g.dimension)} · cost derived from CPA×conv (Geographic export carries no cost column)</div></div></div>
       <div class="panel"><div class="tbl-wrap"><table class="sortable">
-        <thead><tr><th>${esc(g.dimension)}</th><th class="num">Clicks</th><th class="num">Impr</th>
-          <th class="num">CTR</th><th class="num">Conv</th><th class="num">Conv Value</th>
-          <th class="num">Cost*</th><th class="num">CPA</th></tr></thead>
+        <thead><tr><th>${esc(g.dimension)}</th><th class="num">Cost*</th><th class="num">Impr</th>
+          <th class="num">Clicks</th><th class="num">CTR</th><th class="num">Conv</th>
+          <th class="num">Cost/conv.</th><th class="num">Conv Value</th></tr></thead>
         <tbody>${body}
           <tr class="strong"><td>Total</td>
-            <td class="num">${fmt.num(t.clicks)}</td><td class="num">${fmt.num(t.impr)}</td><td></td>
-            <td class="num">${fmt.num(t.conv, 1)}</td><td class="num">${fmt.money(t.conv_value)}</td>
-            <td class="num">${fmt.money(t.cost)}</td><td></td></tr>
+            <td class="num">${fmt.money(t.cost)}</td><td class="num">${fmt.num(t.impr)}</td>
+            <td class="num">${fmt.num(t.clicks)}</td><td></td>
+            <td class="num">${fmt.num(t.conv, 1)}</td><td></td><td class="num">${fmt.money(t.conv_value)}</td></tr>
         </tbody></table></div></div>`;
     if (typeof enableSortable === "function") enableSortable(el);
   }
