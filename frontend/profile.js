@@ -14,6 +14,8 @@
   if (!META) {                                  // pre-baked bundle -> keep original chrome
     var cp0 = document.querySelector(".client-pick");
     if (cp0) cp0.style.display = "none";
+    var dr0 = document.getElementById("dateRange");
+    if (dr0) dr0.style.display = "none";
     return;
   }
 
@@ -48,6 +50,52 @@
         location.href = "/?client=" + encodeURIComponent(this.value);
       });
     }).catch(function () {});
+  })();
+
+  // Date-range selector (top bar). Filters time-series views today; whole-window reports
+  // honour it once date-segmented data is uploaded.
+  (function () {
+    var host = document.getElementById("dateRange");
+    if (!host || !META.client_id) return;
+    var params = new URLSearchParams(location.search);
+    var curFrom = params.get("from") || "", curTo = params.get("to") || "";
+    var pad = function (n) { return (n < 10 ? "0" : "") + n; };
+    var ymd = function (d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); };
+    var now = new Date();
+    var monthsAgo = function (n) { var d = new Date(now); d.setMonth(d.getMonth() - n); return d; };
+    var presets = {
+      all: { label: "All time", from: "", to: "" },
+      m3: { label: "Last 3 months", from: ymd(monthsAgo(3)), to: ymd(now) },
+      m6: { label: "Last 6 months", from: ymd(monthsAgo(6)), to: ymd(now) },
+      m12: { label: "Last 12 months", from: ymd(monthsAgo(12)), to: ymd(now) },
+      ytd: { label: "Year to date", from: now.getFullYear() + "-01-01", to: ymd(now) },
+    };
+    var curKey = (!curFrom && !curTo) ? "all" : "custom";
+    for (var k in presets) { if (presets[k].from === curFrom && presets[k].to === curTo) { curKey = k; break; } }
+    var opts = Object.keys(presets).map(function (k) {
+      return '<option value="' + k + '"' + (k === curKey ? " selected" : "") + ">" + presets[k].label + "</option>";
+    }).join("") + '<option value="custom"' + (curKey === "custom" ? " selected" : "") + ">Custom…</option>";
+    host.innerHTML =
+      "<label>Dates</label><select id=\"drSel\">" + opts + "</select>" +
+      '<span id="drCustom" style="display:' + (curKey === "custom" ? "flex" : "none") + ';gap:6px;align-items:center">' +
+        '<input type="date" id="drFrom" value="' + curFrom + '"><input type="date" id="drTo" value="' + curTo + '">' +
+        '<button class="dr-apply" id="drApply">Apply</button></span>' +
+      '<span class="dr-info" title="The date range filters the time-series views (Overview, Monthly Trends, Campaign Performance, Budget & Pacing). Other reports show the full export window until date-segmented daily data is uploaded.">&#9432;</span>';
+    function go(from, to) {
+      try { sessionStorage.setItem("chz_nav", "1"); } catch (e) {}
+      var u = new URLSearchParams(location.search);
+      u.set("client", META.client_id);
+      if (from) u.set("from", from); else u.delete("from");
+      if (to) u.set("to", to); else u.delete("to");
+      location.search = u.toString();
+    }
+    document.getElementById("drSel").addEventListener("change", function () {
+      if (this.value === "custom") { document.getElementById("drCustom").style.display = "flex"; return; }
+      var pr = presets[this.value]; go(pr.from, pr.to);
+    });
+    document.getElementById("drApply").addEventListener("click", function () {
+      go(document.getElementById("drFrom").value, document.getElementById("drTo").value);
+    });
   })();
 
   // ---- single-brand: drop the brand filter (and keep it dropped across views) ----

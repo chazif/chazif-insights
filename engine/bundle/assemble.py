@@ -52,6 +52,12 @@ def _client_name(engine, client_id):
         return r[0] if r else client_id
 
 
+def _ym_bound(s):
+    """'2026-06' or '2026-06-15' -> (2026, 6); None if empty/unparseable."""
+    m = re.match(r"(\d{4})-(\d{2})", str(s or ""))
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
 def _latest_complete_month(engine, client_id):
     """From the export window_end, return the latest fully-covered month as
     {year, month, ym, full, abbr}, or None. A window ending mid-month means that
@@ -477,9 +483,12 @@ def _to_overview_findings(findings):
     return out[:6]
 
 
-def build_bundle(client_id, engine=None):
-    """Return the DATA bundle dict for a client, or None if there's no campaign data."""
+def build_bundle(client_id, engine=None, date_from=None, date_to=None):
+    """Return the DATA bundle dict for a client, or None if there's no campaign data.
+    date_from/date_to (YYYY-MM or YYYY-MM-DD) filter the month-grained series/KPIs; whole-window
+    reports (search terms, keywords, ads, geo, LP) are unaffected until date-segmented data lands."""
     engine = engine or get_engine()
+    rng_from, rng_to = _ym_bound(date_from), _ym_bound(date_to)
     with engine.connect() as c:
         has = c.execute(text("SELECT COUNT(*) FROM raw_rows WHERE client_id=:c AND report_type='campaign_performance'"),
                         {"c": client_id}).scalar()
@@ -498,10 +507,20 @@ def build_bundle(client_id, engine=None):
                 series.append((mk, float(cost or 0), float(clicks or 0), float(conv or 0)))
         series.sort(key=lambda x: (x[0][0], x[0][1]))
 
-        # keep only fully-covered months (drop the partial trailing export month)
+        # keep only fully-covered months (drop the partial trailing export month), then
+        # apply the requested date range at month granularity.
         cm = _latest_complete_month(engine, client_id)
-        if cm:
-            series = [s for s in series if (s[0][0], s[0][1]) <= (cm["year"], cm["month"])]
+        hi = (cm["year"], cm["month"]) if cm else None
+        if rng_to and (hi is None or rng_to < hi):
+            hi = rng_to
+        if hi:
+            series = [s for s in series if s[0][:2] <= hi]
+        if rng_from:
+            series = [s for s in series if s[0][:2] >= rng_from]
+        if series:                      # KPIs/campaigns use the latest month in the (filtered) series
+            ly, lm = series[-1][0][0], series[-1][0][1]
+            cm = {"year": ly, "month": lm, "ym": f"{ly}-{lm:02d}",
+                  "full": f"{FULL_MONTHS[lm-1]} {ly}", "abbr": f"{MABBR[lm-1]} {ly}"}
 
         total_trend = [{
             "Month": mk[2],
@@ -595,6 +614,12 @@ def build_bundle(client_id, engine=None):
             # listed here (workspace/admin tabs are always shown). Grows as later
             # increments populate more views.
             "views": view_list,
+            "date_range": {
+                "from": date_from, "to": date_to,
+                "applied": bool(rng_from or rng_to),
+                # views that honour the range today (month-grained); the rest are whole-window
+                "windowed_views": ["overview", "trends", "campaign-perf", "budget-pacing"],
+            },
             "generated_from": "warehouse",
         },
         "total_trend": total_trend,

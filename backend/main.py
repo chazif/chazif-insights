@@ -117,14 +117,15 @@ def inventory(client: str = Query(...)):
 
 # ---- bundle --------------------------------------------------------------
 @app.get("/api/bundle")
-def bundle(client: str = Query("mavis"), period: str = Query("2026-03")):
+def bundle(client: str = Query("mavis"), period: str = Query("2026-03"),
+           date_from: str = Query(None, alias="from"), date_to: str = Query(None, alias="to")):
     _safe_seg(client, period)
-    # Pre-baked bundle (e.g. the Mavis demo) wins if present.
+    # Pre-baked bundle (e.g. the Mavis demo) wins if present (ignores date range).
     path = CLIENTS / client / period / "bundle.json"
-    if path.is_file():
+    if path.is_file() and not (date_from or date_to):
         return FileResponse(path, media_type="application/json")
-    # Otherwise compute it from the warehouse.
-    computed = build_bundle(client, _engine)
+    # Otherwise compute it from the warehouse, honoring the date range.
+    computed = build_bundle(client, _engine, date_from=date_from, date_to=date_to)
     if computed is None:
         raise HTTPException(404, f"no data for client '{client}'")
     return JSONResponse(computed)
