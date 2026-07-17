@@ -220,6 +220,22 @@ def _budget(engine, client_id, cm, config):
 QS_BUCKETS = [("Poor (1-3)", 1, 3, "#dc2626"), ("Below Average (4-5)", 4, 5, "#f59e0b"),
               ("Average (6-7)", 6, 7, "#9CA3AF"), ("Strong (8-10)", 8, 10, "#2F7D4F")]
 
+QS_RATINGS = ["Above average", "Average", "Below average"]
+QS_COMPONENTS = [("exp_ctr", "Expected Click-Through Rate", "Expected CTR"),
+                 ("ad_relevance", "Ad Relevance", "Ad Relevance"),
+                 ("landing_page_exp", "Landing Page Experience", "LP Experience")]
+
+
+def _norm_rating(v):
+    s = (v or "").strip().lower()
+    if "above" in s:
+        return "Above average"
+    if "below" in s:
+        return "Below average"
+    if "average" in s:
+        return "Average"
+    return None
+
 
 def _quality_score(engine, client_id, cm=None, config=None):
     """Non-brand Quality Score overview from the Search Keyword + QS report: per-QS
@@ -295,6 +311,143 @@ def _quality_score(engine, client_id, cm=None, config=None):
         "per_qs": per_qs, "buckets": buckets,
         "totals": {"keywords": total_kw, "cost": round(total_cost, 2), "clicks": round(total_clicks),
                    "conv": round(total_conv, 1), **rates(total_cost, total_clicks, total_impr, total_conv)},
+    }
+
+
+def _qs_breakdown(engine, client_id, cm, config):
+    """QS Breakdown: per-component (eCTR / Ad Relevance / LP Experience) rating rollups,
+    the 27-way eCTR×LP×AdRel combination grid (avg CPC / spend / avg QS per cell), a
+    weak→QS7 savings estimate by brand, and the top QS≤6 optimization keywords. Non-brand."""
+    config = config or {}
+    brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
+    brand_label = (config.get("brand_terms") or [None])[0] or _client_name(engine, client_id)
+    catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
+             for c in (config.get("product_categories") or [])}
+
+    def categorize(kw):
+        n = kw.lower()
+        for cat, kws in catkw.items():
+            if cat.lower() in n or any(w in n for w in kws):
+                return cat[:1].upper() + cat[1:]
+        return None
+
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT cost, clicks, impressions, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='search_keyword_qs'"), {"c": client_id}).all()
+    if not rows:
+        return None
+
+    # optional keyword -> dominant region, from a region-segmented keyword export
+    kw_region = {}
+    with engine.connect() as c:
+        geo = c.execute(text("SELECT row, cost FROM raw_rows WHERE client_id=:c "
+                             "AND report_type='keyword_geo'"), {"c": client_id}).all()
+    if geo:
+        tmp = defaultdict(lambda: defaultdict(float))
+        for grow, gcost in geo:
+            d = _asdict(grow); kw = (d.get("search_keyword") or "").lower(); rg = _region_value(d)
+            if kw and rg:
+                tmp[kw][rg] += _num(gcost)
+        kw_region = {kw: max(rr.items(), key=lambda kv: kv[1])[0] for kw, rr in tmp.items()}
+
+    comp_agg = {ck: {r: [0, 0.0, 0.0, 0.0, 0.0] for r in QS_RATINGS} for ck, _, _ in QS_COMPONENTS}
+    grid = defaultdict(lambda: [0.0, 0.0, 0, 0.0])   # (ectr,lp,adrel) -> cost, clicks, kws, qs_sum
+    tot = [0, 0.0, 0.0, 0.0, 0.0]                     # kws, cost, clicks, impr, conv
+    weak = [0, 0.0, 0.0]                              # kws, cost, clicks at QS<=5
+    q7 = [0.0, 0.0]                                   # cost, clicks at QS7
+    below = {ck: 0 for ck, _, _ in QS_COMPONENTS}     # below-average count among weak keywords
+    kept = []
+
+    for cost, clicks, impr, conv, row in rows:
+        d = _asdict(row)
+        try:
+            q = int(float(d.get("quality_score")))
+        except (TypeError, ValueError):
+            q = None
+        kw = d.get("search_keyword", "") or ""
+        kwl = kw.lower(); camp = (d.get("campaign", "") or "").lower()
+        if brand_terms and (any(b in kwl for b in brand_terms) or any(b in camp for b in brand_terms)):
+            continue
+        cost = _num(cost); clicks = _num(clicks); impr = _num(impr); conv = _num(conv)
+        ectr = _norm_rating(d.get("exp_ctr")); adrel = _norm_rating(d.get("ad_relevance"))
+        lpexp = _norm_rating(d.get("landing_page_exp"))
+        tot[0] += 1; tot[1] += cost; tot[2] += clicks; tot[3] += impr; tot[4] += conv
+        for ck, _, _ in QS_COMPONENTS:
+            rr = _norm_rating(d.get(ck))
+            if rr:
+                a = comp_agg[ck][rr]; a[0] += 1; a[1] += cost; a[2] += clicks; a[3] += impr; a[4] += conv
+        if ectr and lpexp and adrel and q:
+            g = grid[(ectr, lpexp, adrel)]; g[0] += cost; g[1] += clicks; g[2] += 1; g[3] += q
+        if q is not None and q <= 5:
+            weak[0] += 1; weak[1] += cost; weak[2] += clicks
+            for ck, _, _ in QS_COMPONENTS:
+                if _norm_rating(d.get(ck)) == "Below average":
+                    below[ck] += 1
+        if q == 7:
+            q7[0] += cost; q7[1] += clicks
+        if q is not None and q <= 6:
+            kept.append({"keyword": kw, "brand": brand_label, "region": kw_region.get(kwl, "—"),
+                         "category": categorize(kw) or "—", "qs": q, "spend": cost, "clicks": clicks,
+                         "cpc": round(cost / clicks, 2) if clicks else 0,
+                         "ectr": ectr or "—", "ad_rel": adrel or "—", "lp_exp": lpexp or "—", "conv": conv})
+    if not tot[0]:
+        return None
+    total_cost, total_clicks = tot[1], tot[2]
+    avg_cpc = total_cost / total_clicks if total_clicks else 0
+
+    def rates(kws, cost, clicks, impr, conv, denom):
+        return {"keywords": kws, "kw_share": round(kws / denom, 4) if denom else 0, "spend": round(cost, 2),
+                "cpc": round(cost / clicks, 2) if clicks else 0, "ctr": round(clicks / impr, 4) if impr else 0,
+                "conv_rate": round(conv / clicks, 4) if clicks else 0, "cpa": round(cost / conv, 2) if conv else 0,
+                "conv": round(conv, 1),
+                "cpc_vs_avg": round(((cost / clicks) - avg_cpc) / avg_cpc, 4) if clicks and avg_cpc else None}
+    components = []
+    for i, (ck, lbl, _) in enumerate(QS_COMPONENTS, 1):
+        denom = sum(comp_agg[ck][r][0] for r in QS_RATINGS)   # % of KWs sums to 100% within a component
+        components.append({"key": ck, "label": lbl, "num": i,
+                           "ratings": [dict(rating=r, **rates(*comp_agg[ck][r], denom)) for r in QS_RATINGS]})
+
+    ectr_spend = {r: 0.0 for r in QS_RATINGS}
+    for (ectr, _lp, _ad), (cost, _cl, _k, _q) in grid.items():
+        ectr_spend[ectr] += cost
+    grid_cells = []
+    for ectr in QS_RATINGS:
+        for lpexp in QS_RATINGS:
+            for adrel in QS_RATINGS:
+                g = grid.get((ectr, lpexp, adrel))
+                if g and g[2]:
+                    grid_cells.append({"ectr": ectr, "lp_exp": lpexp, "ad_rel": adrel,
+                                       "cpc": round(g[0] / g[1], 2) if g[1] else 0, "spend": round(g[0], 2),
+                                       "qs": round(g[3] / g[2], 1), "keywords": g[2]})
+                else:
+                    grid_cells.append({"ectr": ectr, "lp_exp": lpexp, "ad_rel": adrel,
+                                       "cpc": 0, "spend": 0, "qs": 0, "keywords": 0})
+
+    cpc_cur = weak[1] / weak[2] if weak[2] else 0
+    cpc_tgt = q7[0] / q7[1] if q7[1] else 0
+    savings = round(weak[2] * max(0.0, cpc_cur - cpc_tgt), 2)
+    gap = None
+    if weak[0] and any(below.values()):
+        gk = max(below, key=below.get)
+        short = {c[0]: c[2] for c in QS_COMPONENTS}[gk]
+        gap = f"{short} ({round(below[gk] / weak[0] * 100)}% below avg)"
+    savings_rows = [{"brand": brand_label, "kws_weak": weak[0], "spend_weak": round(weak[1], 2),
+                     "cpc_current": round(cpc_cur, 2), "cpc_target": round(cpc_tgt, 2), "savings": savings,
+                     "pct_brand_spend": round(savings / total_cost, 4) if total_cost else 0, "primary_gap": gap or "—"}]
+
+    kept.sort(key=lambda r: -r["spend"])
+    opt_rows = [dict(r, spend=round(r["spend"], 2), clicks=round(r["clicks"]), conv=round(r["conv"], 1))
+                for r in kept[:100]]
+    cats = sorted({r["category"] for r in kept if r["category"] != "—"})
+    regs = sorted({r["region"] for r in kept if r["region"] != "—"})
+    return {
+        "month": cm["abbr"] if cm else "", "non_brand": bool(brand_terms), "avg_cpc": round(avg_cpc, 2),
+        "components": components, "grid": grid_cells,
+        "grid_meta": {"ectr_spend_share": {r: round(ectr_spend[r] / total_cost, 4) if total_cost else 0 for r in QS_RATINGS}},
+        "savings_by_brand": savings_rows,
+        "opt_keywords": {"total": len(kept), "shown": len(opt_rows), "categories": cats,
+                         "regions": regs, "has_region": bool(regs), "rows": opt_rows},
     }
 
 
@@ -846,6 +999,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
     geo = _geo(engine, client_id)
     budget = _budget(engine, client_id, cm, config) if cm else None
     qscore = _quality_score(engine, client_id, cm, config)
+    qs_break = _qs_breakdown(engine, client_id, cm, config)
     keyword = _keyword_section(engine, client_id)
     kw_regions = _keyword_regions(engine, client_id, config)
     st = _search_terms_section(engine, client_id, config)
@@ -868,7 +1022,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
         view_list.append("kw-deep-dive")
     if qscore:
         view_list.append("qs-detail")
-    if keyword:
+    if qs_break or keyword:
         view_list.append("qs-breakdown")
     if st:
         view_list += ["st-intent", "st-relevant"]
@@ -913,6 +1067,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
         "budget_pacing": budget,
         "quality_score": qscore,
         "keyword_section": keyword,
+        "qs_breakdown_section": qs_break,
         "keyword_regions_section": kw_regions,
         "search_terms_section": st,
         "ads_section": ads,
