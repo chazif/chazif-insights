@@ -353,7 +353,7 @@
     </div>
     <h2>Sign in</h2>
     <p class="muted" id="gateSub">Client portal · Mavis Tire · March 2026 report</p>
-    <form id="gateForm" onsubmit="event.preventDefault(); unlock();">
+    <form id="gateForm" onsubmit="event.preventDefault(); try{sessionStorage.setItem('chz_authed','1')}catch(e){}; unlock();">
       <div class="gate-field">
         <label for="gEmail">Email</label>
         <input id="gEmail" type="email" value="ci@chazif.com" autocomplete="email" />
@@ -455,6 +455,13 @@
 
 <script>
 (function () {
+  // Already signed in this session? Hide the gate immediately so reloads
+  // (date/client changes) don't flash the login screen.
+  try {
+    if (sessionStorage.getItem("chz_authed") === "1") {
+      var g = document.getElementById("gate"); if (g) g.classList.add("hidden");
+    }
+  } catch (e) {}
   var p = new URLSearchParams(location.search);
   var period = p.get("period") || "2026-03";
   var qsFrom = p.get("from"), qsTo = p.get("to");
