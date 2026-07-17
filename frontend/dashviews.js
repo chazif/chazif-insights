@@ -343,14 +343,18 @@
       .kwd-ctl label.lbl{display:block;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--grey,#888);margin-bottom:5px}`;
     document.head.appendChild(s);
   })();
-  function kwHeat(v, max) {
-    if (!(v > 0) || !(max > 0)) return "";
-    const t = Math.min(1, Math.sqrt(v / max));
+  // t in [0,1] -> green(low) → yellow(mid) → red(high) background style
+  function heatT(t) {
+    t = Math.max(0, Math.min(1, t));
     const stops = [[226, 240, 217], [255, 229, 153], [229, 115, 115]];
     const seg = t < 0.5 ? 0 : 1, u = t < 0.5 ? t / 0.5 : (t - 0.5) / 0.5;
     const a = stops[seg], b = stops[seg + 1];
     const c = a.map((x, i) => Math.round(x + (b[i] - x) * u));
     return `background:rgb(${c[0]},${c[1]},${c[2]})`;
+  }
+  function kwHeat(v, max) {
+    if (!(v > 0) || !(max > 0)) return "";
+    return heatT(Math.sqrt(v / max));
   }
   function renderKwHeatmap(el, kr) {
     const branded = KWD_TYPE === "branded";
@@ -434,20 +438,152 @@
         <tbody>${rows}</tbody></table></div></div>`;
     if (typeof enableSortable === "function") enableSortable(el);
   }
+  let QSB_METRIC = "cpc", QSB_CAT = "all", QSB_REG = "all", QSB_FILTER = "";
+  const QSB_RATINGS = ["Above average", "Average", "Below average"];
+  const qsPill = r => {
+    const st = r === "Above average" ? "background:#DCFCE7;color:#166534"
+      : r === "Below average" ? "background:#FCE7CE;color:#9A5B1E"
+      : r === "Average" ? "background:#FEF3C7;color:#92660A" : "background:#eee;color:#666";
+    return `<span class="tag" style="${st};font-size:10px">${esc(r)}</span>`;
+  };
   function renderQsBreakdown(el) {
-    el.className = "view"; const k = (typeof DATA !== "undefined" && DATA.keyword_section) || null;
-    if (!k) { el.innerHTML = stHead("QS Breakdown", "") + `<div class="panel">No data.</div>`; return; }
-    const panels = Object.keys(k.components).map(name => {
-      const rows = k.components[name].map(r => {
-        const cls = r.rating === "Above average" ? "up" : r.rating === "Below average" ? "dn" : "";
-        return `<tr><td class="chg ${cls}">${esc(r.rating)}</td><td class="num">${fmt.num(r.keywords)}</td><td class="num">${fmt.money(r.cost)}</td></tr>`;
-      }).join("");
-      return `<div class="panel"><h3>${esc(name)}</h3><div class="tbl-wrap"><table>
-        <thead><tr><th>Rating</th><th class="num">Keywords</th><th class="num">Cost</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
-    }).join("");
-    const banner = k.below_ctr_spend ? `<div class="panel" style="background:#FCFEF0"><strong>Modeled savings:</strong> ${fmt.money(k.below_ctr_spend)} runs on Below-average expected CTR → ~${fmt.money(k.savings_estimate)} modeled CPC penalty. Rework these keywords to cut it.</div>` : "";
-    el.innerHTML = stHead("QS Breakdown", "Quality Score components across keywords") + banner +
-      `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px">${panels}</div>`;
+    el.className = "view";
+    const q = (typeof DATA !== "undefined" && DATA.qs_breakdown_section) || null;
+    if (!q) { el.innerHTML = stHead("Quality Score Breakdown", "") + `<div class="panel">No Quality Score component data.</div>`; return; }
+    if (!document.getElementById("qsbStyle")) {
+      const s = document.createElement("style"); s.id = "qsbStyle";
+      s.textContent = `
+        .qsb-grouphead td{background:var(--ink,#1a1a1a);color:#fff;font-weight:700;font-size:11px;letter-spacing:.04em;padding:9px 12px;text-transform:uppercase}
+        .qsb-badge{display:inline-block;background:var(--lime,#CFFF04);color:var(--ink,#1a1a1a);font-weight:800;border-radius:4px;padding:1px 7px;margin-right:8px}
+        .qsb-grid{border-collapse:separate;border-spacing:0;width:100%;font-size:12.5px}
+        .qsb-grid th,.qsb-grid td{padding:9px 12px;border-bottom:1px solid var(--line,#eee)}
+        .qsb-grid thead th.qsb-hd{background:var(--ink,#1a1a1a);color:#fff;font-size:11px;letter-spacing:.03em;text-transform:uppercase}
+        .qsb-grid td.qsb-ectr{vertical-align:middle;background:#FAFAF7;border-right:2px solid var(--line,#eee)}
+        .qsb-grid td.qsb-cell{text-align:center;font-variant-numeric:tabular-nums}`;
+      document.head.appendChild(s);
+    }
+    const scope = q.non_brand ? "non-brand" : "";
+    const vsAvg = v => v == null ? "—" : `<span class="chg ${v <= 0 ? "up" : "dn"}">${(v >= 0 ? "+" : "") + (v * 100).toFixed(1)}%</span>`;
+
+    // ---- Section 1: component analysis ----
+    const compTable = `
+      <div class="panel">
+        <h3>Quality Score Component Analysis <span class="muted" style="font-weight:400">· portfolio total</span></h3>
+        <div class="muted" style="margin-bottom:10px">All three Quality Score components stacked in one table. Each component breaks keywords into Above / Average / Below average ratings with performance context.</div>
+        <div class="tbl-wrap"><table class="sortable">
+          <thead><tr><th>Rating</th><th class="num">Keywords</th><th class="num">% of KWs</th><th class="num">Spend</th>
+            <th class="num">Avg CPC</th><th class="num">CTR</th><th class="num">Conv Rate</th><th class="num">CPA</th>
+            <th class="num">Conversions</th><th class="num">CPC vs Avg</th></tr></thead>
+          <tbody>${q.components.map(c => `
+            <tr class="qsb-grouphead"><td colspan="10"><span class="qsb-badge">${c.num}</span>${esc(c.label)}</td></tr>
+            ${c.ratings.map(r => `<tr>
+              <td>${qsPill(r.rating)}</td>
+              <td class="num">${fmt.num(r.keywords)}</td><td class="num">${fmt.pct(r.kw_share, 1)}</td>
+              <td class="num">${fmt.money(r.spend)}</td><td class="num">${fmt.money(r.cpc, 2)}</td>
+              <td class="num">${fmt.pct(r.ctr, 2)}</td><td class="num">${fmt.pct(r.conv_rate, 2)}</td>
+              <td class="num">${r.cpa ? fmt.money(r.cpa, 2) : "—"}</td><td class="num">${fmt.num(r.conv, 0)}</td>
+              <td class="num">${vsAvg(r.cpc_vs_avg)}</td></tr>`).join("")}`).join("")}
+          </tbody></table></div>
+      </div>`;
+
+    // ---- Section 2: 27-combination grid ----
+    const G = {};
+    q.grid.forEach(c => { (G[c.ectr] = G[c.ectr] || {}); (G[c.ectr][c.lp_exp] = G[c.ectr][c.lp_exp] || {}); G[c.ectr][c.lp_exp][c.ad_rel] = c; });
+    const mk = QSB_METRIC, higherGood = mk === "qs";
+    const gvals = q.grid.filter(c => c.keywords > 0).map(c => c[mk]);
+    const mn = gvals.length ? Math.min(...gvals) : 0, mx = gvals.length ? Math.max(...gvals) : 0;
+    const fmtCell = v => mk === "cpc" ? fmt.money(v, 2) : mk === "spend" ? fmt.money(v) : v.toFixed(1);
+    const cellHtml = (ectr, lp, ad) => {
+      const c = G[ectr] && G[ectr][lp] && G[ectr][lp][ad];
+      if (!c || !c.keywords) return `<td class="qsb-cell" style="color:#cbd0c7">·</td>`;
+      const v = c[mk], t = mx > mn ? (higherGood ? 1 - (v - mn) / (mx - mn) : (v - mn) / (mx - mn)) : 0.5;
+      return `<td class="qsb-cell" style="${heatT(t)}" title="${c.keywords} kw">${fmtCell(v)}</td>`;
+    };
+    const seg = (v, l) => `<button class="seg-pill ${QSB_METRIC === v ? "active" : ""}" data-qsb="${v}">${l}</button>`;
+    const gridBody = QSB_RATINGS.map(ectr => QSB_RATINGS.map((lp, li) => `<tr>
+        ${li === 0 ? `<td rowspan="3" class="qsb-ectr"><strong>${esc(ectr)}</strong><div class="muted" style="font-size:11px">${fmt.pct(q.grid_meta.ectr_spend_share[ectr], 1)} of spend</div></td>` : ""}
+        <td>${qsPill(lp)}</td>${QSB_RATINGS.map(ad => cellHtml(ectr, lp, ad)).join("")}</tr>`).join("")).join("");
+    const gridPanel = `
+      <div class="panel">
+        <h3>All three components: Expected CTR × LP Experience × Ad Relevance</h3>
+        <div class="muted" style="margin-bottom:12px">All 27 component combinations. Row-pairs group by Expected CTR; within each group rows are LP Experience and columns are Ad Relevance. Toggle the metric to see avg CPC, spend volume, or the resulting average Quality Score.</div>
+        <div class="seg-group" style="margin-bottom:12px">${seg("cpc", "Avg CPC")}${seg("spend", "Spend")}${seg("qs", "Avg Quality Score")}</div>
+        <div class="tbl-wrap"><table class="qsb-grid">
+          <thead>
+            <tr><th class="qsb-hd">Expected CTR</th><th class="qsb-hd">LP Experience</th><th class="qsb-hd" colspan="3" style="text-align:center">Ad Relevance →</th></tr>
+            <tr><th></th><th></th>${QSB_RATINGS.map(ad => `<th style="text-align:center">${qsPill(ad)}</th>`).join("")}</tr>
+          </thead>
+          <tbody>${gridBody}</tbody></table></div>
+        <div class="muted" style="text-align:right;margin-top:8px">${higherGood ? "Higher = better" : "Higher = more expensive"} &nbsp; <span class="tag" style="background:#DCFCE7">Good</span> <span class="tag" style="background:#FEF3C7">Mid</span> <span class="tag" style="background:#F3C9BF">Costly</span></div>
+      </div>`;
+
+    // ---- Section 3: savings by brand ----
+    const sv = q.savings_by_brand;
+    const svT = sv.reduce((a, r) => { a.kws += r.kws_weak; a.sp += r.spend_weak; a.sav += r.savings; return a; }, { kws: 0, sp: 0, sav: 0 });
+    const savPanel = `
+      <div class="panel">
+        <h3>Estimated monthly savings by brand <span class="muted" style="font-weight:400">if QS ≤ 5 → QS 7</span></h3>
+        <div class="tbl-wrap"><table class="sortable">
+          <thead><tr><th>Brand</th><th class="num">KWs at QS ≤ 5</th><th class="num">Spend at QS ≤ 5</th>
+            <th class="num">Current CPC</th><th class="num">Target CPC (QS 7)</th><th class="num">Est. Savings</th>
+            <th class="num">% of Brand Spend</th><th>Primary Component Gap</th></tr></thead>
+          <tbody>${sv.map(r => `<tr>
+            <td class="strong">${esc(r.brand)}</td><td class="num">${fmt.num(r.kws_weak)}</td>
+            <td class="num">${fmt.money(r.spend_weak)}</td><td class="num">${fmt.money(r.cpc_current, 2)}</td>
+            <td class="num">${fmt.money(r.cpc_target, 2)}</td><td class="num">${fmt.money(r.savings)}</td>
+            <td class="num">${fmt.pct(r.pct_brand_spend, 2)}</td><td>${esc(r.primary_gap)}</td></tr>`).join("")}
+            <tr class="strong"><td>Total</td><td class="num">${fmt.num(svT.kws)}</td><td class="num">${fmt.money(svT.sp)}</td>
+              <td></td><td></td><td class="num">${fmt.money(svT.sav)}</td><td></td><td></td></tr>
+          </tbody></table></div>
+      </div>`;
+
+    // ---- Section 4: top optimization keywords ----
+    const ok = q.opt_keywords;
+    const optRow = r => `<tr>
+        <td class="strong">${esc(r.keyword)}</td><td>${esc(r.brand)}</td>
+        <td>${r.region === "—" ? '<span class="muted">—</span>' : esc(r.region)}</td>
+        <td>${r.category === "—" ? '<span class="muted">—</span>' : `<span class="tag info">${esc(r.category)}</span>`}</td>
+        <td class="num">${r.qs}</td><td class="num">${fmt.money(r.spend)}</td><td class="num">${fmt.money(r.cpc, 2)}</td>
+        <td class="num">${fmt.num(r.clicks)}</td><td>${qsPill(r.ectr)}</td><td>${qsPill(r.ad_rel)}</td>
+        <td>${qsPill(r.lp_exp)}</td><td class="num">${fmt.num(r.conv, 1)}</td></tr>`;
+    const filterRows = () => {
+      let rws = ok.rows;
+      if (QSB_CAT !== "all") rws = rws.filter(r => r.category === QSB_CAT);
+      if (QSB_REG !== "all") rws = rws.filter(r => r.region === QSB_REG);
+      if (QSB_FILTER) { const f = QSB_FILTER.toLowerCase(); rws = rws.filter(r => (r.keyword + " " + r.region + " " + r.category).toLowerCase().indexOf(f) >= 0); }
+      return rws;
+    };
+    const shown = filterRows();
+    const catOpts = ['<option value="all">All categories</option>'].concat(ok.categories.map(c => `<option value="${esc(c)}"${QSB_CAT === c ? " selected" : ""}>${esc(c)}</option>`)).join("");
+    const regOpts = ['<option value="all">All regions</option>'].concat(ok.regions.map(c => `<option value="${esc(c)}"${QSB_REG === c ? " selected" : ""}>${esc(c)}</option>`)).join("");
+    const optPanel = `
+      <div class="panel">
+        <h3>Top optimization keywords <span class="muted" style="font-weight:400">QS ≤ 6, sorted by spend</span></h3>
+        <div class="toolbar">
+          <input type="text" id="qsbFilter" placeholder="Filter keyword, region, category…" value="${esc(QSB_FILTER)}" style="min-width:240px"/>
+          <label>Category:</label><select id="qsbCat">${catOpts}</select>
+          ${ok.has_region ? `<label>Region:</label><select id="qsbReg">${regOpts}</select>` : ""}
+          <span class="muted" id="qsbCount" style="margin-left:auto">Showing ${fmt.num(shown.length)} of ${fmt.num(ok.total)}${ok.total > ok.shown ? ` · top ${ok.shown} loaded` : ""}</span>
+        </div>
+        <div class="tbl-wrap"><table class="sortable">
+          <thead><tr><th>Keyword</th><th>Brand</th><th>Region</th><th>Category</th><th class="num">QS</th>
+            <th class="num">Spend</th><th class="num">CPC</th><th class="num">Clicks</th><th>eCTR</th><th>Ad Rel</th><th>LP Exp</th><th class="num">Conv</th></tr></thead>
+          <tbody id="qsbOptBody">${shown.map(optRow).join("")}</tbody></table></div>
+      </div>`;
+
+    el.innerHTML = stHead("Quality Score Breakdown", `Component-level ratings (eCTR, Ad Relevance, LP Experience) and the top optimization opportunities${scope ? " · " + scope + " keywords" : ""}`) +
+      compTable + gridPanel + savPanel + optPanel;
+
+    el.querySelectorAll("[data-qsb]").forEach(b => b.addEventListener("click", () => { QSB_METRIC = b.dataset.qsb; setView("qs-breakdown", { preserveScroll: true }); }));
+    const cf = el.querySelector("#qsbCat"); if (cf) cf.addEventListener("change", () => { QSB_CAT = cf.value; setView("qs-breakdown", { preserveScroll: true }); });
+    const rf = el.querySelector("#qsbReg"); if (rf) rf.addEventListener("change", () => { QSB_REG = rf.value; setView("qs-breakdown", { preserveScroll: true }); });
+    const tf = el.querySelector("#qsbFilter");
+    if (tf) tf.addEventListener("input", () => {                     // live filter without losing focus
+      QSB_FILTER = tf.value; const rws = filterRows();
+      const body = el.querySelector("#qsbOptBody"); if (body) body.innerHTML = rws.map(optRow).join("");
+      const cnt = el.querySelector("#qsbCount"); if (cnt) cnt.textContent = `Showing ${fmt.num(rws.length)} of ${fmt.num(ok.total)}${ok.total > ok.shown ? ` · top ${ok.shown} loaded` : ""}`;
+    });
+    if (typeof enableSortable === "function") enableSortable(el);
   }
 
   // ---------- Ad Copy section ----------
