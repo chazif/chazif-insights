@@ -18,9 +18,15 @@ CORE_METRICS = {
     "conv_value": "conv_value",
 }
 
+# region/location column slugs a Google Ads report may carry when segmented by
+# geography (Report Editor "Segment > Geographic" or a Location column).
+GEO_SLUGS = ("state_matched", "region", "region_user_location", "region_matched_location",
+             "state", "metro", "metro_area", "city", "most_specific_location", "county")
+
 # report_type -> (entity column slug, date/grain column slug or None)
 ENTITY_COL = {
     "search_terms": "search_term",
+    "keyword_geo": "search_keyword",
     "search_keyword_qs": "search_keyword",
     "ad_group_performance": "ad_group",
     "campaign_performance": "campaign",
@@ -116,6 +122,10 @@ def parse_window(raw: str):
 
 def detect_report(header_slugs):
     cols = set(header_slugs)
+    # A keyword report segmented by geography carries BOTH a keyword column and a
+    # region column -> its own type, checked before the plain keyword-QS rule.
+    if "search_keyword" in cols and (cols & set(GEO_SLUGS)):
+        return "keyword_geo"
     for needle, rtype in _DETECT:
         if needle in cols:
             return rtype
