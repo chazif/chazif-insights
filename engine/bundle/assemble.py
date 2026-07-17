@@ -109,6 +109,13 @@ def _prior_month(cm):
     return {"full": f"{FULL_MONTHS[pm-1]} {py}", "abbr": f"{MABBR[pm-1]} {py}"}
 
 
+def _yoy_prior(cm):
+    """Same month, prior year — the YoY comparison period."""
+    py = cm["year"] - 1
+    return {"year": py, "month": cm["month"],
+            "full": f"{FULL_MONTHS[cm['month']-1]} {py}", "abbr": f"{MABBR[cm['month']-1]} {py}"}
+
+
 def _campaigns(engine, client_id, cm):
     """Per-campaign snapshot for the latest complete month + month-over-month deltas."""
     prior = _prior_month(cm)
@@ -390,45 +397,74 @@ def _lp_categories(lps, product_categories):
     return out if any(not c["category"].startswith("Other") for c in out) else None
 
 
-def _nb_categories(engine, client_id, config):
-    """Non-brand keyword spend bucketed by product category (keywords matched to the
-    configured categories, brand terms excluded). Single-period — the export carries no
-    prior-year column, so this is the current window, not a YoY. Returns None if no
-    categories are configured or nothing buckets to a real category."""
-    cats = config.get("product_categories") or []
-    if not cats:
+def _nb_category_of(name, catkw, brand_terms):
+    """Bucket a campaign into a non-brand category from its name, mirroring how the
+    reference groups by campaign structure. Returns None for brand campaigns (excluded)."""
+    n = (name or "").lower()
+    if "brand defense" in n or "| brand" in n or (brand_terms and any(bt in n for bt in brand_terms)):
+        return None  # brand campaign -> not "non-brand"
+    for cat, kws in catkw.items():                 # product category named in the campaign
+        if cat.lower() in n or any(w in n for w in kws):
+            return cat[:1].upper() + cat[1:]
+    if "pmax" in n or "performance max" in n:
+        return "PMax"
+    if "conquest" in n or "competitor" in n:
+        return "Conquest"
+    if "non-brand" in n or "nonbrand" in n or "non brand" in n:
+        return "Non-Brand Search"
+    return "Other Non-Brand"
+
+
+def _nb_categories(engine, client_id, cm, config):
+    """YoY non-brand spend/conversions by category, bucketed from campaign structure
+    (the date-segmented source), latest complete month vs same month prior year — with a
+    prior-calendar-month fallback when the account has under a year of history, matching
+    the KPI logic. Brand campaigns are excluded. None if there is no non-brand data."""
+    if not cm:
         return None
+    catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
+             for c in (config.get("product_categories") or [])}
     brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
-    catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4] for c in cats}
-    with engine.connect() as c:
-        rows = c.execute(text(
-            "SELECT cost, clicks, conversions, row FROM raw_rows "
-            "WHERE client_id=:c AND report_type='search_keyword_qs'"), {"c": client_id}).all()
-    if not rows:
+
+    def month_agg(full_label):
+        agg = defaultdict(lambda: [0.0, 0.0])  # spend, conv
+        with engine.connect() as c:
+            for camp, cost, conv in c.execute(text(
+                "SELECT campaign, cost, conversions FROM raw_rows WHERE client_id=:c "
+                "AND report_type='campaign_performance' AND date=:d"),
+                {"c": client_id, "d": full_label}):
+                cat = _nb_category_of(camp, catkw, brand_terms)
+                if cat is None:
+                    continue
+                a = agg[cat]; a[0] += _num(cost); a[1] += _num(conv)
+        return agg
+
+    prior = _yoy_prior(cm)
+    cur_agg, pri_agg = month_agg(cm["full"]), month_agg(prior["full"])
+    if not cur_agg and not pri_agg:
         return None
-    grid = defaultdict(lambda: [0.0, 0.0, 0.0, 0])  # cost, clicks, conv, keywords
-    for cost, clicks, conv, row in rows:
-        kw = (_asdict(row).get("search_keyword", "") or "").lower()
-        if brand_terms and any(bt in kw for bt in brand_terms):
-            continue  # brand keyword -> not "non-brand"
-        matched = None
-        for cat, kws in catkw.items():
-            if cat.lower() in kw or any(w in kw for w in kws):
-                matched = cat
-                break
-        g = grid[matched or "Other / uncategorized"]
-        g[0] += _num(cost); g[1] += _num(clicks); g[2] += _num(conv); g[3] += 1
-    out = [{"category": cat, "cost": round(g[0], 2), "clicks": round(g[1]),
-            "conv": round(g[2], 1), "keywords": g[3],
-            "cpa": round(g[0] / g[2], 2) if g[2] else 0}
-           for cat, g in sorted(grid.items(), key=lambda kv: -kv[1][0])]
-    if not any(not r["category"].startswith("Other") for r in out):
-        return None
-    total = sum(r["cost"] for r in out)
-    for r in out:
-        r["share"] = round(r["cost"] / total, 4) if total else 0
-    return {"rows": out, "total_cost": round(total, 2),
-            "total_conv": round(sum(r["conv"] for r in out), 1)}
+    if not pri_agg:                                # < 1yr of history -> compare prior month
+        prior = _prior_month(cm)
+        pri_agg = month_agg(prior["full"])
+
+    def chg(cur, prev):
+        return round((cur - prev) / prev, 4) if prev else None
+
+    def make(cat, cs, ccv, ps, pcv):
+        ccpa = cs / ccv if ccv else 0
+        pcpa = ps / pcv if pcv else 0
+        return {"category": cat,
+                "spend_prior": round(ps, 2), "spend_cur": round(cs, 2), "spend_chg": chg(cs, ps),
+                "conv_prior": round(pcv, 1), "conv_cur": round(ccv, 1), "conv_chg": chg(ccv, pcv),
+                "cpa_prior": round(pcpa, 2), "cpa_cur": round(ccpa, 2), "cpa_chg": chg(ccpa, pcpa)}
+
+    rows = [make(cat, *cur_agg.get(cat, [0.0, 0.0]), *pri_agg.get(cat, [0.0, 0.0]))
+            for cat in sorted(set(cur_agg) | set(pri_agg),
+                              key=lambda k: -cur_agg.get(k, [0.0])[0])]
+    tcs = sum(r["spend_cur"] for r in rows); tps = sum(r["spend_prior"] for r in rows)
+    tcc = sum(r["conv_cur"] for r in rows); tpc = sum(r["conv_prior"] for r in rows)
+    totals = make("Non-Brand Total", tcs, tcc, tps, tpc)
+    return {"prior_label": prior["abbr"], "cur_label": cm["abbr"], "rows": rows, "totals": totals}
 
 
 def _landing_pages(engine, client_id, config):
@@ -621,10 +657,10 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
     st = _search_terms_section(engine, client_id, config)
     ads = _ads_section(engine, client_id)
     lps = _landing_pages(engine, client_id, config)
-    nb_cats = _nb_categories(engine, client_id, config)
+    nb_cats = _nb_categories(engine, client_id, cm, config) if cm else None
 
     # Performance section — mirrors the reference nav order (Overview, Monthly Trends,
-    # NB Categories, Regions, Campaign, Budget). NB Categories needs product categories;
+    # NB Categories, Regions, Campaign, Budget). NB Categories is a campaign-derived YoY;
     # Regions reuses the geographic data. All Brands / Brand Detail are multi-brand only
     # and never populate for a single-brand account, so they are not listed here.
     view_list = ["overview", "trends"]
