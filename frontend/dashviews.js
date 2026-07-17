@@ -9,6 +9,9 @@
     const cls = v >= 0 ? "up" : "dn";
     return `<td class="num chg ${cls}">${(v >= 0 ? "+" : "") + (v * 100).toFixed(0)}%</td>`;
   };
+  // YoY % change spans — up-is-good (spend/conv) and down-is-good (CPA, inverted coloring)
+  const yoyUp = v => v == null ? '<span class="muted">New</span>' : `<span class="chg ${v >= 0 ? "up" : "dn"}">${(v >= 0 ? "+" : "") + (v * 100).toFixed(1)}%</span>`;
+  const yoyDn = v => v == null ? '<span class="muted">—</span>' : `<span class="chg ${v <= 0 ? "up" : "dn"}">${(v >= 0 ? "+" : "") + (v * 100).toFixed(1)}%</span>`;
 
   // ---- chart helpers (Chart.js is loaded by the page; match the reference style) ----
   const PALETTE = ["#CFFF04", "#1A1A1A", "#2F7D4F", "#dc2626", "#9CA3AF", "#6366f1", "#f59e0b", "#0ea5e9", "#a855f7", "#14b8a6"];
@@ -390,19 +393,17 @@
       : { prior: "spend_prior", cur: "spend_cur", money: true, donut: "spend share", bar: "YoY Spend" };
     const pill = (v, l) => `<button class="seg-pill ${NBC_METRIC === v ? "active" : ""}" data-nbc="${v}">${l}</button>`;
     // Spend/Conv: up is good (green). CPA: down is good (invert).
-    // Spend/Conv: up is good (green). CPA: down is good (invert coloring).
-    const chgUp = v => v == null ? '<span class="muted">New</span>' : `<span class="chg ${v >= 0 ? "up" : "dn"}">${(v >= 0 ? "+" : "") + (v * 100).toFixed(1)}%</span>`;
-    const chgDn = v => v == null ? '<span class="muted">—</span>' : `<span class="chg ${v <= 0 ? "up" : "dn"}">${(v >= 0 ? "+" : "") + (v * 100).toFixed(1)}%</span>`;
     const rowHtml = (r, strong) => `<tr${strong ? ' class="strong"' : ""}>
         <td>${strong ? esc(r.category) : `<span class="tag info">${esc(r.category)}</span>`}</td>
-        <td class="num">${fmt.money(r.spend_prior)}</td><td class="num">${fmt.money(r.spend_cur)}</td><td class="num">${chgUp(r.spend_chg)}</td>
-        <td class="num">${fmt.num(r.conv_prior, 1)}</td><td class="num">${fmt.num(r.conv_cur, 1)}</td><td class="num">${chgUp(r.conv_chg)}</td>
-        <td class="num">${fmt.money(r.cpa_prior, 2)}</td><td class="num">${fmt.money(r.cpa_cur, 2)}</td><td class="num">${chgDn(r.cpa_chg)}</td></tr>`;
+        <td class="num">${fmt.money(r.spend_prior)}</td><td class="num">${fmt.money(r.spend_cur)}</td><td class="num">${yoyUp(r.spend_chg)}</td>
+        <td class="num">${fmt.num(r.conv_prior, 1)}</td><td class="num">${fmt.num(r.conv_cur, 1)}</td><td class="num">${yoyUp(r.conv_chg)}</td>
+        <td class="num">${fmt.money(r.cpa_prior, 2)}</td><td class="num">${fmt.money(r.cpa_cur, 2)}</td><td class="num">${yoyDn(r.cpa_chg)}</td></tr>`;
     const P = esc(n.prior_label), C = esc(n.cur_label);
+    const cmp = (String(n.prior_label).slice(-4) !== String(n.cur_label).slice(-4)) ? "YoY" : "period-over-period";
     el.innerHTML = `
       <div class="view-head">
         <div><h2>Non-Brand Categories</h2>
-          <div class="muted">YoY by non-brand category · ${P} vs ${C} · bucketed from campaign structure</div></div>
+          <div class="muted">${cmp} by non-brand category · ${P} vs ${C} · bucketed from campaign structure</div></div>
         <div class="view-head-ctl"><label class="kdd-ctl-lbl">Chart metric</label>
           <div class="seg-group">${pill("spend", "Spend")}${pill("conv", "Conversions")}</div></div>
       </div>
@@ -427,39 +428,86 @@
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
-  // ---------- Regions (Performance) — chart-forward view of the geographic data ----------
+  // ---------- Regions (Performance) — campaign-derived YoY by region ----------
+  let REG_CATS = null;  // Set of selected categories; null = all (initialized per bundle)
   function renderRegions(el) {
     el.className = "view";
-    const g = (typeof DATA !== "undefined" && DATA.geo_performance) || null;
-    if (!g || !g.rows || !g.rows.length) {
-      el.innerHTML = stHead("Regions", "") + `<div class="panel">No regional data.</div>`;
+    const rs = (typeof DATA !== "undefined" && DATA.regions_section) || null;
+    if (!rs || !rs.cells || !rs.cells.length) {
+      el.innerHTML = stHead("Regions", "") + `<div class="panel">No region-segmented non-brand campaign data.</div>`;
       return;
     }
-    const top = g.rows.slice(0, 12);
-    const body = g.rows.map(r => `<tr>
-        <td class="strong">${esc(r.location)}</td>
-        <td class="num" data-sort="${r.cost}">${fmt.money(r.cost)}</td>
-        <td class="num" data-sort="${r.clicks}">${fmt.num(r.clicks)}</td>
-        <td class="num" data-sort="${r.conv}">${fmt.num(r.conv, 1)}</td>
-        <td class="num" data-sort="${r.cpa}">${fmt.money(r.cpa, 2)}</td>
-        <td class="num" data-sort="${r.conv_value}">${fmt.money(r.conv_value)}</td></tr>`).join("");
-    const t = g.totals || {};
-    const dim = String(g.dimension || "region");
-    el.innerHTML = stHead("Regions", `Performance by ${esc(dim.toLowerCase())} · cost derived from CPA×conv (Geographic export carries no cost column)`) +
-      `<div class="two-col">
-         <div class="panel"><h3>Top ${top.length} ${esc(dim.toLowerCase())}s by spend</h3><canvas id="regChart" height="210"></canvas></div>
-         <div class="panel"><h3>Spend share</h3><canvas id="regDonut" height="210"></canvas></div>
-       </div>
-       <div class="panel"><h3>${esc(dim)} detail</h3><div class="tbl-wrap"><table class="sortable">
-         <thead><tr><th>${esc(dim)}</th><th class="num">Cost*</th><th class="num">Clicks</th>
-           <th class="num">Conv</th><th class="num">Cost/conv.</th><th class="num">Conv Value</th></tr></thead>
-         <tbody>${body}
-           <tr class="strong"><td>Total</td><td class="num">${fmt.money(t.cost)}</td>
-             <td class="num">${fmt.num(t.clicks)}</td><td class="num">${fmt.num(t.conv, 1)}</td>
-             <td></td><td class="num">${fmt.money(t.conv_value)}</td></tr>
-         </tbody></table></div></div>`;
-    bars("regChart", top.map(r => r.location), top.map(r => Math.round(r.cost)), "Cost");
-    donut("regDonut", top.map(r => r.location), top.map(r => Math.round(r.cost)));
+    const allCats = rs.categories || [];
+    // (re)initialize the filter when unset or stale for this bundle's categories
+    if (REG_CATS === null || ![...REG_CATS].some(c => allCats.indexOf(c) >= 0)) REG_CATS = new Set(allCats);
+
+    // aggregate cells -> per-region YoY, honoring the category filter
+    const by = {};
+    rs.cells.forEach(c => {
+      if (!REG_CATS.has(c.category)) return;
+      const r = by[c.region] || (by[c.region] = { spend_prior: 0, spend_cur: 0, conv_prior: 0, conv_cur: 0 });
+      r.spend_prior += c.spend_prior; r.spend_cur += c.spend_cur;
+      r.conv_prior += c.conv_prior; r.conv_cur += c.conv_cur;
+    });
+    const chg = (cur, prev) => prev ? (cur - prev) / prev : null;
+    const cpa = (s, c) => c ? s / c : 0;
+    let rows = Object.keys(by).map(region => {
+      const r = by[region];
+      return { region, ...r, spend_chg: chg(r.spend_cur, r.spend_prior), conv_chg: chg(r.conv_cur, r.conv_prior),
+        cpa_prior: cpa(r.spend_prior, r.conv_prior), cpa_cur: cpa(r.spend_cur, r.conv_cur),
+        cpa_chg: chg(cpa(r.spend_cur, r.conv_cur), cpa(r.spend_prior, r.conv_prior)) };
+    }).sort((a, b) => b.spend_cur - a.spend_cur);
+
+    // totals row
+    const T = rows.reduce((a, r) => { a.spend_prior += r.spend_prior; a.spend_cur += r.spend_cur; a.conv_prior += r.conv_prior; a.conv_cur += r.conv_cur; return a; },
+      { region: "Non-Brand Total", spend_prior: 0, spend_cur: 0, conv_prior: 0, conv_cur: 0 });
+    T.spend_chg = chg(T.spend_cur, T.spend_prior); T.conv_chg = chg(T.conv_cur, T.conv_prior);
+    T.cpa_prior = cpa(T.spend_prior, T.conv_prior); T.cpa_cur = cpa(T.spend_cur, T.conv_cur); T.cpa_chg = chg(T.cpa_cur, T.cpa_prior);
+
+    const P = esc(rs.prior_label), C = esc(rs.cur_label);
+    const cmp = (String(rs.prior_label).slice(-4) !== String(rs.cur_label).slice(-4)) ? "YoY" : "period-over-period";
+    const top = rows.slice(0, 12);
+    const rowHtml = (r, strong) => `<tr${strong ? ' class="strong"' : ""}>
+        <td>${strong ? esc(r.region) : `<span class="tag info">${esc(r.region)}</span>`}</td>
+        <td class="num">${fmt.money(r.spend_prior)}</td><td class="num">${fmt.money(r.spend_cur)}</td><td class="num">${yoyUp(r.spend_chg)}</td>
+        <td class="num">${fmt.num(r.conv_prior, 1)}</td><td class="num">${fmt.num(r.conv_cur, 1)}</td><td class="num">${yoyUp(r.conv_chg)}</td>
+        <td class="num">${fmt.money(r.cpa_prior, 2)}</td><td class="num">${fmt.money(r.cpa_cur, 2)}</td><td class="num">${yoyDn(r.cpa_chg)}</td></tr>`;
+    const catLabel = REG_CATS.size === allCats.length ? "All categories" : `${REG_CATS.size} of ${allCats.length}`;
+    const filterNote = REG_CATS.size === allCats.length ? "all categories" : [...REG_CATS].join(", ");
+    el.innerHTML = `
+      <div class="view-head"><div><h2>Regions</h2>
+        <div class="muted">Non-Brand campaigns · ${cmp} by region · ${P} vs ${C}</div></div></div>
+      <div class="panel">
+        <div class="toolbar">
+          <label>Categories:</label>
+          <div class="multi">
+            <button class="multi-btn" id="regCatBtn" type="button">${esc(catLabel)}</button>
+            <div class="multi-menu hidden" id="regCatMenu">
+              ${allCats.map(c => `<label><input type="checkbox" value="${esc(c)}" ${REG_CATS.has(c) ? "checked" : ""}> ${esc(c)}</label>`).join("")}
+            </div>
+          </div>
+          <span class="muted" style="margin-left:12px">NB-campaign YoY · ${esc(filterNote)}</span>
+        </div>
+        <h3 style="margin-top:12px">Top ${top.length} regions by ${C} spend</h3>
+        <canvas id="regChart" height="150"></canvas>
+      </div>
+      <div class="panel"><h3>Region YoY detail</h3><div class="tbl-wrap"><table class="sortable">
+        <thead><tr><th>Region</th>
+          <th class="num">${P} Spend</th><th class="num">${C} Spend</th><th class="num">Chg</th>
+          <th class="num">${P} Conv</th><th class="num">${C} Conv</th><th class="num">Chg</th>
+          <th class="num">${P} CPA</th><th class="num">${C} CPA</th><th class="num">Chg</th></tr></thead>
+        <tbody>${rows.map(r => rowHtml(r, false)).join("")}
+          ${rowHtml(T, true)}
+        </tbody></table></div></div>`;
+    groupedBars("regChart", top.map(r => r.region), top.map(r => r.spend_prior), top.map(r => r.spend_cur), rs.prior_label, rs.cur_label, true);
+    // category multi-select
+    const btn = el.querySelector("#regCatBtn"), menu = el.querySelector("#regCatMenu");
+    if (btn) btn.addEventListener("click", () => menu.classList.toggle("hidden"));
+    el.querySelectorAll("#regCatMenu input").forEach(cb => cb.addEventListener("change", () => {
+      if (cb.checked) REG_CATS.add(cb.value); else REG_CATS.delete(cb.value);
+      if (!REG_CATS.size) REG_CATS = new Set(allCats);   // never empty
+      setView("regions", { preserveScroll: true });
+    }));
     if (typeof enableSortable === "function") enableSortable(el);
   }
 

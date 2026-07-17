@@ -467,6 +467,66 @@ def _nb_categories(engine, client_id, cm, config):
     return {"prior_label": prior["abbr"], "cur_label": cm["abbr"], "rows": rows, "totals": totals}
 
 
+def _region_of(name):
+    """Region token parsed from a geo-segmented campaign name, e.g.
+    'Search | Non-Brand | Tier A - NYC Metro Core' -> 'NYC Metro Core'. Short tokens
+    (nyc, la) are upper-cased. None when the campaign carries no region."""
+    m = re.search(r"tier\s+\S+\s*[-–:|]\s*(.+)$", (name or "").lower())
+    if not m:
+        return None
+    raw = m.group(1).strip(" -–|")
+    label = " ".join(w.upper() if len(w) <= 3 else w.capitalize() for w in raw.split())
+    return label or None
+
+
+def _regions(engine, client_id, cm, config):
+    """YoY non-brand spend/conversions by region, parsed from geo-segmented campaign
+    names (mirrors the reference 'Non-Brand campaigns · YoY by region'). Returns per
+    (region, category) cells so the frontend can filter by category; None if no
+    region-segmented campaigns exist."""
+    if not cm:
+        return None
+    catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
+             for c in (config.get("product_categories") or [])}
+    brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
+
+    def month_cells(full_label):
+        agg = defaultdict(lambda: [0.0, 0.0])  # (region, category) -> spend, conv
+        with engine.connect() as c:
+            for camp, cost, conv in c.execute(text(
+                "SELECT campaign, cost, conversions FROM raw_rows WHERE client_id=:c "
+                "AND report_type='campaign_performance' AND date=:d"),
+                {"c": client_id, "d": full_label}):
+                cat = _nb_category_of(camp, catkw, brand_terms)
+                if cat is None:                 # brand campaign
+                    continue
+                region = _region_of(camp)
+                if region is None:              # not region-segmented
+                    continue
+                a = agg[(region, cat)]; a[0] += _num(cost); a[1] += _num(conv)
+        return agg
+
+    prior = _yoy_prior(cm)
+    cur_agg, pri_agg = month_cells(cm["full"]), month_cells(prior["full"])
+    if not cur_agg and not pri_agg:
+        return None
+    if not pri_agg:
+        prior = _prior_month(cm)
+        pri_agg = month_cells(prior["full"])
+
+    cats, cells = set(), []
+    for key in sorted(set(cur_agg) | set(pri_agg)):
+        region, cat = key
+        cs, ccv = cur_agg.get(key, [0.0, 0.0])
+        ps, pcv = pri_agg.get(key, [0.0, 0.0])
+        cats.add(cat)
+        cells.append({"region": region, "category": cat,
+                      "spend_prior": round(ps, 2), "spend_cur": round(cs, 2),
+                      "conv_prior": round(pcv, 1), "conv_cur": round(ccv, 1)})
+    return {"prior_label": prior["abbr"], "cur_label": cm["abbr"],
+            "categories": sorted(cats), "cells": cells}
+
+
 def _landing_pages(engine, client_id, config):
     """Landing-page performance (clicks/cost/CTR + mobile speed) + a URL-derived category
     grid. The LP export has no conversion or device column, so no CVR / device grid."""
@@ -658,15 +718,16 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
     ads = _ads_section(engine, client_id)
     lps = _landing_pages(engine, client_id, config)
     nb_cats = _nb_categories(engine, client_id, cm, config) if cm else None
+    regions = _regions(engine, client_id, cm, config) if cm else None
 
     # Performance section — mirrors the reference nav order (Overview, Monthly Trends,
-    # NB Categories, Regions, Campaign, Budget). NB Categories is a campaign-derived YoY;
-    # Regions reuses the geographic data. All Brands / Brand Detail are multi-brand only
-    # and never populate for a single-brand account, so they are not listed here.
+    # NB Categories, Regions, Campaign, Budget). NB Categories and Regions are both
+    # campaign-derived YoY (the date-segmented source). All Brands / Brand Detail are
+    # multi-brand only and never populate for a single-brand account, so they are absent.
     view_list = ["overview", "trends"]
     if nb_cats:
         view_list.append("nb-cats")
-    if geo:
+    if regions:
         view_list.append("regions")
     view_list += ["campaign-perf", "budget-pacing"]
     if keyword:
@@ -722,4 +783,5 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
         "ads_section": ads,
         "landing_pages_section": lps,
         "nb_categories_section": nb_cats,
+        "regions_section": regions,
     }
