@@ -1,4 +1,4 @@
-# Chazif Insights — Paid-Search Intelligence Platform
+# SearchNex AE — Paid-Search Intelligence Platform
 
 An always-on web console for managing Google Ads accounts: upload the exports,
 the engine analyzes them, and the app shows observations, findings, and

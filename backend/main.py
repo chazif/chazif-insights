@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Chazif Insights — production backend (Railway target).
+"""SearchNex AE — production backend (Railway target).
 
 Serves the static frontend, the per-client DATA bundle, and the admin API
 (clients, upload, inventory). SQLite locally / Postgres via DATABASE_URL.
@@ -24,7 +24,7 @@ FRONTEND = ROOT / "frontend"
 CLIENTS = ROOT / "data" / "clients"
 UPLOADS = ROOT / "data" / "uploads"
 
-app = FastAPI(title="Chazif Insights", version="0.2.0")
+app = FastAPI(title="SearchNex AE", version="0.3.0")
 _engine = get_engine()
 
 
