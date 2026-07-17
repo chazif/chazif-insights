@@ -12,6 +12,7 @@ from collections import defaultdict
 from sqlalchemy import text, select, func
 from ..ingest.store import get_engine, clients, uploads
 from ..ingest.service import get_config
+from ..ingest.parser import GEO_SLUGS
 from ..analyze.analyzers import run_analyzers, _asdict, _num
 
 FULL_MONTHS = ["January", "February", "March", "April", "May", "June",
@@ -348,6 +349,94 @@ def _keyword_section(engine, client_id):
         "below_ctr_spend": round(below_ctr, 2),
         "savings_estimate": round(below_ctr * 0.33, 2),
     }
+
+
+def _region_value(d):
+    """First populated geographic column in a row (a keyword-geo export may name it
+    state_matched / region / metro / city depending on how it was segmented)."""
+    for k in GEO_SLUGS:
+        v = d.get(k)
+        if v:
+            return v
+    return None
+
+
+def _keyword_regions(engine, client_id, config):
+    """Keyword × region pivot for the Keyword Deep Dive heatmap, from a keyword report
+    segmented by geography (report_type 'keyword_geo'). None if that segmented export
+    hasn't been uploaded — the view then falls back to the flat keyword table."""
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT cost, clicks, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='keyword_geo'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
+    catkw = {cat: [w for w in re.findall(r"[a-z]+", cat.lower()) if len(w) >= 4]
+             for cat in (config.get("product_categories") or [])}
+    brand_label = (config.get("brand_terms") or [None])[0] or _client_name(engine, client_id)
+
+    def categorize(kw):
+        n = kw.lower()
+        for cat, kws in catkw.items():
+            if cat.lower() in n or any(w in n for w in kws):
+                return cat[:1].upper() + cat[1:]
+        return None
+
+    kw_map = {}                                    # keyword -> record
+    region_tot = defaultdict(lambda: [0.0, 0.0])   # region -> spend, conv
+    for cost, clicks, conv, row in rows:
+        d = _asdict(row)
+        kw = d.get("search_keyword")
+        region = _region_value(d)
+        if not kw or not region:
+            continue
+        cost = _num(cost); cv = _num(conv)
+        rec = kw_map.get(kw)
+        if rec is None:
+            rec = kw_map[kw] = {"match": d.get("search_keyword_match_type", ""),
+                                "branded": bool(brand_terms and any(bt in kw.lower() for bt in brand_terms)),
+                                "category": categorize(kw), "overall": [0.0, 0.0], "cells": {}}
+        rec["overall"][0] += cost; rec["overall"][1] += cv
+        cell = rec["cells"].setdefault(region, [0.0, 0.0])
+        cell[0] += cost; cell[1] += cv
+        region_tot[region][0] += cost; region_tot[region][1] += cv
+    if not kw_map:
+        return None
+
+    regions_sorted = sorted(region_tot.items(), key=lambda kv: -kv[1][0])[:25]
+    region_names = [r for r, _ in regions_sorted]
+    regions = [{"name": r, "spend": round(v[0], 2), "conv": round(v[1], 1)} for r, v in regions_sorted]
+
+    def top_keep(items):                           # top 100 by spend ∪ top 100 by conv
+        keep = {}
+        for k, v in sorted(items, key=lambda kv: -kv[1]["overall"][0])[:100]:
+            keep[k] = v
+        for k, v in sorted(items, key=lambda kv: -kv[1]["overall"][1])[:100]:
+            keep[k] = v
+        return keep
+    keep = {}
+    keep.update(top_keep([(k, v) for k, v in kw_map.items() if v["branded"]]))
+    keep.update(top_keep([(k, v) for k, v in kw_map.items() if not v["branded"]]))
+
+    keywords = []
+    for kw, rec in keep.items():
+        cells = {r: {"spend": round(rec["cells"][r][0], 2), "conv": round(rec["cells"][r][1], 1)}
+                 for r in region_names if r in rec["cells"]}
+        keywords.append({"keyword": kw, "match": rec["match"], "category": rec["category"],
+                         "brand": brand_label, "branded": rec["branded"],
+                         "overall": {"spend": round(rec["overall"][0], 2), "conv": round(rec["overall"][1], 1)},
+                         "cells": cells})
+
+    def tot(pred):
+        items = [rec for rec in kw_map.values() if pred(rec)]
+        return {"keywords": len(items),
+                "spend": round(sum(r["overall"][0] for r in items), 2),
+                "conv": round(sum(r["overall"][1] for r in items), 1)}
+    return {"brand": brand_label, "regions": regions, "keywords": keywords,
+            "totals": {"branded": tot(lambda r: r["branded"]),
+                       "nonbranded": tot(lambda r: not r["branded"]),
+                       "regions": len(region_tot)}}
 
 
 def _ads_section(engine, client_id):
@@ -714,6 +803,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
     budget = _budget(engine, client_id, cm, config) if cm else None
     qscore = _quality_score(engine, client_id)
     keyword = _keyword_section(engine, client_id)
+    kw_regions = _keyword_regions(engine, client_id, config)
     st = _search_terms_section(engine, client_id, config)
     ads = _ads_section(engine, client_id)
     lps = _landing_pages(engine, client_id, config)
@@ -730,7 +820,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
     if regions:
         view_list.append("regions")
     view_list += ["campaign-perf", "budget-pacing"]
-    if keyword:
+    if keyword or kw_regions:
         view_list.append("kw-deep-dive")
     if qscore:
         view_list.append("qs-detail")
@@ -779,6 +869,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
         "budget_pacing": budget,
         "quality_score": qscore,
         "keyword_section": keyword,
+        "keyword_regions_section": kw_regions,
         "search_terms_section": st,
         "ads_section": ads,
         "landing_pages_section": lps,

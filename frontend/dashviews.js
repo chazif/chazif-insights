@@ -273,8 +273,101 @@
   }
 
   // ---------- Keyword section ----------
+  // Heatmap state (used when a region-segmented keyword export is present)
+  let KWD_TYPE = "nonbranded", KWD_CRIT = "spend", KWD_GRID = "spend";
+  (function injectKwdStyle() {
+    const s = document.createElement("style");
+    s.textContent = `
+      .kwd-grid{border-collapse:separate;border-spacing:0;font-size:12.5px;white-space:nowrap}
+      .kwd-grid th,.kwd-grid td{padding:6px 10px;border-bottom:1px solid var(--line,#eee);text-align:right}
+      .kwd-grid th:nth-child(-n+2),.kwd-grid td:nth-child(-n+2){text-align:left}
+      .kwd-grid thead th{position:sticky;top:0;background:var(--ink,#1a1a1a);color:#fff;font-size:11px;letter-spacing:.02em;z-index:2}
+      .kwd-grid td.kwd-kwcell{position:sticky;left:0;background:#fff;z-index:1}
+      .kwd-grid .kwd-kw{font-weight:600;color:var(--ink,#1a1a1a)}
+      .kwd-grid .kwd-tags{margin-top:2px;display:flex;gap:4px}
+      .kwd-grid .kwd-tags .tag{font-size:9.5px;padding:1px 6px}
+      .kwd-grid td.kwd-empty{color:#cfd4cb;text-align:center}
+      .kwd-brandhead td{background:var(--ink,#1a1a1a);color:var(--lime,#CFFF04);font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:11px;letter-spacing:.04em;text-transform:uppercase;position:sticky;left:0}
+      .kwd-ctls{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+      .kwd-ctl label.lbl{display:block;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--grey,#888);margin-bottom:5px}`;
+    document.head.appendChild(s);
+  })();
+  function kwHeat(v, max) {
+    if (!(v > 0) || !(max > 0)) return "";
+    const t = Math.min(1, Math.sqrt(v / max));
+    const stops = [[226, 240, 217], [255, 229, 153], [229, 115, 115]];
+    const seg = t < 0.5 ? 0 : 1, u = t < 0.5 ? t / 0.5 : (t - 0.5) / 0.5;
+    const a = stops[seg], b = stops[seg + 1];
+    const c = a.map((x, i) => Math.round(x + (b[i] - x) * u));
+    return `background:rgb(${c[0]},${c[1]},${c[2]})`;
+  }
+  function renderKwHeatmap(el, kr) {
+    const branded = KWD_TYPE === "branded";
+    const metric = KWD_GRID, crit = KWD_CRIT;
+    const tot = branded ? kr.totals.branded : kr.totals.nonbranded;
+    const regions = kr.regions || [];
+    const fmtV = v => metric === "conv" ? fmt.num(v, 0) : fmt.money(v);
+    let rows = kr.keywords.filter(kw => !!kw.branded === branded)
+      .sort((a, b) => (b.overall[crit] || 0) - (a.overall[crit] || 0)).slice(0, 50);
+    let maxCell = 0, maxOverall = 0;
+    rows.forEach(kw => {
+      maxOverall = Math.max(maxOverall, kw.overall[metric] || 0);
+      regions.forEach(rg => { const c = kw.cells[rg.name]; if (c) maxCell = Math.max(maxCell, c[metric] || 0); });
+    });
+    const seg = (val, cur, attr, l) => `<button class="seg-pill ${cur === val ? "active" : ""}" data-${attr}="${val}">${l}</button>`;
+    const regionHead = regions.map(rg => `<th>${esc(rg.name)}</th>`).join("");
+    const body = rows.map((kw, i) => {
+      const cells = regions.map(rg => {
+        const c = kw.cells[rg.name];
+        if (!c || !(c[metric] > 0)) return `<td class="kwd-empty">·</td>`;
+        return `<td style="${kwHeat(c[metric], maxCell)}">${fmtV(c[metric])}</td>`;
+      }).join("");
+      return `<tr>
+        <td>${i + 1}</td>
+        <td class="kwd-kwcell"><div class="kwd-kw">${esc(kw.keyword)}</div>
+          <div class="kwd-tags"><span class="tag">${esc(kw.brand)}</span>${kw.category ? `<span class="tag info">${esc(kw.category)}</span>` : ""}</div></td>
+        <td style="${kwHeat(kw.overall[metric], maxOverall)}"><strong>${fmtV(kw.overall[metric])}</strong></td>
+        ${cells}</tr>`;
+    }).join("");
+    const gridLabel = metric === "conv" ? "Conversions" : "Spend";
+    el.innerHTML = `
+      <div class="view-head">
+        <div><h2>Keyword Deep Dive</h2>
+          <div class="muted">Top ${branded ? "branded" : "non-branded"} keywords (by ${crit === "conv" ? "conversions" : "spend"}) × regions · cells show ${gridLabel}</div></div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat"><div class="stat-label">Keywords</div><div class="stat-value">${fmt.num(tot.keywords)}</div></div>
+        <div class="stat"><div class="stat-label">Regions</div><div class="stat-value">${fmt.num(kr.totals.regions)}</div></div>
+        <div class="stat"><div class="stat-label">Spend</div><div class="stat-value">${fmt.money(tot.spend)}</div></div>
+        <div class="stat"><div class="stat-label">Conversions</div><div class="stat-value">${fmt.num(tot.conv, 0)}</div></div>
+      </div>
+      <div class="panel">
+        <div class="kwd-ctls">
+          <div class="kwd-ctl"><label class="lbl">Keyword type</label><div class="seg-group">${seg("nonbranded", KWD_TYPE, "kwtype", "Non-branded")}${seg("branded", KWD_TYPE, "kwtype", "Branded")}</div></div>
+          <div class="kwd-ctl"><label class="lbl">Top-keyword criteria</label><div class="seg-group">${seg("spend", KWD_CRIT, "kwcrit", "Spend")}${seg("conv", KWD_CRIT, "kwcrit", "Main Conversions")}</div></div>
+          <div class="kwd-ctl"><label class="lbl">Metric in grid</label>
+            <select id="kwGrid"><option value="spend"${metric === "spend" ? " selected" : ""}>Spend</option><option value="conv"${metric === "conv" ? " selected" : ""}>Conversions</option></select></div>
+        </div>
+        <div class="tbl-wrap" style="max-height:640px;overflow:auto">
+          <table class="kwd-grid">
+            <thead><tr><th>Rank</th><th>Keyword</th><th>Overall</th>${regionHead}</tr></thead>
+            <tbody>
+              <tr class="kwd-brandhead"><td colspan="${3 + regions.length}">${esc(kr.brand)} · Top ${rows.length} ${branded ? "branded" : "non-branded"} keywords by ${crit === "conv" ? "conversions" : "spend"}</td></tr>
+              ${body || `<tr><td colspan="${3 + regions.length}" class="muted" style="padding:16px">No ${branded ? "branded" : "non-branded"} keywords.</td></tr>`}
+            </tbody></table>
+        </div>
+      </div>`;
+    el.querySelectorAll("[data-kwtype]").forEach(b => b.addEventListener("click", () => { KWD_TYPE = b.dataset.kwtype; setView("kw-deep-dive", { preserveScroll: true }); }));
+    el.querySelectorAll("[data-kwcrit]").forEach(b => b.addEventListener("click", () => { KWD_CRIT = b.dataset.kwcrit; setView("kw-deep-dive", { preserveScroll: true }); }));
+    const gsel = el.querySelector("#kwGrid");
+    if (gsel) gsel.addEventListener("change", () => { KWD_GRID = gsel.value; setView("kw-deep-dive", { preserveScroll: true }); });
+  }
   function renderKwDeepDive(el) {
-    el.className = "view"; const k = (typeof DATA !== "undefined" && DATA.keyword_section) || null;
+    el.className = "view";
+    const kr = (typeof DATA !== "undefined" && DATA.keyword_regions_section) || null;
+    if (kr && kr.keywords && kr.keywords.length) { renderKwHeatmap(el, kr); return; }
+    // fallback: flat keyword table (no region-segmented export uploaded)
+    const k = (typeof DATA !== "undefined" && DATA.keyword_section) || null;
     if (!k) { el.innerHTML = stHead("Keyword Deep Dive", "") + `<div class="panel">No keyword data.</div>`; return; }
     const rows = k.deep_dive.map(d => `<tr>
         <td class="strong">${esc(d.keyword)}</td><td>${esc(d.match)}</td>
@@ -283,7 +376,7 @@
         <td class="num" data-sort="${d.cost}">${fmt.money(d.cost)}</td>
         <td class="num" data-sort="${d.conv}">${fmt.num(d.conv, 1)}</td>
         <td class="num" data-sort="${d.cpa}">${fmt.money(d.cpa, 2)}</td></tr>`).join("");
-    el.innerHTML = stHead("Keyword Deep Dive", "Top keywords by spend") +
+    el.innerHTML = stHead("Keyword Deep Dive", "Top keywords by spend · upload a region-segmented keyword export to unlock the keyword × region heatmap") +
       `<div class="panel"><div class="tbl-wrap"><table class="sortable">
         <thead><tr><th>Keyword</th><th>Match</th><th class="num">QS</th><th class="num">Clicks</th>
           <th class="num">Cost</th><th class="num">Conv</th><th class="num">CPA</th></tr></thead>
