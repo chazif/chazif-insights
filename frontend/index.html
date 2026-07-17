@@ -107,6 +107,14 @@
   .client-pick select { width: 100%; background: rgba(255,255,255,0.06); color: #e5e7eb; border: 1px solid rgba(255,255,255,0.18);
                         border-radius: 8px; font-family: inherit; font-size: 13px; padding: 8px 10px; cursor: pointer; }
   .client-pick select:hover { background: rgba(255,255,255,0.10); }
+  .date-range { display:flex; align-items:center; gap:8px; }
+  .date-range label { font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:12px; color:var(--grey);
+                      letter-spacing:0.04em; text-transform:uppercase; }
+  .date-range select, .date-range input[type=date] { font:inherit; font-size:13px; padding:5px 8px; border:1px solid var(--border);
+                      border-radius:8px; background:#fff; color:var(--ink); cursor:pointer; }
+  .date-range .dr-info { font-size:11px; color:var(--grey); cursor:help; }
+  .date-range .dr-apply { font:inherit; font-size:12px; font-weight:600; padding:5px 10px; border-radius:8px;
+                      border:1px solid var(--ink); background:var(--ink); color:#fff; cursor:pointer; }
   .nav-section { font-size: 10.5px; color: var(--grey-400); text-transform: uppercase; letter-spacing: 0.14em; margin: 14px 8px 6px; font-weight: 600;}
   .nav-item {
     display:flex; align-items:center; gap:10px; padding: 9px 10px; border-radius: 8px; cursor: pointer;
@@ -415,6 +423,7 @@
         <span class="breadcrumb"><span id="crumbClient">Mavis Tire</span> › Paid Search › <strong id="crumb">Overview</strong></span>
       </div>
       <div class="topbar-right">
+        <div class="date-range" id="dateRange"></div>
         <div class="brand-filter" id="brandFilter">
           <label style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:12px; color:var(--grey); letter-spacing:0.04em; text-transform:uppercase; margin-right:8px;">Brand</label>
           <select id="brandFilterSel" class="brand-select">
@@ -448,9 +457,11 @@
 (function () {
   var p = new URLSearchParams(location.search);
   var period = p.get("period") || "2026-03";
+  var qsFrom = p.get("from"), qsTo = p.get("to");
 
   function boot(client) {
-    var url = window.BUNDLE_URL || ("/api/bundle?client=" + encodeURIComponent(client) + "&period=" + encodeURIComponent(period));
+    var url = window.BUNDLE_URL || ("/api/bundle?client=" + encodeURIComponent(client) + "&period=" + encodeURIComponent(period)
+      + (qsFrom ? "&from=" + encodeURIComponent(qsFrom) : "") + (qsTo ? "&to=" + encodeURIComponent(qsTo) : ""));
     fetch(url)
       .then(function (r) { if (!r.ok) throw new Error("bundle HTTP " + r.status); return r.json(); })
       .then(function (d) {
