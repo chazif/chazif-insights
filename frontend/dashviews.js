@@ -29,6 +29,19 @@
       data: { labels, datasets: [{ label: label || "", data, backgroundColor: color || "#CFFF04", borderColor: "#1A1A1A", borderWidth: 1 }] },
       options: opt });
   }
+  // grouped prior-vs-current bars (grey / lime) — matches the reference YoY chart
+  function groupedBars(id, labels, prior, cur, priorLabel, curLabel, moneyAxis) {
+    const c = document.getElementById(id);
+    if (!c || typeof Chart === "undefined") return;
+    const opt = (typeof chartOpts === "function") ? chartOpts({ moneyAxis: !!moneyAxis }) : { responsive: true, maintainAspectRatio: true };
+    if (opt.plugins && opt.plugins.legend) { opt.plugins.legend.display = true; opt.plugins.legend.position = "top"; }
+    new Chart(c, { type: "bar",
+      data: { labels, datasets: [
+        { label: priorLabel, data: prior, backgroundColor: "#9CA3AF", borderRadius: 4 },
+        { label: curLabel, data: cur, backgroundColor: "#CFFF04", borderColor: "#1A1A1A", borderWidth: 1, borderRadius: 4 },
+      ] },
+      options: opt });
+  }
 
   // ---------- Campaign Performance ----------
   function renderCampaignPerf(el) {
@@ -362,38 +375,55 @@
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
-  // ---------- Non-Brand Categories (Performance) ----------
+  // ---------- Non-Brand Categories (Performance) — campaign-derived YoY ----------
+  let NBC_METRIC = "spend";
   function renderNbCats(el) {
     el.className = "view";
     const n = (typeof DATA !== "undefined" && DATA.nb_categories_section) || null;
     if (!n || !n.rows || !n.rows.length) {
       el.innerHTML = stHead("Non-Brand Categories", "") +
-        `<div class="panel">No category data — set product categories in Business Context to break out non-brand spend.</div>`;
+        `<div class="panel">No non-brand campaign data.</div>`;
       return;
     }
-    const rows = n.rows.map(r => `<tr>
-        <td class="strong">${esc(r.category)}</td>
-        <td class="num" data-sort="${r.keywords}">${fmt.num(r.keywords)}</td>
-        <td class="num" data-sort="${r.clicks}">${fmt.num(r.clicks)}</td>
-        <td class="num" data-sort="${r.cost}">${fmt.money(r.cost)}</td>
-        <td class="num" data-sort="${r.share}">${(r.share * 100).toFixed(0)}%</td>
-        <td class="num" data-sort="${r.conv}">${fmt.num(r.conv, 1)}</td>
-        <td class="num" data-sort="${r.cpa}">${fmt.money(r.cpa, 2)}</td></tr>`).join("");
-    el.innerHTML = stHead("Non-Brand Categories", "Non-brand keyword spend by product category · brand terms excluded") +
-      `<div class="two-col">
-         <div class="panel"><h3>Spend share by category</h3><canvas id="nbDonut" height="210"></canvas></div>
-         <div class="panel"><h3>Spend by category</h3><canvas id="nbBars" height="210"></canvas></div>
-       </div>
-       <div class="panel"><h3>Category detail</h3><div class="tbl-wrap"><table class="sortable">
-         <thead><tr><th>Category</th><th class="num">Keywords</th><th class="num">Clicks</th>
-           <th class="num">Cost</th><th class="num">% Spend</th><th class="num">Conv</th><th class="num">CPA</th></tr></thead>
-         <tbody>${rows}
-           <tr class="strong"><td>Total</td><td></td><td></td>
-             <td class="num">${fmt.money(n.total_cost)}</td><td class="num">100%</td>
-             <td class="num">${fmt.num(n.total_conv, 1)}</td><td></td></tr>
-         </tbody></table></div></div>`;
-    donut("nbDonut", n.rows.map(r => r.category), n.rows.map(r => Math.round(r.cost)));
-    bars("nbBars", n.rows.map(r => r.category), n.rows.map(r => Math.round(r.cost)), "Cost");
+    const M = NBC_METRIC === "conv"
+      ? { prior: "conv_prior", cur: "conv_cur", money: false, donut: "conversions share", bar: "YoY Conversions" }
+      : { prior: "spend_prior", cur: "spend_cur", money: true, donut: "spend share", bar: "YoY Spend" };
+    const pill = (v, l) => `<button class="seg-pill ${NBC_METRIC === v ? "active" : ""}" data-nbc="${v}">${l}</button>`;
+    // Spend/Conv: up is good (green). CPA: down is good (invert).
+    // Spend/Conv: up is good (green). CPA: down is good (invert coloring).
+    const chgUp = v => v == null ? '<span class="muted">New</span>' : `<span class="chg ${v >= 0 ? "up" : "dn"}">${(v >= 0 ? "+" : "") + (v * 100).toFixed(1)}%</span>`;
+    const chgDn = v => v == null ? '<span class="muted">—</span>' : `<span class="chg ${v <= 0 ? "up" : "dn"}">${(v >= 0 ? "+" : "") + (v * 100).toFixed(1)}%</span>`;
+    const rowHtml = (r, strong) => `<tr${strong ? ' class="strong"' : ""}>
+        <td>${strong ? esc(r.category) : `<span class="tag info">${esc(r.category)}</span>`}</td>
+        <td class="num">${fmt.money(r.spend_prior)}</td><td class="num">${fmt.money(r.spend_cur)}</td><td class="num">${chgUp(r.spend_chg)}</td>
+        <td class="num">${fmt.num(r.conv_prior, 1)}</td><td class="num">${fmt.num(r.conv_cur, 1)}</td><td class="num">${chgUp(r.conv_chg)}</td>
+        <td class="num">${fmt.money(r.cpa_prior, 2)}</td><td class="num">${fmt.money(r.cpa_cur, 2)}</td><td class="num">${chgDn(r.cpa_chg)}</td></tr>`;
+    const P = esc(n.prior_label), C = esc(n.cur_label);
+    el.innerHTML = `
+      <div class="view-head">
+        <div><h2>Non-Brand Categories</h2>
+          <div class="muted">YoY by non-brand category · ${P} vs ${C} · bucketed from campaign structure</div></div>
+        <div class="view-head-ctl"><label class="kdd-ctl-lbl">Chart metric</label>
+          <div class="seg-group">${pill("spend", "Spend")}${pill("conv", "Conversions")}</div></div>
+      </div>
+      <div class="two-col">
+        <div class="panel"><h3>${C} ${M.donut}</h3><canvas id="nbDonut" height="220"></canvas></div>
+        <div class="panel"><h3>${M.bar}</h3><canvas id="nbBars" height="220"></canvas></div>
+      </div>
+      <div class="panel"><h3>Category YoY detail</h3><div class="tbl-wrap"><table class="sortable">
+        <thead><tr><th>Category</th>
+          <th class="num">${P} Spend</th><th class="num">${C} Spend</th><th class="num">Chg</th>
+          <th class="num">${P} Conv</th><th class="num">${C} Conv</th><th class="num">Chg</th>
+          <th class="num">${P} CPA</th><th class="num">${C} CPA</th><th class="num">Chg</th></tr></thead>
+        <tbody>${n.rows.map(r => rowHtml(r, false)).join("")}
+          ${rowHtml(n.totals, true)}
+        </tbody></table></div></div>`;
+    const labels = n.rows.map(r => r.category);
+    donut("nbDonut", labels, n.rows.map(r => Math.round(r[M.cur])));
+    groupedBars("nbBars", labels, n.rows.map(r => r[M.prior]), n.rows.map(r => r[M.cur]), n.prior_label, n.cur_label, M.money);
+    el.querySelectorAll("[data-nbc]").forEach(b => b.addEventListener("click", () => {
+      NBC_METRIC = b.dataset.nbc; setView("nb-cats", { preserveScroll: true });
+    }));
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
