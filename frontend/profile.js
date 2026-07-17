@@ -2,10 +2,12 @@
 // If the bundle has no `meta` (e.g. the Mavis demo), everything is left as-is.
 (function () {
   "use strict";
-  // Auto-skip the demo gate right after an in-app "Open dashboard" navigation.
+  // Stay signed in for the session: once authed, every reload (date/client change)
+  // auto-enters the dashboard instead of re-showing the login gate.
   try {
-    if (sessionStorage.getItem("chz_nav") === "1") {
+    if (sessionStorage.getItem("chz_authed") === "1" || sessionStorage.getItem("chz_nav") === "1") {
       sessionStorage.removeItem("chz_nav");
+      sessionStorage.setItem("chz_authed", "1");
       if (typeof unlock === "function") unlock();
     }
   } catch (e) {}
