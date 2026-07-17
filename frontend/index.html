@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Chazif Insights · Mavis Tire · March 2026</title>
+<title>SearchNex AE</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
@@ -99,6 +99,14 @@
                 display: grid; place-items: center; font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 16px; letter-spacing:-0.02em;}
   .brand-text { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 15px; color: #fff; letter-spacing:-0.01em; }
   .brand-sub  { font-size: 11px; color: var(--grey-400); }
+  .brand-badge { display:inline-block; padding: 1px 6px; margin-left: 4px; background: var(--lime); color: var(--ink);
+                 border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; vertical-align: middle; }
+  .client-pick { padding: 4px 12px 6px; }
+  .client-pick-label { font-size: 10.5px; color: var(--grey-400); text-transform: uppercase; letter-spacing: 0.14em;
+                       font-weight: 600; margin-bottom: 6px; }
+  .client-pick select { width: 100%; background: rgba(255,255,255,0.06); color: #e5e7eb; border: 1px solid rgba(255,255,255,0.18);
+                        border-radius: 8px; font-family: inherit; font-size: 13px; padding: 8px 10px; cursor: pointer; }
+  .client-pick select:hover { background: rgba(255,255,255,0.10); }
   .nav-section { font-size: 10.5px; color: var(--grey-400); text-transform: uppercase; letter-spacing: 0.14em; margin: 14px 8px 6px; font-weight: 600;}
   .nav-item {
     display:flex; align-items:center; gap:10px; padding: 9px 10px; border-radius: 8px; cursor: pointer;
@@ -331,7 +339,7 @@
     <div class="gate-brand">
       <div class="gate-mark">C</div>
       <div>
-        <h1>Chazif Insights</h1>
+        <h1>SearchNex AE</h1>
         <div class="gate-sub">Paid search analytics · by Chazif LLC</div>
       </div>
     </div>
@@ -356,11 +364,15 @@
 <div id="app" class="hidden">
   <aside id="sidebar">
     <div class="brand">
-      <div class="brand-mark">C</div>
+      <div class="brand-mark">S</div>
       <div>
-        <div class="brand-text">Chazif Insights</div>
+        <div class="brand-text">SearchNex <span class="brand-badge">AE</span></div>
         <div class="brand-sub" id="brandSub">Mavis Tire · Mar 2026</div>
       </div>
+    </div>
+    <div class="client-pick">
+      <div class="client-pick-label">Client</div>
+      <div id="clientPick"></div>
     </div>
     <div class="nav-section">Performance</div>
     <div class="nav-item active" data-view="overview"><span class="nav-dot"></span>Overview</div>
