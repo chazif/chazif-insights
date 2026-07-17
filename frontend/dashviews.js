@@ -153,30 +153,81 @@
     if (go) go.addEventListener("click", e => { e.preventDefault(); setView("ws-context"); });
   }
 
-  // ---------- Quality Score ----------
+  // ---------- Quality Score Overview ----------
+  const qsBarColor = qs => qs <= 3 ? "#dc2626" : qs <= 5 ? "#f59e0b" : qs <= 7 ? "#9CA3AF" : "#2F7D4F";
   function renderQsDetail(el) {
     el.className = "view";
     const q = (typeof DATA !== "undefined" && DATA.quality_score) || null;
-    if (!q) { el.innerHTML = `<div class="view-head"><div><h2>Quality Score</h2></div></div><div class="panel">No Quality Score data.</div>`; return; }
-    const buckets = q.buckets.map(b => `<div class="stat">
-        <div class="stat-label">${esc(b.label)}</div><div class="stat-value">${b.keywords}</div>
-        <div class="stat-chg">${fmt.money(b.cost)}</div></div>`).join("");
-    const low = q.top_low.map(k => `<tr>
-        <td class="strong">${esc(k.keyword)}</td><td>${esc(k.match)}</td>
-        <td class="num" data-sort="${k.qs}">${k.qs}</td>
-        <td class="num" data-sort="${k.clicks}">${fmt.num(k.clicks)}</td>
-        <td class="num" data-sort="${k.cost}">${fmt.money(k.cost)}</td></tr>`).join("");
+    if (!q || !q.per_qs) { el.innerHTML = `<div class="view-head"><div><h2>Quality Score</h2></div></div><div class="panel">No Quality Score data.</div>`; return; }
+    const scope = q.non_brand ? "non-brand" : "";
+    const P = q.per_qs, T = q.totals, sv = q.savings;
+    const bucketRows = q.buckets.map(b => `<tr>
+        <td class="strong" style="border-left:4px solid ${b.color};padding-left:12px">${esc(b.label)}</td>
+        <td class="num">${fmt.num(b.keywords)}</td><td class="num">${fmt.pct(b.kw_share, 1)}</td>
+        <td class="num">${fmt.money(b.cost)}</td><td class="num">${fmt.pct(b.spend_share, 1)}</td>
+        <td class="num">${fmt.money(b.cpc, 2)}</td><td class="num">${fmt.pct(b.ctr, 2)}</td>
+        <td class="num">${fmt.pct(b.conv_rate, 2)}</td><td class="num">${b.cpa ? fmt.money(b.cpa, 2) : "—"}</td>
+        <td class="num">${fmt.num(b.conv, 0)}</td></tr>`).join("");
+    const qsRows = P.map(r => `<tr>
+        <td class="strong">QS ${r.qs}</td>
+        <td class="num">${fmt.num(r.keywords)}</td><td class="num">${fmt.pct(r.kw_share, 2)}</td>
+        <td class="num">${fmt.money(r.cost)}</td><td class="num">${fmt.pct(r.spend_share, 2)}</td>
+        <td class="num">${fmt.num(r.clicks)}</td><td class="num">${fmt.money(r.cpc, 2)}</td>
+        <td class="num">${fmt.pct(r.ctr, 2)}</td><td class="num">${fmt.pct(r.conv_rate, 2)}</td>
+        <td class="num">${r.cpa ? fmt.money(r.cpa, 2) : "—"}</td><td class="num">${fmt.num(r.conv, 0)}</td></tr>`).join("");
     el.innerHTML = `
-      <div class="view-head"><div><h2>QS Overview</h2>
-        <div class="muted">Account avg QS ${q.avg_qs} · ${q.total_keywords} keywords with a Quality Score</div></div></div>
-      <div class="stat-grid">${buckets}</div>
+      <div class="view-head">
+        <div><h2>Quality Score Overview${scope ? " · Non-Brand Portfolio" : ""}</h2>
+          <div class="muted">${q.month ? q.month + " · " : ""}Distribution of QS across ${fmt.num(q.total_keywords)} ${scope ? scope + " " : ""}keywords and the CPC differential each score carries</div></div>
+        <div><span class="tag lime">Avg QS ${q.avg_qs}</span></div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat hl"><div class="stat-label">Avg Quality Score</div><div class="stat-value">${q.avg_qs}</div><div class="stat-chg">${scope ? scope + " keywords" : "keywords"}</div></div>
+        <div class="stat"><div class="stat-label">${scope ? "NB " : ""}Keywords</div><div class="stat-value">${fmt.num(q.total_keywords)}</div><div class="stat-chg">graded${q.month ? " in " + q.month : ""}</div></div>
+        <div class="stat"><div class="stat-label">QS ≤ 5 (Weak)</div><div class="stat-value">${fmt.pct(q.pct_weak, 0)}</div><div class="stat-chg dn">of portfolio</div></div>
+        <div class="stat"><div class="stat-label">QS ≥ 7 (Strong)</div><div class="stat-value">${fmt.pct(q.pct_strong, 0)}</div><div class="stat-chg up">of portfolio</div></div>
+        <div class="stat"><div class="stat-label">Est. Monthly Savings</div><div class="stat-value">${fmt.money(sv.amount)}</div><div class="stat-chg">if QS ≤ 5 → QS 7</div></div>
+      </div>
+      <div class="panel" style="background:#FCFEF0">If keywords at QS ≤ 5 could be improved to QS 7, the portfolio would save an estimated <strong>${fmt.money(sv.amount)}/mo</strong> based on the CPC differential (${fmt.money(sv.cpc_weak, 2)} → ${fmt.money(sv.cpc_qs7, 2)}).</div>
       <div class="two-col">
-        <div class="panel"><h3>QS distribution · keywords</h3><canvas id="qsDistChart" height="210"></canvas></div>
-        <div class="panel"><h3>Lowest-QS keywords by spend</h3><div class="tbl-wrap"><table class="sortable">
-          <thead><tr><th>Keyword</th><th>Match</th><th class="num">QS</th><th class="num">Clicks</th><th class="num">Cost</th></tr></thead>
-          <tbody>${low}</tbody></table></div></div>
-      </div>`;
-    bars("qsDistChart", q.distribution.map(d => "QS " + d.qs), q.distribution.map(d => d.keywords), "Keywords");
+        <div class="panel"><h3>QS distribution — keywords &amp; spend share</h3><div style="position:relative;height:300px"><canvas id="qsDistChart"></canvas></div></div>
+        <div class="panel"><h3>Avg CPC &amp; CTR by QS</h3><div style="position:relative;height:300px"><canvas id="qsCpcChart"></canvas></div></div>
+      </div>
+      <div class="panel"><h3>QS bucket summary</h3><div class="tbl-wrap"><table class="sortable">
+        <thead><tr><th>Bucket</th><th class="num">Keywords</th><th class="num">% of KWs</th><th class="num">Spend</th>
+          <th class="num">% of Spend</th><th class="num">Avg CPC</th><th class="num">CTR</th>
+          <th class="num">Conv Rate</th><th class="num">Avg CPA</th><th class="num">Conversions</th></tr></thead>
+        <tbody>${bucketRows}</tbody></table></div></div>
+      <div class="panel"><h3>QS vs CPC detail (QS 1 – QS 10)</h3><div class="tbl-wrap"><table class="sortable">
+        <thead><tr><th>QS</th><th class="num">Keywords</th><th class="num">% of Total</th><th class="num">Spend</th>
+          <th class="num">% of Spend</th><th class="num">Clicks</th><th class="num">Avg CPC</th><th class="num">CTR</th>
+          <th class="num">Conv Rate</th><th class="num">CPA</th><th class="num">Conversions</th></tr></thead>
+        <tbody>${qsRows}
+          <tr class="strong"><td>Total</td><td class="num">${fmt.num(T.keywords)}</td><td class="num">100%</td>
+            <td class="num">${fmt.money(T.cost)}</td><td class="num">100%</td><td class="num">${fmt.num(T.clicks)}</td>
+            <td class="num">${fmt.money(T.cpc, 2)}</td><td class="num">${fmt.pct(T.ctr, 2)}</td>
+            <td class="num">${fmt.pct(T.conv_rate, 2)}</td><td class="num">${fmt.money(T.cpa, 2)}</td>
+            <td class="num">${fmt.num(T.conv, 0)}</td></tr>
+        </tbody></table></div></div>`;
+    // combo: keyword bars (bucket-colored) + % of spend line on a right axis
+    if (typeof Chart !== "undefined") {
+      const dc = document.getElementById("qsDistChart");
+      if (dc) new Chart(dc, { data: { labels: P.map(r => "QS " + r.qs), datasets: [
+          { type: "bar", label: "Keywords", data: P.map(r => r.keywords), backgroundColor: P.map(r => qsBarColor(r.qs)), yAxisID: "y", order: 2 },
+          { type: "line", label: "% of Spend", data: P.map(r => +(r.spend_share * 100).toFixed(2)), borderColor: "#1A1A1A", backgroundColor: "#1A1A1A", yAxisID: "y1", tension: 0.35, pointRadius: 2, fill: false, order: 1 } ] },
+        options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+          scales: { y: { position: "left", title: { display: true, text: "Keywords" } },
+            y1: { position: "right", title: { display: true, text: "% of Spend" }, grid: { drawOnChartArea: false }, ticks: { callback: v => v + "%" } } },
+          plugins: { legend: { position: "bottom", labels: { font: { family: "Inter", size: 11 }, boxWidth: 12 } } } } });
+      const cc = document.getElementById("qsCpcChart");
+      if (cc) new Chart(cc, { type: "line", data: { labels: P.map(r => "QS " + r.qs), datasets: [
+          { label: "Avg CPC", data: P.map(r => r.cpc), borderColor: "#1A1A1A", backgroundColor: "#1A1A1A", yAxisID: "y", tension: 0.35, pointRadius: 2, fill: false },
+          { label: "CTR", data: P.map(r => +(r.ctr * 100).toFixed(2)), borderColor: "#CFFF04", backgroundColor: "#CFFF04", yAxisID: "y1", tension: 0.35, pointRadius: 2, fill: false } ] },
+        options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+          scales: { y: { position: "left", title: { display: true, text: "Avg CPC" }, ticks: { callback: v => "$" + v } },
+            y1: { position: "right", title: { display: true, text: "CTR" }, grid: { drawOnChartArea: false }, ticks: { callback: v => v + "%" } } },
+          plugins: { legend: { position: "bottom", labels: { font: { family: "Inter", size: 11 }, boxWidth: 12 } } } } });
+    }
     if (typeof enableSortable === "function") enableSortable(el);
   }
 

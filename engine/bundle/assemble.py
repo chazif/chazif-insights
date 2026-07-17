@@ -217,40 +217,84 @@ def _budget(engine, client_id, cm, config):
             "months": months, "latest": latest, "status": status}
 
 
-def _quality_score(engine, client_id):
-    """QS distribution, buckets, and top low-QS keywords from the Search Keyword + QS report."""
+QS_BUCKETS = [("Poor (1-3)", 1, 3, "#dc2626"), ("Below Average (4-5)", 4, 5, "#f59e0b"),
+              ("Average (6-7)", 6, 7, "#9CA3AF"), ("Strong (8-10)", 8, 10, "#2F7D4F")]
+
+
+def _quality_score(engine, client_id, cm=None, config=None):
+    """Non-brand Quality Score overview from the Search Keyword + QS report: per-QS
+    (1-10) keyword/spend/click/conv rollups with CPC/CTR/CVR/CPA, four QS buckets, a
+    weak→strong CPC-differential savings estimate, and portfolio totals."""
+    config = config or {}
+    brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
     with engine.connect() as c:
         rows = c.execute(text(
-            "SELECT cost, clicks, row FROM raw_rows WHERE client_id=:c AND report_type='search_keyword_qs'"),
-            {"c": client_id}).all()
+            "SELECT cost, clicks, impressions, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='search_keyword_qs'"), {"c": client_id}).all()
     if not rows:
         return None
-    dist = {i: [0, 0.0] for i in range(1, 11)}
-    qs_vals, kws = [], []
-    for cost, clicks, row in rows:
-        d = _asdict(row); cost = _num(cost); clicks = _num(clicks)
+    per = {i: {"keywords": 0, "cost": 0.0, "clicks": 0.0, "impr": 0.0, "conv": 0.0} for i in range(1, 11)}
+    for cost, clicks, impr, conv, row in rows:
+        d = _asdict(row)
         try:
             q = int(float(d.get("quality_score")))
         except (TypeError, ValueError):
             continue
-        if 1 <= q <= 10:
-            dist[q][0] += 1; dist[q][1] += cost; qs_vals.append(q)
-            kws.append((d.get("search_keyword", ""), d.get("search_keyword_match_type", ""), q, cost, clicks))
-    if not qs_vals:
-        return None
+        if not (1 <= q <= 10):
+            continue
+        kw = (d.get("search_keyword", "") or "").lower()
+        camp = (d.get("campaign", "") or "").lower()
+        if brand_terms and (any(b in kw for b in brand_terms) or any(b in camp for b in brand_terms)):
+            continue                               # non-brand portfolio only
+        p = per[q]
+        p["keywords"] += 1; p["cost"] += _num(cost); p["clicks"] += _num(clicks)
+        p["impr"] += _num(impr); p["conv"] += _num(conv)
 
-    def bucket(lo, hi):
-        return sum(dist[i][0] for i in range(lo, hi + 1)), round(sum(dist[i][1] for i in range(lo, hi + 1)), 2)
-    lk, lc = bucket(1, 4); mk, mc = bucket(5, 7); hk, hc = bucket(8, 10)
-    top_low = sorted([k for k in kws if k[2] <= 5], key=lambda x: -x[3])[:15]
+    total_kw = sum(p["keywords"] for p in per.values())
+    if not total_kw:
+        return None
+    total_cost = sum(p["cost"] for p in per.values())
+    total_clicks = sum(p["clicks"] for p in per.values())
+    total_impr = sum(p["impr"] for p in per.values())
+    total_conv = sum(p["conv"] for p in per.values())
+
+    def rates(cost, clicks, impr, conv):
+        return {"cpc": round(cost / clicks, 2) if clicks else 0,
+                "ctr": round(clicks / impr, 4) if impr else 0,
+                "conv_rate": round(conv / clicks, 4) if clicks else 0,
+                "cpa": round(cost / conv, 2) if conv else 0}
+
+    def block(lo, hi):
+        cost = sum(per[i]["cost"] for i in range(lo, hi + 1))
+        clicks = sum(per[i]["clicks"] for i in range(lo, hi + 1))
+        impr = sum(per[i]["impr"] for i in range(lo, hi + 1))
+        conv = sum(per[i]["conv"] for i in range(lo, hi + 1))
+        kws = sum(per[i]["keywords"] for i in range(lo, hi + 1))
+        return {"keywords": kws, "kw_share": round(kws / total_kw, 4),
+                "cost": round(cost, 2), "spend_share": round(cost / total_cost, 4) if total_cost else 0,
+                "clicks": round(clicks), "conv": round(conv, 1), **rates(cost, clicks, impr, conv)}
+
+    per_qs = [dict(qs=i, **block(i, i)) for i in range(1, 11)]
+    buckets = [{"label": lbl, "lo": lo, "hi": hi, "color": col, **block(lo, hi)} for (lbl, lo, hi, col) in QS_BUCKETS]
+
+    avg_qs = round(sum(i * per[i]["keywords"] for i in range(1, 11)) / total_kw, 1)
+    weak_kw = sum(per[i]["keywords"] for i in range(1, 6))
+    strong_kw = sum(per[i]["keywords"] for i in range(7, 11))
+    weak_cost = sum(per[i]["cost"] for i in range(1, 6))
+    weak_clicks = sum(per[i]["clicks"] for i in range(1, 6))
+    cpc_weak = weak_cost / weak_clicks if weak_clicks else 0
+    cpc_q7 = per[7]["cost"] / per[7]["clicks"] if per[7]["clicks"] else 0
+    savings = round(weak_clicks * max(0.0, cpc_weak - cpc_q7), 2)
+
     return {
-        "avg_qs": round(sum(qs_vals) / len(qs_vals), 1),
-        "total_keywords": len(qs_vals),
-        "distribution": [{"qs": i, "keywords": dist[i][0], "cost": round(dist[i][1], 2)} for i in range(1, 11)],
-        "buckets": [{"label": "Low (1-4)", "keywords": lk, "cost": lc},
-                    {"label": "Mid (5-7)", "keywords": mk, "cost": mc},
-                    {"label": "High (8-10)", "keywords": hk, "cost": hc}],
-        "top_low": [{"keyword": k[0], "match": k[1], "qs": k[2], "cost": round(k[3], 2), "clicks": round(k[4])} for k in top_low],
+        "month": cm["abbr"] if cm else "",
+        "non_brand": bool(brand_terms),
+        "avg_qs": avg_qs, "total_keywords": total_kw,
+        "pct_weak": round(weak_kw / total_kw, 4), "pct_strong": round(strong_kw / total_kw, 4),
+        "savings": {"amount": savings, "cpc_weak": round(cpc_weak, 2), "cpc_qs7": round(cpc_q7, 2)},
+        "per_qs": per_qs, "buckets": buckets,
+        "totals": {"keywords": total_kw, "cost": round(total_cost, 2), "clicks": round(total_clicks),
+                   "conv": round(total_conv, 1), **rates(total_cost, total_clicks, total_impr, total_conv)},
     }
 
 
@@ -801,7 +845,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
     campaigns = _campaigns(engine, client_id, cm) if cm else None
     geo = _geo(engine, client_id)
     budget = _budget(engine, client_id, cm, config) if cm else None
-    qscore = _quality_score(engine, client_id)
+    qscore = _quality_score(engine, client_id, cm, config)
     keyword = _keyword_section(engine, client_id)
     kw_regions = _keyword_regions(engine, client_id, config)
     st = _search_terms_section(engine, client_id, config)
