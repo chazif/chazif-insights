@@ -362,6 +362,77 @@
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
+  // ---------- Non-Brand Categories (Performance) ----------
+  function renderNbCats(el) {
+    el.className = "view";
+    const n = (typeof DATA !== "undefined" && DATA.nb_categories_section) || null;
+    if (!n || !n.rows || !n.rows.length) {
+      el.innerHTML = stHead("Non-Brand Categories", "") +
+        `<div class="panel">No category data — set product categories in Business Context to break out non-brand spend.</div>`;
+      return;
+    }
+    const rows = n.rows.map(r => `<tr>
+        <td class="strong">${esc(r.category)}</td>
+        <td class="num" data-sort="${r.keywords}">${fmt.num(r.keywords)}</td>
+        <td class="num" data-sort="${r.clicks}">${fmt.num(r.clicks)}</td>
+        <td class="num" data-sort="${r.cost}">${fmt.money(r.cost)}</td>
+        <td class="num" data-sort="${r.share}">${(r.share * 100).toFixed(0)}%</td>
+        <td class="num" data-sort="${r.conv}">${fmt.num(r.conv, 1)}</td>
+        <td class="num" data-sort="${r.cpa}">${fmt.money(r.cpa, 2)}</td></tr>`).join("");
+    el.innerHTML = stHead("Non-Brand Categories", "Non-brand keyword spend by product category · brand terms excluded") +
+      `<div class="two-col">
+         <div class="panel"><h3>Spend share by category</h3><canvas id="nbDonut" height="210"></canvas></div>
+         <div class="panel"><h3>Spend by category</h3><canvas id="nbBars" height="210"></canvas></div>
+       </div>
+       <div class="panel"><h3>Category detail</h3><div class="tbl-wrap"><table class="sortable">
+         <thead><tr><th>Category</th><th class="num">Keywords</th><th class="num">Clicks</th>
+           <th class="num">Cost</th><th class="num">% Spend</th><th class="num">Conv</th><th class="num">CPA</th></tr></thead>
+         <tbody>${rows}
+           <tr class="strong"><td>Total</td><td></td><td></td>
+             <td class="num">${fmt.money(n.total_cost)}</td><td class="num">100%</td>
+             <td class="num">${fmt.num(n.total_conv, 1)}</td><td></td></tr>
+         </tbody></table></div></div>`;
+    donut("nbDonut", n.rows.map(r => r.category), n.rows.map(r => Math.round(r.cost)));
+    bars("nbBars", n.rows.map(r => r.category), n.rows.map(r => Math.round(r.cost)), "Cost");
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+
+  // ---------- Regions (Performance) — chart-forward view of the geographic data ----------
+  function renderRegions(el) {
+    el.className = "view";
+    const g = (typeof DATA !== "undefined" && DATA.geo_performance) || null;
+    if (!g || !g.rows || !g.rows.length) {
+      el.innerHTML = stHead("Regions", "") + `<div class="panel">No regional data.</div>`;
+      return;
+    }
+    const top = g.rows.slice(0, 12);
+    const body = g.rows.map(r => `<tr>
+        <td class="strong">${esc(r.location)}</td>
+        <td class="num" data-sort="${r.cost}">${fmt.money(r.cost)}</td>
+        <td class="num" data-sort="${r.clicks}">${fmt.num(r.clicks)}</td>
+        <td class="num" data-sort="${r.conv}">${fmt.num(r.conv, 1)}</td>
+        <td class="num" data-sort="${r.cpa}">${fmt.money(r.cpa, 2)}</td>
+        <td class="num" data-sort="${r.conv_value}">${fmt.money(r.conv_value)}</td></tr>`).join("");
+    const t = g.totals || {};
+    const dim = String(g.dimension || "region");
+    el.innerHTML = stHead("Regions", `Performance by ${esc(dim.toLowerCase())} · cost derived from CPA×conv (Geographic export carries no cost column)`) +
+      `<div class="two-col">
+         <div class="panel"><h3>Top ${top.length} ${esc(dim.toLowerCase())}s by spend</h3><canvas id="regChart" height="210"></canvas></div>
+         <div class="panel"><h3>Spend share</h3><canvas id="regDonut" height="210"></canvas></div>
+       </div>
+       <div class="panel"><h3>${esc(dim)} detail</h3><div class="tbl-wrap"><table class="sortable">
+         <thead><tr><th>${esc(dim)}</th><th class="num">Cost*</th><th class="num">Clicks</th>
+           <th class="num">Conv</th><th class="num">Cost/conv.</th><th class="num">Conv Value</th></tr></thead>
+         <tbody>${body}
+           <tr class="strong"><td>Total</td><td class="num">${fmt.money(t.cost)}</td>
+             <td class="num">${fmt.num(t.clicks)}</td><td class="num">${fmt.num(t.conv, 1)}</td>
+             <td></td><td class="num">${fmt.money(t.conv_value)}</td></tr>
+         </tbody></table></div></div>`;
+    bars("regChart", top.map(r => r.location), top.map(r => Math.round(r.cost)), "Cost");
+    donut("regDonut", top.map(r => r.location), top.map(r => Math.round(r.cost)));
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+
   // ---------- Recommendations (custom, with "See data" evidence modal) ----------
   (function injectModalStyle() {
     const s = document.createElement("style");
@@ -431,6 +502,8 @@
   // ---- register renderers ----
   const REG = {
     "recs": ["Recommendations", renderRecs],
+    "nb-cats": ["Non-Brand Categories", renderNbCats],
+    "regions": ["Regions", renderRegions],
     "campaign-perf": ["Campaign Performance", renderCampaignPerf],
     "budget-pacing": ["Budget & Pacing", renderBudgetPacing],
     "geo-perf": ["Geo Performance", renderGeoPerf],
@@ -452,7 +525,7 @@
   const meta = (window.__BUNDLE__ && window.__BUNDLE__.meta) || null;
   if (meta && Array.isArray(meta.views)) {
     const SECTIONS = [
-      ["Performance", ["overview", "trends", "campaign-perf", "budget-pacing"]],
+      ["Performance", ["overview", "trends", "nb-cats", "regions", "campaign-perf", "budget-pacing"]],
       ["Keyword", ["kw-deep-dive", "qs-detail", "qs-breakdown"]],
       ["Search Terms", ["st-intent", "st-relevant", "st-competitor", "st-flagged"]],
       ["Ad Copy", ["ad-copy", "ad-lp"]],

@@ -390,6 +390,47 @@ def _lp_categories(lps, product_categories):
     return out if any(not c["category"].startswith("Other") for c in out) else None
 
 
+def _nb_categories(engine, client_id, config):
+    """Non-brand keyword spend bucketed by product category (keywords matched to the
+    configured categories, brand terms excluded). Single-period — the export carries no
+    prior-year column, so this is the current window, not a YoY. Returns None if no
+    categories are configured or nothing buckets to a real category."""
+    cats = config.get("product_categories") or []
+    if not cats:
+        return None
+    brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
+    catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4] for c in cats}
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT cost, clicks, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='search_keyword_qs'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    grid = defaultdict(lambda: [0.0, 0.0, 0.0, 0])  # cost, clicks, conv, keywords
+    for cost, clicks, conv, row in rows:
+        kw = (_asdict(row).get("search_keyword", "") or "").lower()
+        if brand_terms and any(bt in kw for bt in brand_terms):
+            continue  # brand keyword -> not "non-brand"
+        matched = None
+        for cat, kws in catkw.items():
+            if cat.lower() in kw or any(w in kw for w in kws):
+                matched = cat
+                break
+        g = grid[matched or "Other / uncategorized"]
+        g[0] += _num(cost); g[1] += _num(clicks); g[2] += _num(conv); g[3] += 1
+    out = [{"category": cat, "cost": round(g[0], 2), "clicks": round(g[1]),
+            "conv": round(g[2], 1), "keywords": g[3],
+            "cpa": round(g[0] / g[2], 2) if g[2] else 0}
+           for cat, g in sorted(grid.items(), key=lambda kv: -kv[1][0])]
+    if not any(not r["category"].startswith("Other") for r in out):
+        return None
+    total = sum(r["cost"] for r in out)
+    for r in out:
+        r["share"] = round(r["cost"] / total, 4) if total else 0
+    return {"rows": out, "total_cost": round(total, 2),
+            "total_conv": round(sum(r["conv"] for r in out), 1)}
+
+
 def _landing_pages(engine, client_id, config):
     """Landing-page performance (clicks/cost/CTR + mobile speed) + a URL-derived category
     grid. The LP export has no conversion or device column, so no CVR / device grid."""
@@ -580,8 +621,18 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
     st = _search_terms_section(engine, client_id, config)
     ads = _ads_section(engine, client_id)
     lps = _landing_pages(engine, client_id, config)
+    nb_cats = _nb_categories(engine, client_id, config)
 
-    view_list = ["overview", "trends", "campaign-perf", "budget-pacing"]
+    # Performance section — mirrors the reference nav order (Overview, Monthly Trends,
+    # NB Categories, Regions, Campaign, Budget). NB Categories needs product categories;
+    # Regions reuses the geographic data. All Brands / Brand Detail are multi-brand only
+    # and never populate for a single-brand account, so they are not listed here.
+    view_list = ["overview", "trends"]
+    if nb_cats:
+        view_list.append("nb-cats")
+    if geo:
+        view_list.append("regions")
+    view_list += ["campaign-perf", "budget-pacing"]
     if keyword:
         view_list.append("kw-deep-dive")
     if qscore:
@@ -634,4 +685,5 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
         "search_terms_section": st,
         "ads_section": ads,
         "landing_pages_section": lps,
+        "nb_categories_section": nb_cats,
     }
