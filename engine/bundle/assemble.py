@@ -594,6 +594,21 @@ def _grade_ad(ctr, impr, branded):
         if ctr >= mn:
             return g
     return "F — Poor / No Conversions"
+
+
+def _grade_lp(cvr, impr, clicks):
+    """Landing-page grade from the ad's CVR (ad-level conversion as an LP proxy)."""
+    if impr < 100 or clicks < 5:
+        return "Low Volume"
+    if cvr >= 0.40:
+        return "A — Top Performer"
+    if cvr >= 0.25:
+        return "B — Good"
+    if cvr >= 0.15:
+        return "C — Average"
+    if cvr >= 0.05:
+        return "D — Below Average"
+    return "F — Poor / No Conversions"
 ST_GRADE_METHOD = [
     ("A — Top Performer", "≥ 40%", "Converts exceptionally well. Protect and scale."),
     ("B — Good", "25–40%", "Solid performer — worth investing in."),
@@ -794,7 +809,8 @@ def _ads_section(engine, client_id, config=None):
                     "clicks": round(clicks), "impr": round(impr), "cost": round(cost, 2), "conv": round(cv, 1),
                     "ctr": round(ctr, 4), "cpc": round(cost / clicks, 2) if clicks else 0,
                     "cvr": round(cv / clicks, 4) if clicks else 0,
-                    "grade": _grade_ad(ctr, impr, branded)})
+                    "grade": _grade_ad(ctr, impr, branded),
+                    "lp_grade": _grade_lp(cv / clicks if clicks else 0, impr, clicks)})
     if not ads:
         return None
     ads.sort(key=lambda x: -x["cost"])
@@ -809,13 +825,41 @@ def _ads_section(engine, client_id, config=None):
                    "spend_share": round(gs[g] / tot, 4) if tot else 0, "conv": round(gcv[g], 0),
                    "cvr": round(gcv[g] / gcl[g], 4) if gcl[g] else 0} for g in ST_GRADES if g in gc]
         detail = [{"brand": a["brand"], "category": a["category"], "region": a["region"], "ad_group": a["ad_group"],
-                   "headline": a["headline"], "grade": a["grade"], "ctr": a["ctr"], "impr": a["impr"],
-                   "clicks": a["clicks"], "cpc": a["cpc"], "spend": a["cost"], "conv": a["conv"], "cvr": a["cvr"]}
-                  for a in subset[:100]]
+                   "headline": a["headline"], "grade": a["grade"], "ctr_grade": a["grade"], "lp_grade": a["lp_grade"],
+                   "ctr": a["ctr"], "impr": a["impr"], "clicks": a["clicks"], "cpc": a["cpc"], "spend": a["cost"],
+                   "conv": a["conv"], "cvr": a["cvr"]} for a in subset[:100]]
+
+        # pairing grid: Ad-CTR grade (rows) × LP-CVR grade (cols)
+        pg = {r: {c: [0, 0.0] for c in ST_GRADES} for r in ST_GRADES}
+        for a in subset:
+            cell = pg[a["grade"]][a["lp_grade"]]; cell[0] += 1; cell[1] += a["cost"]
+        n = len(subset)
+        grid_rows = [{"ctr_grade": r,
+                      "cols": [{"cvr_grade": c, "ads": pg[r][c][0], "spend": round(pg[r][c][1], 2),
+                                "pct": round(pg[r][c][0] / n, 4) if n else 0} for c in ST_GRADES],
+                      "total_ads": sum(pg[r][c][0] for c in ST_GRADES),
+                      "total_spend": round(sum(pg[r][c][1] for c in ST_GRADES), 2)} for r in ST_GRADES]
+        col_totals = [{"cvr_grade": c, "ads": sum(pg[r][c][0] for r in ST_GRADES),
+                       "spend": round(sum(pg[r][c][1] for r in ST_GRADES), 2)} for c in ST_GRADES]
+
+        strong = lambda g: g[0] in ("A", "B")
+        weak = lambda g: g[0] in ("D", "F")
+        low = lambda g: g.startswith("Low")
+        stats = {
+            "total": n,
+            "aligned": sum(1 for a in subset if strong(a["grade"]) and strong(a["lp_grade"])),
+            "fix_lp": sum(1 for a in subset if strong(a["grade"]) and weak(a["lp_grade"])),
+            "fix_ad": sum(1 for a in subset if weak(a["grade"]) and strong(a["lp_grade"])),
+            "low_vol": sum(1 for a in subset if low(a["grade"]) or low(a["lp_grade"])),
+        }
+        stats["aligned_pct"] = round(stats["aligned"] / n, 4) if n else 0
         return {"count": len(subset), "grades": grades, "rows": detail,
                 "categories": sorted({a["category"] for a in subset if a["category"] != "Uncategorized"}),
                 "regions": sorted({a["region"] for a in subset if a["region"] != "—"}),
-                "grade_labels": [g["grade"] for g in grades], "has_region": False}
+                "grade_labels": [g["grade"] for g in grades], "has_region": False,
+                "pairing": {"grades": ST_GRADES, "rows": grid_rows, "col_totals": col_totals,
+                            "grand_ads": n, "grand_spend": round(sum(a["cost"] for a in subset), 2)},
+                "stats": stats}
 
     nb = [a for a in ads if not a["branded"]]
     br = [a for a in ads if a["branded"]]
