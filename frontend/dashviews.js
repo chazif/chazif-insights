@@ -502,7 +502,17 @@
       .kwd-grid td.kwd-empty{color:#cfd4cb;text-align:center}
       .kwd-brandhead td{background:var(--ink,#1a1a1a);color:var(--lime,#CFFF04);font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:11px;letter-spacing:.04em;text-transform:uppercase;position:sticky;left:0}
       .kwd-ctls{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
-      .kwd-ctl label.lbl{display:block;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--grey,#888);margin-bottom:5px}`;
+      .kwd-ctl label.lbl{display:block;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--grey,#888);margin-bottom:5px}
+      .qsb-grouphead td{background:var(--ink,#1a1a1a);color:#fff;font-weight:700;font-size:11px;letter-spacing:.04em;padding:9px 12px;text-transform:uppercase}
+      .qsb-badge{display:inline-block;background:var(--lime,#CFFF04);color:var(--ink,#1a1a1a);font-weight:800;border-radius:4px;padding:1px 7px;margin-right:8px}
+      .qsb-grid{border-collapse:separate;border-spacing:0;width:100%;font-size:12.5px}
+      .qsb-grid th,.qsb-grid td{padding:9px 12px;border-bottom:1px solid var(--line,#eee)}
+      .qsb-grid thead th.qsb-hd{background:var(--ink,#1a1a1a);color:#fff;font-size:11px;letter-spacing:.03em;text-transform:uppercase}
+      .qsb-grid thead th{background:#FAFAF7;text-align:right}
+      .qsb-grid thead th:first-child{text-align:left}
+      .qsb-grid td.qsb-ectr{vertical-align:middle;background:#FAFAF7;border-right:2px solid var(--line,#eee)}
+      .qsb-grid td.qsb-cell{text-align:center;font-variant-numeric:tabular-nums}
+      .qsb-grid td.pair-cell{text-align:right;font-variant-numeric:tabular-nums}`;
     document.head.appendChild(s);
   })();
   // t in [0,1] -> green(low) → yellow(mid) → red(high) background style
@@ -876,17 +886,95 @@
     });
     if (typeof enableSortable === "function") enableSortable(el);
   }
+  const kmoney = v => { const n = Math.round(v || 0); return n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(1) + "K" : "$" + n; };
+  const pairStyle = (ctr, cvr) => {
+    const cS = ctr[0] === "A" || ctr[0] === "B", cW = ctr[0] === "D" || ctr[0] === "F";
+    const vS = cvr[0] === "A" || cvr[0] === "B", vW = cvr[0] === "D" || cvr[0] === "F";
+    if (cS && vS) return "background:#DCFCE7"; if (cS && vW) return "background:#FEE2E2";
+    if (cW && vS) return "background:#FEF3C7"; return "";
+  };
+  let ALP_GROUP = "nonbranded", ALP_CAT = "all", ALP_REG = "all", ALP_FILTER = "", ALP_CELL = null;
   function renderAdLp(el) {
     el.className = "view"; const a = (typeof DATA !== "undefined" && DATA.ads_section) || null;
-    if (!a) { el.innerHTML = stHead("Ad &harr; LP Pairing", "") + `<div class="panel">No ad data.</div>`; return; }
-    const rows = a.ads.map(d => { const u = d.final_url || ""; return `<tr>
-        <td class="strong">${esc(d.campaign)}</td><td>${esc(d.ad_group)}</td>
-        <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a>` : "—"}</td>
-        <td class="num">${fmt.num(d.clicks)}</td><td class="num">${fmt.money(d.cost)}</td><td class="num">${fmt.num(d.conv, 1)}</td></tr>`; }).join("");
-    el.innerHTML = stHead("Ad &harr; LP Pairing", "Each ad and the landing page it points to") +
-      `<div class="panel"><div class="tbl-wrap"><table class="sortable">
-        <thead><tr><th>Campaign</th><th>Ad group</th><th>Landing page</th><th class="num">Clicks</th><th class="num">Cost</th><th class="num">Conv</th></tr></thead>
-        <tbody>${rows}</tbody></table></div></div>`;
+    const ac = a && a.ad_copy;
+    if (!ac) { el.innerHTML = stHead("Ad &harr; LP Pairing", "") + `<div class="panel">No ad data.</div>`; return; }
+    if (!ac[ALP_GROUP]) ALP_GROUP = ac.nonbranded ? "nonbranded" : "branded";
+    const g = ac[ALP_GROUP], P = g.pairing, S = g.stats, label = ALP_GROUP === "branded" ? "Branded" : "Non-Branded";
+    const gseg = k => `<button class="seg-pill ${ALP_GROUP === k ? "active" : ""}" data-alpg="${k}">${k === "branded" ? "Branded" : "Non-Branded"}</button>`;
+    // stat cards
+    const cards = `
+      <div class="stat"><div class="stat-label">Total ads</div><div class="stat-value">${fmt.num(S.total)}</div></div>
+      <div class="stat hl"><div class="stat-label">Aligned · A/B ad + A/B LP</div><div class="stat-value">${fmt.num(S.aligned)}</div><div class="stat-chg">${fmt.pct(S.aligned_pct, 1)} of ads</div></div>
+      <div class="stat"><div class="stat-label">Good ad · weak LP <span class="tag" style="background:#FEE2E2;color:#991B1B">FIX LP</span></div><div class="stat-value">${fmt.num(S.fix_lp)}</div><div class="stat-chg">A/B ad CTR → D/F LP CVR</div></div>
+      <div class="stat"><div class="stat-label">Weak ad · good LP <span class="tag" style="background:#FEF3C7;color:#92660A">FIX AD</span></div><div class="stat-value">${fmt.num(S.fix_ad)}</div><div class="stat-chg">D/F ad CTR · A/B LP CVR</div></div>
+      <div class="stat"><div class="stat-label">Low Volume</div><div class="stat-value">${fmt.num(S.low_vol)}</div><div class="stat-chg">&lt; 100 imp or &lt; 5 clicks</div></div>`;
+    // pairing grid
+    const headCols = P.grades.map(c => `<th>${stGradePill(c)}</th>`).join("");
+    const bodyRows = P.rows.map(row => `<tr>
+        <td>${stGradePill(row.ctr_grade)}</td>
+        ${row.cols.map(c => {
+          const sel = ALP_CELL && ALP_CELL[0] === row.ctr_grade && ALP_CELL[1] === c.cvr_grade;
+          if (!c.ads) return `<td class="pair-cell muted" style="text-align:center">·</td>`;
+          return `<td class="pair-cell" data-ctr="${esc(row.ctr_grade)}" data-cvr="${esc(c.cvr_grade)}" style="${pairStyle(row.ctr_grade, c.cvr_grade)};cursor:pointer${sel ? ";outline:2px solid #1A1A1A;outline-offset:-2px" : ""}">
+            <strong>${fmt.num(c.ads)}</strong> <span class="muted">(${kmoney(c.spend)})</span><div class="muted" style="font-size:10px">${(c.pct * 100).toFixed(1)}% of ads</div></td>`;
+        }).join("")}
+        <td class="num strong">${fmt.num(row.total_ads)}<div class="muted" style="font-size:10px">${kmoney(row.total_spend)}</div></td></tr>`).join("");
+    const totalRow = `<tr class="strong"><td>Total</td>${P.col_totals.map(c => `<td class="num">${fmt.num(c.ads)}<div class="muted" style="font-size:10px">${kmoney(c.spend)}</div></td>`).join("")}<td class="num">${fmt.num(P.grand_ads)}<div class="muted" style="font-size:10px">${kmoney(P.grand_spend)}</div></td></tr>`;
+    // ad list
+    const rowFn = r => `<tr>
+        <td class="strong">${esc(r.brand)}</td>
+        <td>${r.category === "Uncategorized" ? '<span class="muted">Uncategorized</span>' : `<span class="tag info">${esc(r.category)}</span>`}</td>
+        <td>${r.region === "—" ? '<span class="muted">—</span>' : esc(r.region)}</td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.ad_group)}</td>
+        <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="muted" style="font-size:11.5px">${esc(r.headline)}</span></td>
+        <td>${stGradePill(r.grade)}</td><td class="num">${fmt.pct(r.ctr, 2)}</td><td class="num">${fmt.num(r.impr)}</td>
+        <td class="num">${fmt.num(r.clicks)}</td><td class="num">${fmt.money(r.cpc, 2)}</td><td class="num">${fmt.money(r.spend)}</td>
+        <td class="num">${fmt.num(r.conv, 1)}</td><td class="num">${fmt.pct(r.cvr, 2)}</td></tr>`;
+    const filterRows = () => {
+      let rws = g.rows;
+      if (ALP_CELL) rws = rws.filter(r => r.ctr_grade === ALP_CELL[0] && r.lp_grade === ALP_CELL[1]);
+      if (ALP_CAT !== "all") rws = rws.filter(r => r.category === ALP_CAT);
+      if (ALP_REG !== "all") rws = rws.filter(r => r.region === ALP_REG);
+      if (ALP_FILTER) { const f = ALP_FILTER.toLowerCase(); rws = rws.filter(r => (r.ad_group + " " + r.headline + " " + r.region + " " + r.category).toLowerCase().indexOf(f) >= 0); }
+      return rws;
+    };
+    const shown = filterRows();
+    const opts = (list, cur) => ['<option value="all">All</option>'].concat(list.map(x => `<option value="${esc(x)}"${cur === x ? " selected" : ""}>${esc(x)}</option>`)).join("");
+    const cellLabel = ALP_CELL ? `${ALP_CELL[0].split(" ")[0]} ad × ${ALP_CELL[1].split(" ")[0]} LP` : "All cells";
+    el.innerHTML = `
+      <div class="view-head"><div><h2>Ad &harr; LP Pairing · ${label}</h2>
+        <div class="muted">Ad performance graded by CTR × landing-page performance graded by CVR (from ad-level conversion). Click any grid cell to filter the ad list below.</div></div>
+        <div class="seg-group">${gseg("nonbranded")}${gseg("branded")}</div></div>
+      <div class="stat-grid">${cards}</div>
+      <div class="panel"><h3>Pairing grid · ads by Ad-CTR grade (rows) × LP-CVR grade (cols) · ${label}</h3>
+        <div class="tbl-wrap"><table class="qsb-grid">
+          <thead><tr><th>AD CTR ↓ &nbsp; LP CVR →</th>${headCols}<th>Total</th></tr></thead>
+          <tbody>${bodyRows}${totalRow}</tbody></table></div>
+        <div class="muted" style="margin-top:8px"><span class="tag" style="background:#DCFCE7">Aligned</span> both strong · <span class="tag" style="background:#FEE2E2">Fix LP</span> high-CTR ad on low-converting LP · <span class="tag" style="background:#FEF3C7">Fix Ad</span> good LP, weak ad copy</div></div>
+      <div class="panel">
+        <div class="toolbar">
+          <button class="multi-btn" id="alpAll">${esc(cellLabel)}${ALP_CELL ? " ✕" : ""}</button>
+          <input type="text" id="alpFilter" placeholder="Filter ad group / headline / region…" value="${esc(ALP_FILTER)}" style="min-width:220px"/>
+          <label>Category:</label><select id="alpCat">${opts(g.categories, ALP_CAT)}</select>
+          ${g.has_region ? `<label>Region:</label><select id="alpReg">${opts(g.regions, ALP_REG)}</select>` : ""}
+          <span class="muted" id="alpCount" style="margin-left:auto">Showing ${fmt.num(shown.length)} of ${fmt.num(g.count)}${g.count > g.rows.length ? ` · top ${g.rows.length} by spend` : ""}</span>
+        </div>
+        <div class="tbl-wrap"><table class="sortable">
+          <thead><tr><th>Brand</th><th>Category</th><th>Region</th><th>Ad Group</th><th>Headline</th><th>Grade</th>
+            <th class="num">CTR</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CPC</th><th class="num">Spend</th><th class="num">Conv</th><th class="num">CVR</th></tr></thead>
+          <tbody id="alpBody">${shown.map(rowFn).join("")}</tbody></table></div>
+      </div>`;
+    el.querySelectorAll("[data-alpg]").forEach(b => b.addEventListener("click", () => { ALP_GROUP = b.dataset.alpg; ALP_CELL = null; ALP_CAT = "all"; ALP_REG = "all"; setView("ad-lp", { preserveScroll: true }); }));
+    el.querySelectorAll(".pair-cell[data-ctr]").forEach(c => c.addEventListener("click", () => { ALP_CELL = [c.dataset.ctr, c.dataset.cvr]; setView("ad-lp", { preserveScroll: true }); }));
+    const allBtn = el.querySelector("#alpAll"); if (allBtn) allBtn.addEventListener("click", () => { ALP_CELL = null; setView("ad-lp", { preserveScroll: true }); });
+    const bind = (id, set) => { const e = el.querySelector(id); if (e) e.addEventListener("change", () => { set(e.value); setView("ad-lp", { preserveScroll: true }); }); };
+    bind("#alpCat", v => ALP_CAT = v); bind("#alpReg", v => ALP_REG = v);
+    const tf = el.querySelector("#alpFilter");
+    if (tf) tf.addEventListener("input", () => {
+      ALP_FILTER = tf.value; const rws = filterRows();
+      const body = el.querySelector("#alpBody"); if (body) body.innerHTML = rws.map(rowFn).join("");
+      const cnt = el.querySelector("#alpCount"); if (cnt) cnt.textContent = `Showing ${fmt.num(rws.length)} of ${fmt.num(g.count)}${g.count > g.rows.length ? ` · top ${g.rows.length} by spend` : ""}`;
+    });
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
