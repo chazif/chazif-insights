@@ -449,11 +449,39 @@
     });
     if (typeof enableSortable === "function") enableSortable(el);
   }
+  let STF_FILTER = "";
   function renderStFlagged(el) {
     el.className = "view"; const s = stData();
-    if (!s) { el.innerHTML = stHead("Flagged / Review", "") + `<div class="panel">No data.</div>`; return; }
-    el.innerHTML = stHead("Flagged / Review", `Zero-conversion or irrelevant terms — negative-keyword candidates`) +
-      `<div class="panel">${termTable(s.flagged, true)}</div>`;
+    if (!s) { el.innerHTML = stHead("Flagged / Needs Review", "") + `<div class="panel">No data.</div>`; return; }
+    const rows = s.flagged_terms || [];
+    if (!rows.length) {
+      el.innerHTML = stHead("Flagged / Needs Review", "Terms flagged for review based on intent/relevance") +
+        `<div class="panel"><div class="ws-empty" style="padding:24px;text-align:center;color:var(--grey)">No terms need review.</div></div>`;
+      return;
+    }
+    const intentPill = i => `<span class="tag" style="background:#E0EAFB;color:#1E40AF;font-size:10.5px">${esc(i)}</span>`;
+    const rowFn = r => `<tr>
+        <td class="strong">${esc(r.term)}</td><td>${intentPill(r.intent)}</td><td>${stStatusBadge(r.status)}</td>
+        <td class="num">${fmt.money(r.spend)}</td><td class="num">${fmt.num(r.clicks)}</td>
+        <td class="num">${fmt.num(r.conv, 1)}</td><td class="num">${fmt.pct(r.cvr, 2)}</td>
+        <td class="num">${r.cpa ? fmt.money(r.cpa, 2) : "—"}</td></tr>`;
+    const filterRows = () => STF_FILTER ? rows.filter(r => r.term.toLowerCase().indexOf(STF_FILTER.toLowerCase()) >= 0) : rows;
+    const shown = filterRows();
+    el.innerHTML = stHead("Flagged / Needs Review", `Top ${fmt.num(rows.length)} terms flagged for review based on intent/relevance`) +
+      `<div class="panel">
+         <div class="toolbar"><input type="text" id="stfFilter" placeholder="Filter term…" value="${esc(STF_FILTER)}" style="min-width:240px"/>
+           <span class="muted" id="stfCount" style="margin-left:auto">Showing ${fmt.num(shown.length)} of ${fmt.num(s.flagged_total)}</span></div>
+         <div class="tbl-wrap"><table class="sortable">
+           <thead><tr><th>Search Term</th><th>Intent</th><th>Status</th><th class="num">Spend</th><th class="num">Clicks</th>
+             <th class="num">Conv</th><th class="num">CVR</th><th class="num">CPA</th></tr></thead>
+           <tbody id="stfBody">${shown.map(rowFn).join("")}</tbody></table></div>
+       </div>`;
+    const tf = el.querySelector("#stfFilter");
+    if (tf) tf.addEventListener("input", () => {
+      STF_FILTER = tf.value; const rws = filterRows();
+      const body = el.querySelector("#stfBody"); if (body) body.innerHTML = rws.map(rowFn).join("");
+      const cnt = el.querySelector("#stfCount"); if (cnt) cnt.textContent = `Showing ${fmt.num(rws.length)} of ${fmt.num(s.flagged_total)}`;
+    });
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
