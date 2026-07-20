@@ -1020,6 +1020,46 @@ def _regions(engine, client_id, cm, config):
             "categories": sorted(cats), "cells": cells}
 
 
+def _lp_score(cvr, clicks):
+    """Landing-page quality label from its conversion rate."""
+    if clicks < 5:
+        return "—"
+    if cvr >= 0.45:
+        return "Excellent"
+    if cvr >= 0.30:
+        return "Strong"
+    if cvr >= 0.20:
+        return "Average"
+    return "Below Avg"
+
+
+def _lp_performance(engine, client_id):
+    """Per landing-page cost/clicks/conv/CVR/CPA + quality score, from ads grouped by
+    final URL (the ads report is the only source that carries LP-level conversions)."""
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT clicks, cost, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='ads_performance'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    agg = defaultdict(lambda: [0.0, 0.0, 0.0])   # cost, clicks, conv
+    for clicks, cost, conv, row in rows:
+        d = _asdict(row)
+        url = d.get("ad_final_url") or d.get("final_url") or ""
+        if not url:
+            continue
+        a = agg[url]; a[0] += _num(cost); a[1] += _num(clicks); a[2] += _num(conv)
+    if not agg:
+        return None
+    out = []
+    for url, (cost, clicks, conv) in sorted(agg.items(), key=lambda kv: -kv[1][0])[:50]:
+        cvr = conv / clicks if clicks else 0
+        out.append({"url": url, "cost": round(cost, 2), "clicks": round(clicks), "conv": round(conv, 1),
+                    "cvr": round(cvr, 4), "cpa": round(cost / conv, 2) if conv else None,
+                    "score": _lp_score(cvr, clicks)})
+    return out
+
+
 def _landing_pages(engine, client_id, config):
     """Landing-page performance (clicks/cost/CTR + mobile speed) + a URL-derived category
     grid. The LP export has no conversion or device column, so no CVR / device grid."""
@@ -1332,6 +1372,11 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
     st = _search_terms_section(engine, client_id, config)
     ads = _ads_section(engine, client_id, config)
     lps = _landing_pages(engine, client_id, config)
+    lp_perf = _lp_performance(engine, client_id)
+    if lps is None and lp_perf:
+        lps = {"count": len(lp_perf), "rows": [], "category_grid": None}
+    if lps is not None:
+        lps["performance"] = lp_perf
     nb_cats = _nb_categories(engine, client_id, cm, config) if cm else None
     regions = _regions(engine, client_id, cm, config) if cm else None
 
