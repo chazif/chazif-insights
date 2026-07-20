@@ -451,6 +451,86 @@ def _qs_breakdown(engine, client_id, cm, config):
     }
 
 
+def _region_category(engine, client_id, config):
+    """Region & Category — for each Brand×Region×Category slice, avg CPC split by the
+    keyword's component rating (Below / Average / Above) per QS component, with the
+    Below−Above CPC spread. Joins the region-segmented keyword export (region + spend)
+    to search_keyword_qs (component ratings). None if the segmented export is absent."""
+    with engine.connect() as c:
+        geo = c.execute(text("SELECT clicks, cost, row FROM raw_rows WHERE client_id=:c "
+                             "AND report_type='keyword_geo'"), {"c": client_id}).all()
+    if not geo:
+        return None
+    with engine.connect() as c:
+        kqs = c.execute(text("SELECT row FROM raw_rows WHERE client_id=:c "
+                             "AND report_type='search_keyword_qs'"), {"c": client_id}).all()
+    kw_ratings = {}
+    for (row,) in kqs:
+        d = _asdict(row); kw = (d.get("search_keyword") or "").lower()
+        if kw:
+            kw_ratings[kw] = {ck: _norm_rating(d.get(ck)) for ck, _, _ in QS_COMPONENTS}
+    if not kw_ratings:
+        return None
+
+    config = config or {}
+    brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
+    brand_label = (config.get("brand_terms") or [None])[0] or _client_name(engine, client_id)
+    catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
+             for c in (config.get("product_categories") or [])}
+
+    def categorize(kw):
+        n = kw.lower()
+        for cat, kws in catkw.items():
+            if cat.lower() in n or any(w in n for w in kws):
+                return cat[:1].upper() + cat[1:]
+        return "Uncategorized"
+
+    slices = {}
+    for clicks, cost, row in geo:
+        d = _asdict(row); kw = d.get("search_keyword"); region = _region_value(d)
+        if not kw or not region:
+            continue
+        kwl = kw.lower()
+        if brand_terms and any(b in kwl for b in brand_terms):
+            continue                                  # non-brand only
+        cost = _num(cost); clicks = _num(clicks)
+        key = (brand_label, region, categorize(kw))
+        s = slices.get(key)
+        if s is None:
+            s = slices[key] = {"total": 0.0, "comp": {ck: {r: [0.0, 0.0] for r in QS_RATINGS}
+                                                      for ck, _, _ in QS_COMPONENTS}}
+        s["total"] += cost
+        rr = kw_ratings.get(kwl)
+        if rr:
+            for ck, _, _ in QS_COMPONENTS:
+                rating = rr.get(ck)
+                if rating:
+                    b = s["comp"][ck][rating]; b[0] += cost; b[1] += clicks
+    if not slices:
+        return None
+
+    def cpc(b):
+        return round(b[0] / b[1], 2) if b[1] else None
+    components = []
+    for ck, label, _ in QS_COMPONENTS:
+        rows = []
+        for (brand, region, cat), s in slices.items():
+            bk = s["comp"][ck]
+            below, avg, above = bk["Below average"], bk["Average"], bk["Above average"]
+            bcpc, acpc, abcpc = cpc(below), cpc(avg), cpc(above)
+            spread = round(bcpc - abcpc, 2) if (bcpc is not None and abcpc is not None) else None
+            rows.append({"brand": brand, "region": region, "category": cat,
+                         "total_spend": round(s["total"], 2),
+                         "below_cpc": bcpc, "below_clicks": round(below[1]),
+                         "avg_cpc": acpc, "avg_clicks": round(avg[1]),
+                         "above_cpc": abcpc, "above_clicks": round(above[1]), "spread": spread})
+        rows.sort(key=lambda r: -r["total_spend"])
+        components.append({"key": ck, "label": label, "total": len(rows), "rows": rows[:100]})
+    cats = sorted({r["category"] for comp in components for r in comp["rows"] if r["category"] != "Uncategorized"})
+    regs = sorted({r["region"] for comp in components for r in comp["rows"]})
+    return {"components": components, "categories": cats, "regions": regs}
+
+
 def _search_terms(engine, client_id, config):
     """Top zero-conversion (waste) and top converting terms, with LLM/heuristic
     relevance on the top waste terms to separate confirmed-irrelevant waste (negate)
@@ -1002,6 +1082,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
     qs_break = _qs_breakdown(engine, client_id, cm, config)
     keyword = _keyword_section(engine, client_id)
     kw_regions = _keyword_regions(engine, client_id, config)
+    reg_cat = _region_category(engine, client_id, config)
     st = _search_terms_section(engine, client_id, config)
     ads = _ads_section(engine, client_id)
     lps = _landing_pages(engine, client_id, config)
@@ -1024,6 +1105,8 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
         view_list.append("qs-detail")
     if qs_break or keyword:
         view_list.append("qs-breakdown")
+    if reg_cat:
+        view_list.append("region-category")
     if st:
         view_list += ["st-intent", "st-relevant"]
         if st["competitor"]:
@@ -1068,6 +1151,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
         "quality_score": qscore,
         "keyword_section": keyword,
         "qs_breakdown_section": qs_break,
+        "region_category_section": reg_cat,
         "keyword_regions_section": kw_regions,
         "search_terms_section": st,
         "ads_section": ads,
