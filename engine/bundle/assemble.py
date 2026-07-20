@@ -943,12 +943,20 @@ def _search_terms_section(engine, client_id, config):
             "WHERE client_id=:c AND report_type='search_terms'"), {"c": client_id}).all()
     if not rows:
         return None
+    brand_excl = [b.lower() for b in (config.get("brand_terms") or []) if b]
     terms = []
     for term, clicks, cost, conv, row in rows:
-        t = {"term": term or "", "match": _asdict(row).get("search_terms_match_type", ""),
+        tl = (term or "").lower()
+        if brand_excl and any(b in tl for b in brand_excl):
+            continue                                # non-brand analysis only
+        d = _asdict(row)
+        t = {"term": term or "", "match": d.get("search_terms_match_type", ""),
+             "added": d.get("added_excluded"),
              "clicks": _num(clicks), "cost": _num(cost), "conv": _num(conv)}
         t["grade"] = _grade_term(t)
         terms.append(t)
+    if not terms:
+        return None
 
     top = sorted(terms, key=lambda x: -x["cost"])[:60]
     context = {"product_categories": config.get("product_categories", []),
@@ -997,12 +1005,27 @@ def _search_terms_section(engine, client_id, config):
             return "Relevant"
         return "Needs Review"
 
+    def status_of(t):
+        ae = (t.get("added") or "").lower()
+        if "exclud" in ae:
+            return "Excluded"
+        if "add" in ae:
+            return "Already Added"
+        g = t["grade"][0]
+        if g in ("A", "B", "C"):
+            return "Recommend to Add"
+        if g == "D":
+            return "Review"
+        return "Unassigned"
+
     seg_c, seg_s = Counter(), Counter()
-    svc_s = Counter()
-    comp_s = Counter()
+    svc_s = Counter(); comp_s = Counter()
+    st_c, st_s = Counter(), Counter()
     for t in terms:
-        seg = intent_of(t["term"]); seg_c[seg] += 1; seg_s[seg] += t["cost"]
-        cat = category_of(t["term"]); svc_s[cat or "Other / uncategorized"] += t["cost"]
+        seg = intent_of(t["term"]); t["seg"] = seg; seg_c[seg] += 1; seg_s[seg] += t["cost"]
+        t["cat"] = category_of(t["term"])
+        svc_s[t["cat"] or "Other / uncategorized"] += t["cost"]
+        t["status"] = status_of(t); st_c[t["status"]] += 1; st_s[t["status"]] += t["cost"]
         tl = t["term"].lower()
         for cx in comps_orig:
             if cx and cx.lower() in tl:
@@ -1014,6 +1037,18 @@ def _search_terms_section(engine, client_id, config):
                           for c, v in sorted(svc_s.items(), key=lambda kv: -kv[1]) if v > 0]
     competitor_breakdown = [{"segment": c, "spend": round(v, 2)}
                             for c, v in sorted(comp_s.items(), key=lambda kv: -kv[1])[:12] if v > 0]
+
+    STATUS_ORDER = ["Recommend to Add", "Already Added", "Review", "Excluded", "Unassigned"]
+    keyword_status = [{"status": s, "terms": st_c[s], "spend": round(st_s[s], 2),
+                       "spend_share": round(st_s[s] / total_spend, 4) if total_spend else 0}
+                      for s in STATUS_ORDER]
+
+    rel_sorted = sorted([t for t in terms if t["seg"] == "Relevant"], key=lambda x: -x["cost"])
+    relevant_terms = [{"term": t["term"], "category": t["cat"] or "Uncategorized", "grade": t["grade"],
+                       "status": t["status"], "spend": round(t["cost"], 2), "clicks": round(t["clicks"]),
+                       "conv": round(t["conv"], 1), "cvr": round(t["conv"] / t["clicks"], 4) if t["clicks"] else 0,
+                       "cpc": round(t["cost"] / t["clicks"], 2) if t["clicks"] else 0} for t in rel_sorted[:150]]
+    rel_categories = sorted({r["category"] for r in relevant_terms if r["category"] != "Uncategorized"})
 
     # legacy intent mix (top terms, LLM categories) kept for other consumers
     ic, isp = Counter(), Counter()
@@ -1040,6 +1075,10 @@ def _search_terms_section(engine, client_id, config):
         "intent_segments": intent_segments,
         "service_categories": service_categories,
         "competitor_breakdown": competitor_breakdown,
+        "keyword_status": keyword_status,
+        "relevant_terms": relevant_terms,
+        "relevant_categories": rel_categories,
+        "relevant_total": len(rel_sorted),
         "grades": grades,
         "grade_method": [{"grade": g, "threshold": th, "interpretation": desc} for (g, th, desc) in ST_GRADE_METHOD],
         "grade_summary": grade_summary,
