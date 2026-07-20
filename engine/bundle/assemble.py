@@ -1065,6 +1065,12 @@ def _search_terms_section(engine, client_id, config):
                        "cpc": round(t["cost"] / t["clicks"], 2) if t["clicks"] else 0} for t in rel_sorted[:150]]
     rel_categories = sorted({r["category"] for r in relevant_terms if r["category"] != "Uncategorized"})
 
+    flag_sorted = sorted([t for t in terms if t["seg"] == "Needs Review"], key=lambda x: -x["cost"])
+    flagged_terms = [{"term": t["term"], "intent": t["seg"], "status": t["status"], "spend": round(t["cost"], 2),
+                      "clicks": round(t["clicks"]), "conv": round(t["conv"], 1),
+                      "cvr": round(t["conv"] / t["clicks"], 4) if t["clicks"] else 0,
+                      "cpa": round(t["cost"] / t["conv"], 2) if t["conv"] else None} for t in flag_sorted[:75]]
+
     # legacy intent mix (top terms, LLM categories) kept for other consumers
     ic, isp = Counter(), Counter()
     for t in top:
@@ -1097,6 +1103,8 @@ def _search_terms_section(engine, client_id, config):
         "relevant_terms": relevant_terms,
         "relevant_categories": rel_categories,
         "relevant_total": len(rel_sorted),
+        "flagged_terms": flagged_terms,
+        "flagged_total": len(flag_sorted),
         "grades": grades,
         "grade_method": [{"grade": g, "threshold": th, "interpretation": desc} for (g, th, desc) in ST_GRADE_METHOD],
         "grade_summary": grade_summary,
