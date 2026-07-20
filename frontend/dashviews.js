@@ -401,11 +401,52 @@
     });
     if (typeof enableSortable === "function") enableSortable(el);
   }
+  let STC_FILTER = "";
   function renderStCompetitor(el) {
     el.className = "view"; const s = stData();
     if (!s) { el.innerHTML = stHead("Competitor Terms", "") + `<div class="panel">No data.</div>`; return; }
-    el.innerHTML = stHead("Competitor Terms", `Search terms matching configured competitor names`) +
-      `<div class="panel">${s.competitor.length ? termTable(s.competitor, false) : '<div class="ws-empty" style="padding:24px;text-align:center;color:var(--grey)">No competitor terms — add competitors in Business Context.</div>'}</div>`;
+    const summary = s.competitor_summary || [], rows = s.competitor_terms || [];
+    if (!rows.length) {
+      el.innerHTML = stHead("Competitor Terms", "Search terms targeting competitor brands") +
+        `<div class="panel"><div class="ws-empty" style="padding:24px;text-align:center;color:var(--grey)">No competitor terms — add competitors in Business Context.</div></div>`;
+      return;
+    }
+    const compPill = c => `<span class="tag info" style="font-size:10.5px">${esc(String(c).toLowerCase().replace(/\s+/g, "_"))}</span>`;
+    const sumRows = summary.map(r => `<tr>
+        <td>${compPill(r.type)}</td><td class="num">${fmt.num(r.terms)}</td><td class="num">${fmt.money(r.spend)}</td>
+        <td class="num">${fmt.pct(r.spend_share, 1)}</td><td class="num">${fmt.num(r.conv, 0)}</td>
+        <td class="num">${r.cpa ? fmt.money(r.cpa, 2) : "—"}</td></tr>`).join("");
+    const rowFn = r => `<tr>
+        <td class="strong">${esc(r.term)}</td><td>${compPill(r.competitor)}</td>
+        <td class="num">${fmt.money(r.spend)}</td><td class="num">${fmt.num(r.clicks)}</td>
+        <td class="num">${fmt.num(r.conv, 1)}</td><td class="num">${fmt.pct(r.cvr, 2)}</td>
+        <td class="num">${r.cpa ? fmt.money(r.cpa, 2) : "—"}</td></tr>`;
+    const filterRows = () => STC_FILTER ? rows.filter(r => (r.term + " " + r.competitor).toLowerCase().indexOf(STC_FILTER.toLowerCase()) >= 0) : rows;
+    const shown = filterRows();
+    el.innerHTML = stHead("Competitor Terms", `Top ${fmt.num(rows.length)} search terms targeting competitor brands`) +
+      `<div class="two-col">
+         <div class="panel"><h3>Competitor types by spend</h3><canvas id="stcDonut" height="230"></canvas></div>
+         <div class="panel"><h3>Competitor type summary</h3>
+           <div class="muted" style="margin-bottom:8px">Paid-search spend on competitor-intent terms by segment. Portfolio-wide — each term counted once.</div>
+           <div class="tbl-wrap"><table class="sortable">
+             <thead><tr><th>Competitor Type</th><th class="num">Terms</th><th class="num">Spend</th><th class="num">% of Spend</th><th class="num">Conv</th><th class="num">CPA</th></tr></thead>
+             <tbody>${sumRows}</tbody></table></div></div>
+       </div>
+       <div class="panel">
+         <div class="toolbar"><input type="text" id="stcFilter" placeholder="Filter term…" value="${esc(STC_FILTER)}" style="min-width:240px"/>
+           <span class="muted" id="stcCount" style="margin-left:auto">Showing ${fmt.num(shown.length)} of ${fmt.num(s.competitor_total)}</span></div>
+         <div class="tbl-wrap"><table class="sortable">
+           <thead><tr><th>Search Term</th><th>Competitor</th><th class="num">Spend</th><th class="num">Clicks</th>
+             <th class="num">Conv</th><th class="num">CVR</th><th class="num">CPA</th></tr></thead>
+           <tbody id="stcBody">${shown.map(rowFn).join("")}</tbody></table></div>
+       </div>`;
+    donut("stcDonut", summary.map(r => r.type), summary.map(r => Math.round(r.spend)));
+    const tf = el.querySelector("#stcFilter");
+    if (tf) tf.addEventListener("input", () => {
+      STC_FILTER = tf.value; const rws = filterRows();
+      const body = el.querySelector("#stcBody"); if (body) body.innerHTML = rws.map(rowFn).join("");
+      const cnt = el.querySelector("#stcCount"); if (cnt) cnt.textContent = `Showing ${fmt.num(rws.length)} of ${fmt.num(s.competitor_total)}`;
+    });
     if (typeof enableSortable === "function") enableSortable(el);
   }
   function renderStFlagged(el) {
