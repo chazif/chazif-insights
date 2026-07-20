@@ -1309,39 +1309,54 @@
   };
   Object.keys(REG).forEach(v => { views[v] = REG[v][1]; labels[v] = REG[v][0]; });
 
-  // ---- rebuild a sectioned dashboard nav for computed clients (mirrors the reference) ----
+  // ---- rebuild a collapsible sectioned nav for computed clients ----
   const meta = (window.__BUNDLE__ && window.__BUNDLE__.meta) || null;
   if (meta && Array.isArray(meta.views)) {
+    // Recommendations first, Settings last; every section collapses (closed by default).
     const SECTIONS = [
+      ["Recommendations", ["recs"]],
       ["Performance", ["overview", "trends", "nb-cats", "regions", "campaign-perf", "budget-pacing"]],
       ["Keyword", ["kw-deep-dive", "qs-detail", "qs-breakdown", "region-category"]],
       ["Search Terms", ["st-intent", "st-relevant", "st-competitor", "st-flagged"]],
       ["Ad Copy", ["ad-copy", "ad-lp"]],
       ["Landing Pages", ["lp-perf", "lp-category"]],
       ["Geo", ["geo-perf"]],
-      ["", ["recs"]],
     ];
+    if (!document.getElementById("navGroupStyle")) {
+      const s = document.createElement("style"); s.id = "navGroupStyle";
+      s.textContent = `
+        .nav-section{cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none}
+        .nav-section .nav-caret{display:inline-block;transition:transform .15s;font-size:9px;color:var(--grey-400,#9aa0a6)}
+        .nav-group:not(.open) .nav-group-items{display:none}
+        .nav-group.open .nav-section .nav-caret{transform:rotate(90deg)}`;
+      document.head.appendChild(s);
+    }
     const sidebar = document.getElementById("sidebar");
-    // clear the static (Mavis-demo) dashboard nav; keep the Workspace admin section
-    Array.prototype.slice.call(sidebar.querySelectorAll(".nav-section, .nav-item")).forEach(n => {
-      if (n.classList.contains("nav-item") && (n.dataset.view || "").indexOf("ws-") === 0) return;
-      if (n.classList.contains("nav-section") && n.textContent === "Settings") return;
-      n.remove();
-    });
+    // capture the admin (Settings) items admin.js inserted, then clear the whole nav
+    const wsItems = Array.prototype.slice.call(sidebar.querySelectorAll(".nav-item")).filter(n => (n.dataset.view || "").indexOf("ws-") === 0);
+    Array.prototype.slice.call(sidebar.querySelectorAll(".nav-section, .nav-item, .nav-group")).forEach(n => n.remove());
+
+    const makeGroup = (title, itemNodes) => {
+      if (!itemNodes.length) return;
+      const group = document.createElement("div"); group.className = "nav-group";
+      const head = document.createElement("div"); head.className = "nav-section";
+      head.innerHTML = `<span class="nav-caret">▶</span>${title}`;
+      const body = document.createElement("div"); body.className = "nav-group-items";
+      itemNodes.forEach(n => body.appendChild(n));
+      head.addEventListener("click", () => group.classList.toggle("open"));
+      group.appendChild(head); group.appendChild(body); sidebar.appendChild(group);
+    };
+
     const allow = {}; meta.views.forEach(v => allow[v] = true);
     SECTIONS.forEach(([title, keys]) => {
-      const items = keys.filter(v => allow[v]);
-      if (!items.length) return;
-      if (title) {
-        const h = document.createElement("div"); h.className = "nav-section"; h.textContent = title;
-        sidebar.appendChild(h);
-      }
-      items.forEach(v => {
+      const nodes = keys.filter(v => allow[v]).map(v => {
         const d = document.createElement("div"); d.className = "nav-item"; d.dataset.view = v;
         d.innerHTML = `<span class="nav-dot"></span>${labels[v] || v}`;
         d.addEventListener("click", () => setView(v));
-        sidebar.appendChild(d);
+        return d;
       });
+      makeGroup(title, nodes);
     });
+    makeGroup("Settings", wsItems);   // Settings last, using admin.js's items (handlers intact)
   }
 })();
