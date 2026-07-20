@@ -979,21 +979,51 @@
   }
 
   // ---------- Landing Pages section ----------
+  const lpScoreBadge = s => {
+    const m = { "Excellent": "background:#DCFCE7;color:#166534", "Strong": "background:#D1FAE5;color:#065F46",
+      "Average": "background:#DBEAFE;color:#1E40AF", "Below Avg": "background:#FEF3C7;color:#92660A" };
+    return `<span class="tag" style="${m[s] || "background:#eee;color:#666"};font-size:10.5px">${esc(s)}</span>`;
+  };
+  let LPP_FILTER = "";
   function renderLpPerf(el) {
     el.className = "view"; const l = (typeof DATA !== "undefined" && DATA.landing_pages_section) || null;
-    if (!l) { el.innerHTML = stHead("LP Performance", "") + `<div class="panel">No landing-page data.</div>`; return; }
-    const rows = l.rows.map(r => { const u = r.url || ""; return `<tr>
-        <td class="strong" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a>` : "—"}</td>
-        <td class="num" data-sort="${r.clicks}">${fmt.num(r.clicks)}</td>
-        <td class="num" data-sort="${r.impr}">${fmt.num(r.impr)}</td>
-        <td class="num" data-sort="${r.ctr}">${fmt.pct(r.ctr, 2)}</td>
-        <td class="num" data-sort="${r.cost}">${fmt.money(r.cost)}</td>
-        <td class="num">${r.speed == null ? "—" : r.speed}</td></tr>`; }).join("");
-    el.innerHTML = stHead("LP Performance", `${l.count} landing pages · by spend (LP export has no conversion column)`) +
-      `<div class="panel"><div class="tbl-wrap"><table class="sortable">
-        <thead><tr><th>Landing page</th><th class="num">Clicks</th><th class="num">Impr</th>
-          <th class="num">CTR</th><th class="num">Cost</th><th class="num">Mobile speed</th></tr></thead>
-        <tbody>${rows}</tbody></table></div></div>`;
+    const perf = l && l.performance;
+    if (!perf || !perf.length) {   // fallback: LP-report rows (no conversions)
+      if (!l) { el.innerHTML = stHead("Landing Page Performance", "") + `<div class="panel">No landing-page data.</div>`; return; }
+      const rows = l.rows.map(r => { const u = r.url || ""; return `<tr>
+          <td class="strong" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a>` : "—"}</td>
+          <td class="num">${fmt.num(r.clicks)}</td><td class="num">${fmt.num(r.impr)}</td>
+          <td class="num">${fmt.pct(r.ctr, 2)}</td><td class="num">${fmt.money(r.cost)}</td>
+          <td class="num">${r.speed == null ? "—" : r.speed}</td></tr>`; }).join("");
+      el.innerHTML = stHead("Landing Page Performance", `${l.count} landing pages · by spend`) +
+        `<div class="panel"><div class="tbl-wrap"><table class="sortable">
+          <thead><tr><th>URL</th><th class="num">Clicks</th><th class="num">Impr</th><th class="num">CTR</th><th class="num">Cost</th><th class="num">Mobile speed</th></tr></thead>
+          <tbody>${rows}</tbody></table></div></div>`;
+      if (typeof enableSortable === "function") enableSortable(el);
+      return;
+    }
+    const rowFn = r => { const u = r.url || ""; return `<tr>
+        <td class="strong" style="max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a>` : "—"}</td>
+        <td class="num">${fmt.money(r.cost)}</td><td class="num">${fmt.num(r.clicks)}</td><td class="num">${fmt.num(r.conv, 0)}</td>
+        <td class="num">${fmt.pct(r.cvr, 2)}</td><td class="num">${r.cpa ? fmt.money(r.cpa, 2) : "—"}</td>
+        <td>${lpScoreBadge(r.score)}</td></tr>`; };
+    const filterRows = () => LPP_FILTER ? perf.filter(r => (r.url || "").toLowerCase().indexOf(LPP_FILTER.toLowerCase()) >= 0) : perf;
+    const shown = filterRows();
+    el.innerHTML = stHead("Landing Page Performance", `Top ${fmt.num(perf.length)} landing pages by spend · quality score`) +
+      `<div class="panel">
+         <div class="toolbar"><input type="text" id="lppFilter" placeholder="Filter URL…" value="${esc(LPP_FILTER)}" style="min-width:260px"/>
+           <span class="muted" id="lppCount" style="margin-left:auto">Showing ${fmt.num(shown.length)} of ${fmt.num(perf.length)}</span></div>
+         <div class="tbl-wrap"><table class="sortable">
+           <thead><tr><th>URL</th><th class="num">Cost</th><th class="num">Clicks</th><th class="num">Conv</th>
+             <th class="num">CVR</th><th class="num">CPA</th><th>Score</th></tr></thead>
+           <tbody id="lppBody">${shown.map(rowFn).join("")}</tbody></table></div>
+       </div>`;
+    const tf = el.querySelector("#lppFilter");
+    if (tf) tf.addEventListener("input", () => {
+      LPP_FILTER = tf.value; const rws = filterRows();
+      const body = el.querySelector("#lppBody"); if (body) body.innerHTML = rws.map(rowFn).join("");
+      const cnt = el.querySelector("#lppCount"); if (cnt) cnt.textContent = `Showing ${fmt.num(rws.length)} of ${fmt.num(perf.length)}`;
+    });
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
