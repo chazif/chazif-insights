@@ -128,9 +128,12 @@
 
   /* Main */
   #main { padding: 0; background: var(--paper); min-width: 0; }
+  .apphead { position: sticky; top: 0; z-index: 50; background: var(--paper); }
   .topbar { display:flex; align-items:center; justify-content:space-between;
-            padding: 14px 28px; border-bottom: 1px solid var(--hairline); background: var(--paper);
-            position: sticky; top: 0; z-index: 50; }
+            padding: 14px 28px; border-bottom: 1px solid var(--hairline); background: var(--paper); }
+  .filterbar { display:flex; align-items:center; gap: 20px; flex-wrap: wrap;
+               padding: 9px 28px; border-bottom: 1px solid var(--hairline); background: #FAFAF7; }
+  .filterbar .date-range { margin-left: auto; }
   .topbar-left { display:flex; align-items:center; gap: 14px; }
   .breadcrumb { font-size: 13px; color: var(--grey); }
   .breadcrumb strong { color: var(--ink); font-weight: 600; }
@@ -415,14 +418,22 @@
   </aside>
 
   <main id="main">
-    <div class="topbar">
-      <div class="topbar-left">
-        <span class="pill" id="periodPill">Mar 2026</span>
-        <span class="breadcrumb"><span id="crumbClient">Mavis Tire</span> › Paid Search › <strong id="crumb">Overview</strong></span>
+    <div class="apphead">
+      <div class="topbar">
+        <div class="topbar-left">
+          <span class="pill" id="periodPill">Mar 2026</span>
+          <span class="breadcrumb"><span id="crumbClient">Mavis Tire</span> › Paid Search › <strong id="crumb">Overview</strong></span>
+        </div>
+        <div class="topbar-right">
+          <div class="user-chip">
+            <span class="pill-outline">Confidential</span>
+            <div class="avatar">CI</div>
+            <span>ci@chazif.com</span>
+          </div>
+        </div>
       </div>
-      <div class="topbar-right">
+      <div class="filterbar">
         <div class="global-filters" id="globalFilters"></div>
-        <div class="date-range" id="dateRange"></div>
         <div class="brand-filter" id="brandFilter">
           <label style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:12px; color:var(--grey); letter-spacing:0.04em; text-transform:uppercase; margin-right:8px;">Brand</label>
           <select id="brandFilterSel" class="brand-select">
@@ -434,11 +445,7 @@
             <option value="BP">BP</option>
           </select>
         </div>
-        <div class="user-chip">
-          <span class="pill-outline">Confidential</span>
-          <div class="avatar">CI</div>
-          <span>ci@chazif.com</span>
-        </div>
+        <div class="date-range" id="dateRange"></div>
       </div>
     </div>
 
