@@ -1105,7 +1105,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
         view_list.append("qs-detail")
     if qs_break or keyword:
         view_list.append("qs-breakdown")
-    if reg_cat:
+    if reg_cat or keyword:      # always show the tab; renderer shows an unlock note if unjoined
         view_list.append("region-category")
     if st:
         view_list += ["st-intent", "st-relevant"]
