@@ -117,8 +117,9 @@ def _yoy_prior(cm):
             "full": f"{FULL_MONTHS[cm['month']-1]} {py}", "abbr": f"{MABBR[cm['month']-1]} {py}"}
 
 
-def _campaigns(engine, client_id, cm):
+def _campaigns(engine, client_id, cm, keep=None):
     """Per-campaign snapshot for the latest complete month + month-over-month deltas."""
+    keep = keep or (lambda d: True)
     prior = _prior_month(cm)
 
     def month_map(label):
@@ -128,6 +129,8 @@ def _campaigns(engine, client_id, cm):
                 "SELECT campaign, clicks, cost, conversions, row FROM raw_rows "
                 "WHERE client_id=:c AND report_type='campaign_performance' AND date=:d"),
                 {"c": client_id, "d": label}):
+                if not keep(_asdict(row)):
+                    continue
                 out[camp] = {"clicks": _num(clicks), "cost": _num(cost), "conv": _num(conv),
                              "type": _asdict(row).get("campaign_type", "")}
         return out
@@ -154,10 +157,11 @@ def _campaigns(engine, client_id, cm):
                        "conv": round(sum(v["conv"] for v in cur.values()), 1)}}
 
 
-def _geo(engine, client_id):
+def _geo(engine, client_id, keep=None):
     """Performance by geographic location (whatever grain the export carries — State
     for most single-market accounts). Cost derived from Cost/conv since the Geographic
     export has no Cost column. Returns None if no geo data."""
+    keep = keep or (lambda d: True)
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT entity, clicks, impressions, conversions, conv_value, row FROM raw_rows "
@@ -166,12 +170,16 @@ def _geo(engine, client_id):
         return None
     agg = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0, 0.0])  # clicks, impr, conv, conv_value, cost
     for ent, clicks, impr, conv, cval, row in rows:
+        if not keep(_asdict(row)):
+            continue
         loc = ent or "(not set)"
         d = agg[loc]
         cv = _num(conv)
         d[0] += _num(clicks); d[1] += _num(impr); d[2] += cv; d[3] += _num(cval)
         cpc = _num(_asdict(row).get("cost_conv"))     # Cost / conv.
         d[4] += cpc * cv if cpc else 0.0
+    if not agg:
+        return None
     out = []
     for loc, (cl, im, cv, cval, cost) in sorted(agg.items(), key=lambda kv: -kv[1][4] or -kv[1][0]):
         out.append({"location": loc, "clicks": round(cl), "impr": round(im),
@@ -185,22 +193,22 @@ def _geo(engine, client_id):
                        "conv_value": round(tot[3], 2), "cost": round(tot[4], 2)}}
 
 
-def _budget(engine, client_id, cm, config):
+def _budget(engine, client_id, cm, config, keep=None):
     """Monthly spend vs a configured monthly budget. Intra-month (daily) pacing needs
     day-segmented exports; this reports monthly adherence and latest-month variance."""
+    keep = keep or (lambda d: True)
     budget = (config.get("thresholds") or {}).get("monthly_budget")
     budget = float(budget) if budget else None
     with engine.connect() as c:
         rows = c.execute(text(
-            "SELECT date, SUM(cost) FROM raw_rows WHERE client_id=:c "
-            "AND report_type='campaign_performance' AND date IS NOT NULL GROUP BY date"),
-            {"c": client_id}).all()
-    series = []
-    for date, cost in rows:
+            "SELECT date, cost, row FROM raw_rows WHERE client_id=:c "
+            "AND report_type='campaign_performance' AND date IS NOT NULL"), {"c": client_id}).all()
+    magg = defaultdict(float)
+    for date, cost, row in rows:
         mk = _month_key(date)
-        if mk:
-            series.append((mk, _num(cost)))
-    series.sort(key=lambda x: (x[0][0], x[0][1]))
+        if mk and keep(_asdict(row)):
+            magg[mk] += _num(cost)
+    series = sorted(magg.items(), key=lambda x: (x[0][0], x[0][1]))
     series = [s for s in series if (s[0][0], s[0][1]) <= (cm["year"], cm["month"])]
     months = [{
         "month": mk[3], "spend": round(cost, 2),
@@ -237,11 +245,12 @@ def _norm_rating(v):
     return None
 
 
-def _quality_score(engine, client_id, cm=None, config=None):
+def _quality_score(engine, client_id, cm=None, config=None, keep=None):
     """Non-brand Quality Score overview from the Search Keyword + QS report: per-QS
     (1-10) keyword/spend/click/conv rollups with CPC/CTR/CVR/CPA, four QS buckets, a
     weak→strong CPC-differential savings estimate, and portfolio totals."""
     config = config or {}
+    keep = keep or (lambda d: True)
     brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
     with engine.connect() as c:
         rows = c.execute(text(
@@ -252,6 +261,8 @@ def _quality_score(engine, client_id, cm=None, config=None):
     per = {i: {"keywords": 0, "cost": 0.0, "clicks": 0.0, "impr": 0.0, "conv": 0.0} for i in range(1, 11)}
     for cost, clicks, impr, conv, row in rows:
         d = _asdict(row)
+        if not keep(d):
+            continue
         try:
             q = int(float(d.get("quality_score")))
         except (TypeError, ValueError):
@@ -314,11 +325,12 @@ def _quality_score(engine, client_id, cm=None, config=None):
     }
 
 
-def _qs_breakdown(engine, client_id, cm, config):
+def _qs_breakdown(engine, client_id, cm, config, keep=None):
     """QS Breakdown: per-component (eCTR / Ad Relevance / LP Experience) rating rollups,
     the 27-way eCTR×LP×AdRel combination grid (avg CPC / spend / avg QS per cell), a
     weak→QS7 savings estimate by brand, and the top QS≤6 optimization keywords. Non-brand."""
     config = config or {}
+    keep = keep or (lambda d: True)
     brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
     brand_label = (config.get("brand_terms") or [None])[0] or _client_name(engine, client_id)
     catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
@@ -361,6 +373,8 @@ def _qs_breakdown(engine, client_id, cm, config):
 
     for cost, clicks, impr, conv, row in rows:
         d = _asdict(row)
+        if not keep(d):
+            continue
         try:
             q = int(float(d.get("quality_score")))
         except (TypeError, ValueError):
@@ -451,11 +465,12 @@ def _qs_breakdown(engine, client_id, cm, config):
     }
 
 
-def _region_category(engine, client_id, config):
+def _region_category(engine, client_id, config, keep=None):
     """Region & Category — for each Brand×Region×Category slice, avg CPC split by the
     keyword's component rating (Below / Average / Above) per QS component, with the
     Below−Above CPC spread. Joins the region-segmented keyword export (region + spend)
     to search_keyword_qs (component ratings). None if the segmented export is absent."""
+    keep = keep or (lambda d: True)
     with engine.connect() as c:
         geo = c.execute(text("SELECT clicks, cost, row FROM raw_rows WHERE client_id=:c "
                              "AND report_type='keyword_geo'"), {"c": client_id}).all()
@@ -487,7 +502,10 @@ def _region_category(engine, client_id, config):
 
     slices = {}
     for clicks, cost, row in geo:
-        d = _asdict(row); kw = d.get("search_keyword"); region = _region_value(d)
+        d = _asdict(row)
+        if not keep(d):
+            continue
+        kw = d.get("search_keyword"); region = _region_value(d)
         if not kw or not region:
             continue
         kwl = kw.lower()
@@ -635,10 +653,11 @@ def _grade_term(t):
     return "F — Poor / No Conversions"
 
 
-def _keyword_section(engine, client_id):
+def _keyword_section(engine, client_id, keep=None):
     """Keyword Deep Dive (top keywords) + QS component breakdown (eCTR / Ad relevance /
     LP experience) with a modeled CPC-penalty savings estimate."""
     from collections import Counter
+    keep = keep or (lambda d: True)
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT cost, clicks, conversions, row FROM raw_rows "
@@ -650,7 +669,10 @@ def _keyword_section(engine, client_id):
     comp_sp = {"exp_ctr": Counter(), "ad_relevance": Counter(), "landing_page_exp": Counter()}
     below_ctr = 0.0
     for cost, clicks, conv, row in rows:
-        d = _asdict(row); cost = _num(cost); clicks = _num(clicks); cv = _num(conv)
+        d = _asdict(row)
+        if not keep(d):
+            continue
+        cost = _num(cost); clicks = _num(clicks); cv = _num(conv)
         kws.append({"keyword": d.get("search_keyword", ""), "match": d.get("search_keyword_match_type", ""),
                     "qs": d.get("quality_score"), "clicks": clicks, "cost": cost, "conv": cv})
         for key in comp:
@@ -688,10 +710,11 @@ def _region_value(d):
     return None
 
 
-def _keyword_regions(engine, client_id, config):
+def _keyword_regions(engine, client_id, config, keep=None):
     """Keyword × region pivot for the Keyword Deep Dive heatmap, from a keyword report
     segmented by geography (report_type 'keyword_geo'). None if that segmented export
     hasn't been uploaded — the view then falls back to the flat keyword table."""
+    keep = keep or (lambda d: True)
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT cost, clicks, conversions, row FROM raw_rows "
@@ -714,6 +737,8 @@ def _keyword_regions(engine, client_id, config):
     region_tot = defaultdict(lambda: [0.0, 0.0])   # region -> spend, conv
     for cost, clicks, conv, row in rows:
         d = _asdict(row)
+        if not keep(d):
+            continue
         kw = d.get("search_keyword")
         region = _region_value(d)
         if not kw or not region:
@@ -766,10 +791,11 @@ def _keyword_regions(engine, client_id, config):
                        "regions": len(region_tot)}}
 
 
-def _ads_section(engine, client_id, config=None):
+def _ads_section(engine, client_id, config=None, keep=None):
     """RSA inventory + CTR-graded ad performance (Ad Copy) and ad → landing-page pairing."""
     from collections import Counter
     config = config or {}
+    keep = keep or (lambda d: True)
     brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
     brand_label = (config.get("brand_terms") or [None])[0] or _client_name(engine, client_id)
     catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
@@ -791,6 +817,8 @@ def _ads_section(engine, client_id, config=None):
     ads = []
     for clicks, impr, cost, conv, row in rows:
         d = _asdict(row)
+        if not keep(d):
+            continue
         hn = sum(1 for i in range(1, 16) if (d.get(f"headline_{i}") or "").strip())
         dn = sum(1 for i in range(1, 6) if (d.get(f"description_{i}") or "").strip())
         clicks, impr, cost, cv = _num(clicks), _num(impr), _num(cost), _num(conv)
@@ -908,13 +936,14 @@ def _nb_category_of(name, catkw, brand_terms):
     return "Other Non-Brand"
 
 
-def _nb_categories(engine, client_id, cm, config):
+def _nb_categories(engine, client_id, cm, config, keep=None):
     """YoY non-brand spend/conversions by category, bucketed from campaign structure
     (the date-segmented source), latest complete month vs same month prior year — with a
     prior-calendar-month fallback when the account has under a year of history, matching
     the KPI logic. Brand campaigns are excluded. None if there is no non-brand data."""
     if not cm:
         return None
+    keep = keep or (lambda d: True)
     catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
              for c in (config.get("product_categories") or [])}
     brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
@@ -926,6 +955,8 @@ def _nb_categories(engine, client_id, cm, config):
                 "SELECT campaign, cost, conversions FROM raw_rows WHERE client_id=:c "
                 "AND report_type='campaign_performance' AND date=:d"),
                 {"c": client_id, "d": full_label}):
+                if not keep({"campaign": camp}):
+                    continue
                 cat = _nb_category_of(camp, catkw, brand_terms)
                 if cat is None:
                     continue
@@ -972,13 +1003,14 @@ def _region_of(name):
     return label or None
 
 
-def _regions(engine, client_id, cm, config):
+def _regions(engine, client_id, cm, config, keep=None):
     """YoY non-brand spend/conversions by region, parsed from geo-segmented campaign
     names (mirrors the reference 'Non-Brand campaigns · YoY by region'). Returns per
     (region, category) cells so the frontend can filter by category; None if no
     region-segmented campaigns exist."""
     if not cm:
         return None
+    keep = keep or (lambda d: True)
     catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
              for c in (config.get("product_categories") or [])}
     brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
@@ -990,6 +1022,8 @@ def _regions(engine, client_id, cm, config):
                 "SELECT campaign, cost, conversions FROM raw_rows WHERE client_id=:c "
                 "AND report_type='campaign_performance' AND date=:d"),
                 {"c": client_id, "d": full_label}):
+                if not keep({"campaign": camp}):
+                    continue
                 cat = _nb_category_of(camp, catkw, brand_terms)
                 if cat is None:                 # brand campaign
                     continue
@@ -1033,9 +1067,10 @@ def _lp_score(cvr, clicks):
     return "Below Avg"
 
 
-def _lp_performance(engine, client_id):
+def _lp_performance(engine, client_id, keep=None):
     """Per landing-page cost/clicks/conv/CVR/CPA + quality score, from ads grouped by
     final URL (the ads report is the only source that carries LP-level conversions)."""
+    keep = keep or (lambda d: True)
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT clicks, cost, conversions, row FROM raw_rows "
@@ -1045,6 +1080,8 @@ def _lp_performance(engine, client_id):
     agg = defaultdict(lambda: [0.0, 0.0, 0.0])   # cost, clicks, conv
     for clicks, cost, conv, row in rows:
         d = _asdict(row)
+        if not keep(d):
+            continue
         url = d.get("ad_final_url") or d.get("final_url") or ""
         if not url:
             continue
@@ -1060,12 +1097,13 @@ def _lp_performance(engine, client_id):
     return out
 
 
-def _lp_category_grid(engine, client_id, config):
+def _lp_category_grid(engine, client_id, config, keep=None):
     """LP × category CVR matrix from ads grouped by final URL × ad category (an LP can
     serve several categories, each with its own conversion rate). Brand ads bucket to
     'BR'; the rest to their product category or 'Other'. None if no ad data."""
     from collections import Counter
     config = config or {}
+    keep = keep or (lambda d: True)
     brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
     catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
              for c in (config.get("product_categories") or [])}
@@ -1087,6 +1125,8 @@ def _lp_category_grid(engine, client_id, config):
     url_tot = defaultdict(lambda: [0.0, 0.0, 0.0])
     for clicks, cost, conv, row in rows:
         d = _asdict(row)
+        if not keep(d):
+            continue
         url = d.get("ad_final_url") or d.get("final_url") or ""
         if not url:
             continue
@@ -1132,9 +1172,10 @@ def _lp_category_grid(engine, client_id, config):
                       "avg_cats": round(sum(len(cell[u]) for u in cell) / len(cell), 1)}}
 
 
-def _landing_pages(engine, client_id, config):
+def _landing_pages(engine, client_id, config, keep=None):
     """Landing-page performance (clicks/cost/CTR + mobile speed) + a URL-derived category
     grid. The LP export has no conversion or device column, so no CVR / device grid."""
+    keep = keep or (lambda d: True)
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT entity, clicks, impressions, cost, row FROM raw_rows "
@@ -1143,10 +1184,13 @@ def _landing_pages(engine, client_id, config):
         return None
     agg = defaultdict(lambda: [0.0, 0.0, 0.0, None])
     for lp, clicks, impr, cost, row in rows:
+        rd = _asdict(row)
+        if not keep(rd):
+            continue
         d = agg[lp or "(unknown)"]
         d[0] += _num(clicks); d[1] += _num(impr); d[2] += _num(cost)
         if d[3] is None:
-            d[3] = _asdict(row).get("mobile_speed_score")
+            d[3] = rd.get("mobile_speed_score")
     full = [{"url": url, "clicks": round(cl), "impr": round(im), "cost": round(co, 2),
              "ctr": round(cl / im, 4) if im else 0, "speed": sp}
             for url, (cl, im, co, sp) in sorted(agg.items(), key=lambda kv: -kv[1][2])]
@@ -1154,10 +1198,11 @@ def _landing_pages(engine, client_id, config):
             "category_grid": _lp_categories(full, config.get("product_categories", []))}
 
 
-def _search_terms_section(engine, client_id, config):
+def _search_terms_section(engine, client_id, config, keep=None):
     """Full Search Terms section: Intent & Grades, Relevant, Competitor, Flagged."""
     from collections import Counter
     from ..llm.relevance import get_or_classify
+    keep = keep or (lambda d: True)
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT entity, clicks, cost, conversions, row FROM raw_rows "
@@ -1171,6 +1216,8 @@ def _search_terms_section(engine, client_id, config):
         if brand_excl and any(b in tl for b in brand_excl):
             continue                                # non-brand analysis only
         d = _asdict(row)
+        if not keep(d):
+            continue
         t = {"term": term or "", "match": d.get("search_terms_match_type", ""),
              "added": d.get("added_excluded"),
              "clicks": _num(clicks), "cost": _num(cost), "conv": _num(conv)}
@@ -1344,28 +1391,106 @@ def _to_overview_findings(findings):
     return out[:6]
 
 
-def build_bundle(client_id, engine=None, date_from=None, date_to=None):
+_FILTER_TEXT_FIELDS = ("campaign", "ad_group", "search_keyword", "search_term",
+                       "landing_page", "ad_final_url", "final_url", "state_matched")
+
+
+def _row_text(d):
+    return " ".join(str(d.get(f) or "") for f in _FILTER_TEXT_FIELDS).lower()
+
+
+def _row_filter(filters, config):
+    """Build a keep(row_dict) predicate for the global topbar filters. Each filter only
+    drops rows that actually carry the relevant dimension (so e.g. a Region filter is a
+    no-op on keyword/ad rows that have no geography), keeping it best-effort per tab."""
+    filters = filters or {}
+    seg = (filters.get("seg") or "all").lower()
+    campaign = filters.get("campaign") or "all"
+    region = filters.get("region") or "all"
+    category = filters.get("category") or "all"
+    brand = filters.get("brand") or "all"
+    brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
+    catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
+             for c in (config.get("product_categories") or [])}
+    active = any(x != "all" for x in (seg, campaign, region, category, brand))
+
+    def is_brand(txt):
+        return bool(brand_terms and any(b in txt for b in brand_terms))
+
+    def cat_of(txt):
+        for c, kws in catkw.items():
+            if c.lower() in txt or any(w in txt for w in kws):
+                return c[:1].upper() + c[1:]
+        return None
+
+    def keep(d):
+        if not active:
+            return True
+        camp = d.get("campaign") or ""
+        if campaign != "all" and camp and camp != campaign:
+            return False
+        txt = _row_text(d)
+        if seg == "br" and not is_brand(txt):
+            return False
+        if seg == "nb" and is_brand(txt):
+            return False
+        if category != "all":
+            c = cat_of(txt)
+            if c is not None and c != category:
+                return False
+        if region != "all":
+            rv = _region_value(d)
+            if rv is not None and rv != region:
+                return False
+        return True
+
+    return keep, active
+
+
+def _filters_meta(engine, client_id, config):
+    """Option lists for the topbar filter dropdowns (from the full, unfiltered data)."""
+    with engine.connect() as c:
+        campaigns = [r[0] for r in c.execute(text(
+            "SELECT DISTINCT campaign FROM raw_rows WHERE client_id=:c AND campaign IS NOT NULL "
+            "AND campaign<>'' ORDER BY campaign"), {"c": client_id}) if r[0]]
+        regions = set()
+        for (row,) in c.execute(text("SELECT row FROM raw_rows WHERE client_id=:c "
+                                     "AND report_type IN ('geographic','keyword_geo')"), {"c": client_id}):
+            rv = _region_value(_asdict(row))
+            if rv:
+                regions.add(rv)
+    categories = [c[:1].upper() + c[1:] for c in (config.get("product_categories") or [])]
+    brand_label = (config.get("brand_terms") or [None])[0] or _client_name(engine, client_id)
+    return {"campaigns": campaigns[:300], "regions": sorted(regions),
+            "categories": categories, "brands": [brand_label] if brand_label else []}
+
+
+def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=None):
     """Return the DATA bundle dict for a client, or None if there's no campaign data.
-    date_from/date_to (YYYY-MM or YYYY-MM-DD) filter the month-grained series/KPIs; whole-window
-    reports (search terms, keywords, ads, geo, LP) are unaffected until date-segmented data lands."""
+    date_from/date_to (YYYY-MM or YYYY-MM-DD) filter the month-grained series/KPIs; the global
+    `filters` (seg/campaign/region/category/brand) re-compute every section server-side."""
     engine = engine or get_engine()
     rng_from, rng_to = _ym_bound(date_from), _ym_bound(date_to)
+    config = get_config(client_id, engine) or {}
+    keep, _flt_active = _row_filter(filters, config)
     with engine.connect() as c:
         has = c.execute(text("SELECT COUNT(*) FROM raw_rows WHERE client_id=:c AND report_type='campaign_performance'"),
                         {"c": client_id}).scalar()
         if not has:
             return None
 
-        # ---- monthly aggregates -> total_trend ----
+        # ---- monthly aggregates -> total_trend (row-level so the global filter applies) ----
         rows = c.execute(text(
-            "SELECT date, SUM(cost) cost, SUM(clicks) clicks, SUM(conversions) conv "
-            "FROM raw_rows WHERE client_id=:c AND report_type='campaign_performance' "
-            "AND date IS NOT NULL GROUP BY date"), {"c": client_id}).all()
-        series = []
-        for date, cost, clicks, conv in rows:
+            "SELECT date, cost, clicks, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='campaign_performance' AND date IS NOT NULL"),
+            {"c": client_id}).all()
+        magg = defaultdict(lambda: [0.0, 0.0, 0.0])
+        for date, cost, clicks, conv, row in rows:
             mk = _month_key(date)
-            if mk:
-                series.append((mk, float(cost or 0), float(clicks or 0), float(conv or 0)))
+            if not mk or not keep(_asdict(row)):
+                continue
+            m = magg[mk]; m[0] += float(cost or 0); m[1] += float(clicks or 0); m[2] += float(conv or 0)
+        series = [(mk, v[0], v[1], v[2]) for mk, v in magg.items()]
         series.sort(key=lambda x: (x[0][0], x[0][1]))
 
         # keep only fully-covered months (drop the partial trailing export month), then
@@ -1429,29 +1554,28 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
             "SELECT COUNT(*) FROM raw_rows WHERE client_id=:c AND report_type='pmax_placements'"), {"c": client_id}).scalar())
 
     # ---- analyzers -> findings + recommendations (analyzers open their own connections) ----
-    config = get_config(client_id, engine) or {}
     analyzer_findings = run_analyzers(engine, client_id, cm, config) if cm else []
     findings = _to_overview_findings(analyzer_findings)
     recommendations = _to_recommendations(analyzer_findings)
-    campaigns = _campaigns(engine, client_id, cm) if cm else None
-    geo = _geo(engine, client_id)
-    budget = _budget(engine, client_id, cm, config) if cm else None
-    qscore = _quality_score(engine, client_id, cm, config)
-    qs_break = _qs_breakdown(engine, client_id, cm, config)
-    keyword = _keyword_section(engine, client_id)
-    kw_regions = _keyword_regions(engine, client_id, config)
-    reg_cat = _region_category(engine, client_id, config)
-    st = _search_terms_section(engine, client_id, config)
-    ads = _ads_section(engine, client_id, config)
-    lps = _landing_pages(engine, client_id, config)
-    lp_perf = _lp_performance(engine, client_id)
+    campaigns = _campaigns(engine, client_id, cm, keep) if cm else None
+    geo = _geo(engine, client_id, keep)
+    budget = _budget(engine, client_id, cm, config, keep) if cm else None
+    qscore = _quality_score(engine, client_id, cm, config, keep)
+    qs_break = _qs_breakdown(engine, client_id, cm, config, keep)
+    keyword = _keyword_section(engine, client_id, keep)
+    kw_regions = _keyword_regions(engine, client_id, config, keep)
+    reg_cat = _region_category(engine, client_id, config, keep)
+    st = _search_terms_section(engine, client_id, config, keep)
+    ads = _ads_section(engine, client_id, config, keep)
+    lps = _landing_pages(engine, client_id, config, keep)
+    lp_perf = _lp_performance(engine, client_id, keep)
     if lps is None and lp_perf:
         lps = {"count": len(lp_perf), "rows": [], "category_grid": None}
     if lps is not None:
         lps["performance"] = lp_perf
-        lps["category_grid"] = _lp_category_grid(engine, client_id, config)
-    nb_cats = _nb_categories(engine, client_id, cm, config) if cm else None
-    regions = _regions(engine, client_id, cm, config) if cm else None
+        lps["category_grid"] = _lp_category_grid(engine, client_id, config, keep)
+    nb_cats = _nb_categories(engine, client_id, cm, config, keep) if cm else None
+    regions = _regions(engine, client_id, cm, config, keep) if cm else None
 
     # Performance section — mirrors the reference nav order (Overview, Monthly Trends,
     # NB Categories, Regions, Campaign, Budget). NB Categories and Regions are both
@@ -1503,6 +1627,10 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
                 # views that honour the range today (month-grained); the rest are whole-window
                 "windowed_views": ["overview", "trends", "campaign-perf", "budget-pacing"],
             },
+            "filters": {"seg": (filters or {}).get("seg") or "all", "campaign": (filters or {}).get("campaign") or "all",
+                        "region": (filters or {}).get("region") or "all", "category": (filters or {}).get("category") or "all",
+                        "brand": (filters or {}).get("brand") or "all", "active": _flt_active},
+            "filters_meta": _filters_meta(engine, client_id, config),
             "generated_from": "warehouse",
         },
         "total_trend": total_trend,

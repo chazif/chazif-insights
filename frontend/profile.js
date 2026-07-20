@@ -100,6 +100,54 @@
     });
   })();
 
+  // ---- global filter bar (All/BR/NB buttons + Campaign/Region/Category/Brand dropdowns) ----
+  (function () {
+    var host = document.getElementById("globalFilters");
+    if (!host || !META.client_id || !META.filters_meta) return;   // computed clients only
+    var fm = META.filters_meta || {};
+    var cur = META.filters || {};
+    function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+    if (!document.getElementById("gfStyle")) {
+      var st = document.createElement("style"); st.id = "gfStyle";
+      st.textContent =
+        ".global-filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap}" +
+        ".gf-seg-group{display:inline-flex;border:1px solid var(--line,#e6e6e0);border-radius:8px;overflow:hidden}" +
+        ".gf-seg{border:0;background:#fff;padding:5px 11px;font-size:12px;font-weight:600;cursor:pointer;color:var(--grey,#666)}" +
+        ".gf-seg.active{background:var(--ink,#1a1a1a);color:var(--lime,#CFFF04)}" +
+        ".gf-ctl{display:inline-flex;align-items:center;gap:5px}" +
+        ".gf-lbl{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--grey,#888)}" +
+        ".gf-sel{font-size:12px;padding:5px 7px;border:1px solid var(--line,#e6e6e0);border-radius:7px;background:#fff;max-width:180px}";
+      document.head.appendChild(st);
+    }
+    function go(k, v) {
+      try { sessionStorage.setItem("chz_nav", "1"); } catch (e) {}
+      var u = new URLSearchParams(location.search);
+      u.set("client", META.client_id);
+      if (v && v !== "all") u.set(k, v); else u.delete(k);
+      location.search = u.toString();
+    }
+    var seg = cur.seg || "all";
+    var segBtns = [["all", "All"], ["br", "BR"], ["nb", "NB"]].map(function (o) {
+      return '<button class="gf-seg' + (seg === o[0] ? " active" : "") + '" data-seg="' + o[0] + '">' + o[1] + "</button>";
+    }).join("");
+    function dd(key, label, opts, curv) {
+      var options = '<option value="all">All</option>' + (opts || []).map(function (o) {
+        return '<option value="' + esc(o) + '"' + (curv === o ? " selected" : "") + ">" + esc(o) + "</option>";
+      }).join("");
+      return '<span class="gf-ctl"><span class="gf-lbl">' + label + '</span><select class="gf-sel" data-key="' + key + '">' + options + "</select></span>";
+    }
+    host.innerHTML =
+      '<span class="gf-ctl"><span class="gf-lbl">Segment</span><span class="gf-seg-group">' + segBtns + "</span></span>" +
+      dd("campaign", "Campaign", fm.campaigns, cur.campaign) +
+      dd("region", "Region", fm.regions, cur.region) +
+      dd("category", "Category", fm.categories, cur.category) +
+      dd("brand", "Brand", fm.brands, cur.brand);
+    host.querySelectorAll("[data-seg]").forEach(function (b) { b.addEventListener("click", function () { go("seg", b.dataset.seg); }); });
+    host.querySelectorAll(".gf-sel").forEach(function (s) { s.addEventListener("change", function () { go(s.dataset.key, s.value); }); });
+    // our server-side Brand filter replaces the static demo brand switcher
+    var bf = document.getElementById("brandFilter"); if (bf) bf.style.display = "none";
+  })();
+
   // ---- single-brand: drop the brand filter (and keep it dropped across views) ----
   var nBrands = (META.complexity && META.complexity.n_brands) || 1;
   if (nBrands <= 1) {

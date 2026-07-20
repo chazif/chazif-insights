@@ -421,6 +421,7 @@
         <span class="breadcrumb"><span id="crumbClient">Mavis Tire</span> › Paid Search › <strong id="crumb">Overview</strong></span>
       </div>
       <div class="topbar-right">
+        <div class="global-filters" id="globalFilters"></div>
         <div class="date-range" id="dateRange"></div>
         <div class="brand-filter" id="brandFilter">
           <label style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:12px; color:var(--grey); letter-spacing:0.04em; text-transform:uppercase; margin-right:8px;">Brand</label>
@@ -463,10 +464,15 @@
   var p = new URLSearchParams(location.search);
   var period = p.get("period") || "2026-03";
   var qsFrom = p.get("from"), qsTo = p.get("to");
+  var FILTER_KEYS = ["seg", "campaign", "region", "category", "brand"];
 
   function boot(client) {
+    var extra = FILTER_KEYS.map(function (k) {
+      var v = p.get(k);
+      return (v && v !== "all") ? "&" + k + "=" + encodeURIComponent(v) : "";
+    }).join("");
     var url = window.BUNDLE_URL || ("/api/bundle?client=" + encodeURIComponent(client) + "&period=" + encodeURIComponent(period)
-      + (qsFrom ? "&from=" + encodeURIComponent(qsFrom) : "") + (qsTo ? "&to=" + encodeURIComponent(qsTo) : ""));
+      + (qsFrom ? "&from=" + encodeURIComponent(qsFrom) : "") + (qsTo ? "&to=" + encodeURIComponent(qsTo) : "") + extra);
     fetch(url)
       .then(function (r) { if (!r.ok) throw new Error("bundle HTTP " + r.status); return r.json(); })
       .then(function (d) {
