@@ -1019,7 +1019,7 @@ def _search_terms_section(engine, client_id, config):
         return "Unassigned"
 
     seg_c, seg_s = Counter(), Counter()
-    svc_s = Counter(); comp_s = Counter()
+    svc_s = Counter(); comp_s = Counter(); comp_c = Counter(); comp_cv = Counter(); comp_cl = Counter()
     st_c, st_s = Counter(), Counter()
     for t in terms:
         seg = intent_of(t["term"]); t["seg"] = seg; seg_c[seg] += 1; seg_s[seg] += t["cost"]
@@ -1027,9 +1027,12 @@ def _search_terms_section(engine, client_id, config):
         svc_s[t["cat"] or "Other / uncategorized"] += t["cost"]
         t["status"] = status_of(t); st_c[t["status"]] += 1; st_s[t["status"]] += t["cost"]
         tl = t["term"].lower()
+        t["competitor"] = None
         for cx in comps_orig:
             if cx and cx.lower() in tl:
-                comp_s[cx] += t["cost"]; break
+                t["competitor"] = cx
+                comp_s[cx] += t["cost"]; comp_c[cx] += 1; comp_cv[cx] += t["conv"]; comp_cl[cx] += t["clicks"]
+                break
     intent_segments = [{"name": n, "terms": seg_c[n], "spend": round(seg_s[n], 2),
                         "spend_share": round(seg_s[n] / total_spend, 4) if total_spend else 0}
                        for n in ["Relevant", "Competitor", "Needs Review", "Irrelevant"]]
@@ -1037,6 +1040,18 @@ def _search_terms_section(engine, client_id, config):
                           for c, v in sorted(svc_s.items(), key=lambda kv: -kv[1]) if v > 0]
     competitor_breakdown = [{"segment": c, "spend": round(v, 2)}
                             for c, v in sorted(comp_s.items(), key=lambda kv: -kv[1])[:12] if v > 0]
+
+    # competitor section — spend per matched competitor + the top competitor terms
+    total_comp_spend = sum(comp_s.values())
+    competitor_summary = [{"type": c, "terms": comp_c[c], "spend": round(comp_s[c], 2),
+                           "spend_share": round(comp_s[c] / total_comp_spend, 4) if total_comp_spend else 0,
+                           "conv": round(comp_cv[c], 0), "cpa": round(comp_s[c] / comp_cv[c], 2) if comp_cv[c] else None}
+                          for c in sorted(comp_s, key=lambda k: -comp_s[k]) if comp_s[c] > 0 or comp_c[c] > 0]
+    comp_matched = sorted([t for t in terms if t.get("competitor")], key=lambda x: -x["cost"])
+    competitor_terms = [{"term": t["term"], "competitor": t["competitor"], "spend": round(t["cost"], 2),
+                         "clicks": round(t["clicks"]), "conv": round(t["conv"], 1),
+                         "cvr": round(t["conv"] / t["clicks"], 4) if t["clicks"] else 0,
+                         "cpa": round(t["cost"] / t["conv"], 2) if t["conv"] else None} for t in comp_matched[:75]]
 
     STATUS_ORDER = ["Recommend to Add", "Already Added", "Review", "Excluded", "Unassigned"]
     keyword_status = [{"status": s, "terms": st_c[s], "spend": round(st_s[s], 2),
@@ -1075,6 +1090,9 @@ def _search_terms_section(engine, client_id, config):
         "intent_segments": intent_segments,
         "service_categories": service_categories,
         "competitor_breakdown": competitor_breakdown,
+        "competitor_summary": competitor_summary,
+        "competitor_terms": competitor_terms,
+        "competitor_total": len(comp_matched),
         "keyword_status": keyword_status,
         "relevant_terms": relevant_terms,
         "relevant_categories": rel_categories,
