@@ -575,14 +575,32 @@ def _search_terms(engine, client_id, config):
     }
 
 
+ST_GRADES = ["A — Top Performer", "B — Good", "C — Average", "D — Below Average",
+             "F — Poor / No Conversions", "Low Volume"]
+ST_GRADE_METHOD = [
+    ("A — Top Performer", "≥ 40%", "Converts exceptionally well. Protect and scale."),
+    ("B — Good", "25–40%", "Solid performer — worth investing in."),
+    ("C — Average", "15–25%", "Performing at an acceptable level."),
+    ("D — Below Average", "5–15%", "Converting but below expectations — review keyword, ad, and LP alignment."),
+    ("F — Poor / No Conversions", "< 5% (w/ 5+ clicks)", "Traffic is not converting — investigate match quality, ad relevance, and landing page."),
+    ("Low Volume", "< 5 clicks", "Insufficient data to grade reliably."),
+]
+
+
 def _grade_term(t):
-    if t["conv"] >= 1:
-        return "A — Converting"
-    if t["cost"] > 0 and t["conv"] == 0 and t["clicks"] >= 5:
-        return "F — No conversions"
+    """Grade a non-brand search term by conversion rate (reference thresholds)."""
     if t["clicks"] < 5:
-        return "Low volume"
-    return "C — Traffic, no conv"
+        return "Low Volume"
+    cvr = t["conv"] / t["clicks"] if t["clicks"] else 0
+    if cvr >= 0.40:
+        return "A — Top Performer"
+    if cvr >= 0.25:
+        return "B — Good"
+    if cvr >= 0.15:
+        return "C — Average"
+    if cvr >= 0.05:
+        return "D — Below Average"
+    return "F — Poor / No Conversions"
 
 
 def _keyword_section(engine, client_id):
@@ -942,19 +960,67 @@ def _search_terms_section(engine, client_id, config):
         t["intent"] = r["category"] if r else None
         t["relevant"] = r["relevant"] if r else None
 
-    gc, gs = Counter(), Counter()
-    for t in terms:
-        gc[t["grade"]] += 1; gs[t["grade"]] += t["cost"]
-    grade_order = ["A — Converting", "C — Traffic, no conv", "F — No conversions", "Low volume"]
-    grade_summary = [{"grade": g, "terms": gc[g], "cost": round(gs[g], 2)} for g in grade_order if g in gc]
+    total_spend = round(sum(t["cost"] for t in terms), 2)
 
+    # ---- performance grades (full metrics), by CVR band ----
+    gc, gs, gcv = Counter(), Counter(), Counter()
+    for t in terms:
+        gc[t["grade"]] += 1; gs[t["grade"]] += t["cost"]; gcv[t["grade"]] += t["conv"]
+    grades = [{"grade": g, "terms": gc[g], "spend": round(gs[g], 2),
+               "spend_share": round(gs[g] / total_spend, 4) if total_spend else 0,
+               "conv": round(gcv[g], 0), "cpa": round(gs[g] / gcv[g], 2) if gcv[g] else None}
+              for g in ST_GRADES if g in gc]
+    grade_summary = [{"grade": g["grade"], "terms": g["terms"], "cost": g["spend"]} for g in grades]
+
+    # ---- intent segments (heuristic over ALL terms) + service categories donut ----
+    comps_orig = config.get("competitors_conquest", []) + config.get("competitors_friendly", [])
+    comps = [x.lower() for x in comps_orig if x]
+    brand_l = [b.lower() for b in config.get("brand_terms", []) if b]
+    waste_ex = [w.lower() for w in config.get("waste_exclusions", []) if w]
+    catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
+             for c in (config.get("product_categories") or [])}
+
+    def category_of(term):
+        tl = term.lower()
+        for c, kws in catkw.items():
+            if c.lower() in tl or any(w in tl for w in kws):
+                return c[:1].upper() + c[1:]
+        return None
+
+    def intent_of(term):
+        tl = term.lower()
+        if comps and any(cx in tl for cx in comps):
+            return "Competitor"
+        if waste_ex and any(w in tl for w in waste_ex):
+            return "Irrelevant"
+        if category_of(term) or (brand_l and any(b in tl for b in brand_l)):
+            return "Relevant"
+        return "Needs Review"
+
+    seg_c, seg_s = Counter(), Counter()
+    svc_s = Counter()
+    comp_s = Counter()
+    for t in terms:
+        seg = intent_of(t["term"]); seg_c[seg] += 1; seg_s[seg] += t["cost"]
+        cat = category_of(t["term"]); svc_s[cat or "Other / uncategorized"] += t["cost"]
+        tl = t["term"].lower()
+        for cx in comps_orig:
+            if cx and cx.lower() in tl:
+                comp_s[cx] += t["cost"]; break
+    intent_segments = [{"name": n, "terms": seg_c[n], "spend": round(seg_s[n], 2),
+                        "spend_share": round(seg_s[n] / total_spend, 4) if total_spend else 0}
+                       for n in ["Relevant", "Competitor", "Needs Review", "Irrelevant"]]
+    service_categories = [{"category": c, "spend": round(v, 2)}
+                          for c, v in sorted(svc_s.items(), key=lambda kv: -kv[1]) if v > 0]
+    competitor_breakdown = [{"segment": c, "spend": round(v, 2)}
+                            for c, v in sorted(comp_s.items(), key=lambda kv: -kv[1])[:12] if v > 0]
+
+    # legacy intent mix (top terms, LLM categories) kept for other consumers
     ic, isp = Counter(), Counter()
     for t in top:
         cat = (cls.get(t["term"]) or {}).get("category", "unclassified")
         ic[cat] += 1; isp[cat] += t["cost"]
     intent_summary = [{"intent": k, "terms": ic[k], "cost": round(isp[k], 2)} for k in sorted(ic, key=lambda x: -isp[x])]
-
-    comps = [x.lower() for x in (config.get("competitors_conquest", []) + config.get("competitors_friendly", []))]
 
     def trow(t):
         return {"term": t["term"], "match": t["match"], "clicks": round(t["clicks"]),
@@ -970,6 +1036,12 @@ def _search_terms_section(engine, client_id, config):
     return {
         "source": next((v["source"] for v in cls.values()), "none"),
         "total_terms": len(terms),
+        "total_spend": total_spend,
+        "intent_segments": intent_segments,
+        "service_categories": service_categories,
+        "competitor_breakdown": competitor_breakdown,
+        "grades": grades,
+        "grade_method": [{"grade": g, "threshold": th, "interpretation": desc} for (g, th, desc) in ST_GRADE_METHOD],
         "grade_summary": grade_summary,
         "intent_summary": intent_summary,
         "top_graded": [trow(t) for t in sorted(terms, key=lambda x: -x["cost"])[:40]],

@@ -286,19 +286,56 @@
   const stData = () => (typeof DATA !== "undefined" && DATA.search_terms_section) || null;
   const stHead = (title, sub) => `<div class="view-head"><div><h2>${title}</h2><div class="muted">${sub}</div></div></div>`;
 
+  const stGradePill = g => {
+    const c = String(g)[0];
+    const st = (c === "A" || c === "B") ? "background:#DCFCE7;color:#166534"
+      : c === "C" ? "background:#FEF3C7;color:#92660A"
+      : c === "D" ? "background:#FCE7CE;color:#9A5B1E"
+      : c === "F" ? "background:#FEE2E2;color:#991B1B" : "background:#eee;color:#555";
+    return `<span class="tag" style="${st};font-size:10.5px">${esc(g)}</span>`;
+  };
   function renderStIntent(el) {
     el.className = "view"; const s = stData();
     if (!s) { el.innerHTML = stHead("Intent &amp; Grades", "") + `<div class="panel">No search-term data.</div>`; return; }
-    const grades = s.grade_summary.map(g => `<div class="stat"><div class="stat-label">${esc(g.grade)}</div><div class="stat-value">${fmt.num(g.terms)}</div><div class="stat-chg">${fmt.money(g.cost)}</div></div>`).join("");
-    el.innerHTML = stHead("Intent &amp; Grades", `${fmt.num(s.total_terms)} terms · intent via ${esc(s.source)}`) +
-      `<div class="two-col">
-         <div class="panel"><h3>Performance grades · term counts</h3><canvas id="stGradeChart" height="210"></canvas></div>
-         <div class="panel"><h3>Intent mix · spend</h3><canvas id="stIntentChart" height="210"></canvas></div>
+    const seg = s.intent_segments || [];
+    const cards = seg.map((g, i) => `<div class="stat ${i === 0 ? "hl" : ""}">
+        <div class="stat-label">${esc(g.name)}</div><div class="stat-value">${fmt.num(g.terms)}</div>
+        <div class="stat-chg ${g.name === "Irrelevant" ? "dn" : ""}">${fmt.pct(g.spend_share, 1)} of spend</div></div>`).join("");
+    const gradeRows = (s.grades || []).map(g => `<tr>
+        <td>${stGradePill(g.grade)}</td><td class="num">${fmt.num(g.terms)}</td><td class="num">${fmt.money(g.spend)}</td>
+        <td class="num">${fmt.pct(g.spend_share, 1)}</td><td class="num">${fmt.num(g.conv, 0)}</td>
+        <td class="num">${g.cpa ? fmt.money(g.cpa, 2) : "—"}</td></tr>`).join("");
+    const methodRows = (s.grade_method || []).map(m => `<tr>
+        <td>${stGradePill(m.grade)}</td><td class="num">${esc(m.threshold)}</td><td>${esc(m.interpretation)}</td></tr>`).join("");
+    const comp = s.competitor_breakdown || [];
+    const compPanel = comp.length ? `
+      <div class="panel"><h3>Competitor brand breakdown</h3>
+        <div class="muted" style="margin-bottom:8px">Paid-search spend on queries that target named competitor brands.</div>
+        <div style="position:relative;height:${Math.max(160, comp.length * 42)}px"><canvas id="stCompChart"></canvas></div></div>` : "";
+    el.innerHTML = stHead("Search Term · Intent &amp; Grades", `${fmt.num(s.total_terms)} terms · ${fmt.money(s.total_spend)} spend`) +
+      `<div class="stat-grid">${cards}</div>
+       <div class="two-col">
+         <div class="panel"><h3>Service categories by spend</h3><canvas id="stSvcChart" height="230"></canvas></div>
+         <div class="panel"><h3>Performance grades · term counts</h3>
+           <div class="muted" style="margin-bottom:8px">Grades assigned by CVR thresholds on non-brand search terms.</div>
+           <div class="tbl-wrap"><table class="sortable">
+             <thead><tr><th>Grade</th><th class="num">Terms</th><th class="num">Spend</th><th class="num">% of Spend</th><th class="num">Conv</th><th class="num">CPA</th></tr></thead>
+             <tbody>${gradeRows}</tbody></table></div></div>
        </div>
-       <div class="stat-grid">${grades}</div>
-       <div class="panel"><h3>Top terms by spend</h3>${termTable(s.top_graded, true)}</div>`;
-    donut("stGradeChart", s.grade_summary.map(g => g.grade), s.grade_summary.map(g => g.terms));
-    donut("stIntentChart", s.intent_summary.map(i => i.intent), s.intent_summary.map(i => Math.round(i.cost)));
+       <div class="panel"><h3>How grades are calculated</h3>
+         <div class="muted" style="margin-bottom:8px">Non-brand search terms with $1+ spend are graded by conversion rate (CVR = conversions / clicks). Brand &amp; competitor terms are excluded.</div>
+         <div class="tbl-wrap"><table>
+           <thead><tr><th>Grade</th><th class="num">CVR Threshold</th><th>Interpretation</th></tr></thead>
+           <tbody>${methodRows}</tbody></table></div></div>
+       ${compPanel}`;
+    donut("stSvcChart", s.service_categories.map(c => c.category), s.service_categories.map(c => Math.round(c.spend)));
+    if (comp.length && typeof Chart !== "undefined") {
+      const cc = document.getElementById("stCompChart");
+      if (cc) new Chart(cc, { type: "bar",
+        data: { labels: comp.map(c => c.segment), datasets: [{ data: comp.map(c => Math.round(c.spend)), backgroundColor: "#1A1A1A", borderRadius: 3 }] },
+        options: { indexAxis: "y", responsive: true, maintainAspectRatio: false,
+          scales: { x: { ticks: { callback: v => "$" + v.toLocaleString() } } }, plugins: { legend: { display: false } } } });
+    }
     if (typeof enableSortable === "function") enableSortable(el);
   }
   function renderStRelevant(el) {
