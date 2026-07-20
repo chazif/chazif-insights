@@ -338,11 +338,67 @@
     }
     if (typeof enableSortable === "function") enableSortable(el);
   }
+  const stStatusBadge = st => {
+    const m = { "Recommend to Add": "background:#1A1A1A;color:#CFFF04", "Already Added": "background:#DBEAFE;color:#1E40AF",
+      "Review": "background:#FEF3C7;color:#92660A", "Excluded": "background:#FEE2E2;color:#991B1B", "Unassigned": "background:#eee;color:#555" };
+    return `<span class="tag" style="${m[st] || ""};font-size:10px">${esc(st)}</span>`;
+  };
+  const stGradeRow = g => `<tr><td>${stGradePill(g.grade)}</td><td class="num">${fmt.num(g.terms)}</td>
+      <td class="num">${fmt.money(g.spend)}</td><td class="num">${fmt.pct(g.spend_share, 1)}</td>
+      <td class="num">${fmt.num(g.conv, 0)}</td><td class="num">${g.cpa ? fmt.money(g.cpa, 2) : "—"}</td></tr>`;
+  const stGradePanel = s => `<div class="panel"><h3>Performance grades · term counts</h3>
+      <div class="muted" style="margin-bottom:8px">Grades assigned by CVR thresholds on non-brand search terms.</div>
+      <div class="tbl-wrap"><table class="sortable">
+        <thead><tr><th>Grade</th><th class="num">Terms</th><th class="num">Spend</th><th class="num">% of Spend</th><th class="num">Conv</th><th class="num">CPA</th></tr></thead>
+        <tbody>${(s.grades || []).map(stGradeRow).join("")}</tbody></table></div></div>`;
+  let STR_CAT = "all", STR_FILTER = "";
   function renderStRelevant(el) {
     el.className = "view"; const s = stData();
     if (!s) { el.innerHTML = stHead("Relevant Terms", "") + `<div class="panel">No data.</div>`; return; }
-    el.innerHTML = stHead("Relevant Terms", `Terms relevant to the business (${esc(s.source)}), by spend`) +
-      `<div class="panel">${termTable(s.relevant, true)}</div>`;
+    const ks = s.keyword_status || [];
+    const cards = ks.map((k, i) => `<div class="stat ${i === 0 ? "hl" : ""}">
+        <div class="stat-label">${esc(k.status)}</div><div class="stat-value">${fmt.num(k.terms)}</div>
+        <div class="stat-chg">${fmt.money(k.spend)} · ${fmt.pct(k.spend_share, 1)} of spend</div></div>`).join("");
+    const rows = s.relevant_terms || [];
+    const rowFn = r => `<tr>
+        <td class="strong">${esc(r.term)}</td>
+        <td>${r.category === "Uncategorized" ? '<span class="muted">Uncategorized</span>' : esc(r.category)}</td>
+        <td>${stGradePill(r.grade)}</td><td>${stStatusBadge(r.status)}</td>
+        <td class="num">${fmt.money(r.spend)}</td><td class="num">${fmt.num(r.clicks)}</td>
+        <td class="num">${fmt.num(r.conv, 1)}</td><td class="num">${fmt.pct(r.cvr, 2)}</td><td class="num">${fmt.money(r.cpc, 2)}</td></tr>`;
+    const filterRows = () => {
+      let rws = rows;
+      if (STR_CAT !== "all") rws = rws.filter(r => r.category === STR_CAT);
+      if (STR_FILTER) { const f = STR_FILTER.toLowerCase(); rws = rws.filter(r => (r.term + " " + r.category).toLowerCase().indexOf(f) >= 0); }
+      return rws;
+    };
+    const shown = filterRows();
+    const catOpts = ['<option value="all">All categories</option>'].concat((s.relevant_categories || []).map(c => `<option value="${esc(c)}"${STR_CAT === c ? " selected" : ""}>${esc(c)}</option>`)).join("");
+    el.innerHTML = stHead("Relevant Terms", `Top ${fmt.num(rows.length)} Intent=Relevant terms by spend`) +
+      `<div class="stat-grid">${cards}</div>
+       <div class="two-col">
+         <div class="panel"><h3>Service categories by spend</h3><canvas id="strSvcChart" height="230"></canvas></div>
+         ${stGradePanel(s)}
+       </div>
+       <div class="panel">
+         <div class="toolbar">
+           <input type="text" id="strFilter" placeholder="Filter term…" value="${esc(STR_FILTER)}" style="min-width:240px"/>
+           <label>Category:</label><select id="strCat">${catOpts}</select>
+           <span class="muted" id="strCount" style="margin-left:auto">Showing ${fmt.num(shown.length)} of ${fmt.num(s.relevant_total)}</span>
+         </div>
+         <div class="tbl-wrap"><table class="sortable">
+           <thead><tr><th>Search Term</th><th>Category</th><th>Grade</th><th>Status</th><th class="num">Spend</th>
+             <th class="num">Clicks</th><th class="num">Conv</th><th class="num">CVR</th><th class="num">CPC</th></tr></thead>
+           <tbody id="strBody">${shown.map(rowFn).join("")}</tbody></table></div>
+       </div>`;
+    donut("strSvcChart", s.service_categories.map(c => c.category), s.service_categories.map(c => Math.round(c.spend)));
+    const cf = el.querySelector("#strCat"); if (cf) cf.addEventListener("change", () => { STR_CAT = cf.value; setView("st-relevant", { preserveScroll: true }); });
+    const tf = el.querySelector("#strFilter");
+    if (tf) tf.addEventListener("input", () => {
+      STR_FILTER = tf.value; const rws = filterRows();
+      const body = el.querySelector("#strBody"); if (body) body.innerHTML = rws.map(rowFn).join("");
+      const cnt = el.querySelector("#strCount"); if (cnt) cnt.textContent = `Showing ${fmt.num(rws.length)} of ${fmt.num(s.relevant_total)}`;
+    });
     if (typeof enableSortable === "function") enableSortable(el);
   }
   function renderStCompetitor(el) {
