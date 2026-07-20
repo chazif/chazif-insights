@@ -810,22 +810,70 @@
   }
 
   // ---------- Ad Copy section ----------
+  let AC_GROUP = "nonbranded", AC_CAT = "all", AC_REG = "all", AC_GRADE = "all", AC_FILTER = "";
   function renderAdCopy(el) {
     el.className = "view"; const a = (typeof DATA !== "undefined" && DATA.ads_section) || null;
-    if (!a) { el.innerHTML = stHead("Ad Copy", "") + `<div class="panel">No ad data.</div>`; return; }
-    const rows = a.ads.map(d => `<tr>
-        <td class="strong">${esc(d.campaign)}</td><td>${esc(d.ad_group)}</td><td>${esc(d.type)}</td>
-        <td class="num chg ${d.headlines < 8 ? "dn" : d.headlines >= 11 ? "up" : ""}">${d.headlines}</td>
-        <td class="num chg ${d.descriptions < 3 ? "dn" : ""}">${d.descriptions}</td>
-        <td class="num" data-sort="${d.clicks}">${fmt.num(d.clicks)}</td>
-        <td class="num" data-sort="${d.ctr}">${fmt.pct(d.ctr, 2)}</td>
-        <td class="num" data-sort="${d.cost}">${fmt.money(d.cost)}</td>
-        <td class="num" data-sort="${d.conv}">${fmt.num(d.conv, 1)}</td></tr>`).join("");
-    el.innerHTML = stHead("Ad Copy", `${a.count} ads · headline/description counts flag RSA asset coverage`) +
-      `<div class="panel"><div class="tbl-wrap"><table class="sortable">
-        <thead><tr><th>Campaign</th><th>Ad group</th><th>Type</th><th class="num">Headlines</th>
-          <th class="num">Descr.</th><th class="num">Clicks</th><th class="num">CTR</th><th class="num">Cost</th><th class="num">Conv</th></tr></thead>
-        <tbody>${rows}</tbody></table></div></div>`;
+    const ac = a && a.ad_copy;
+    if (!ac) { el.innerHTML = stHead("Ad Copy", "") + `<div class="panel">No ad data.</div>`; return; }
+    if (!ac[AC_GROUP]) AC_GROUP = ac.nonbranded ? "nonbranded" : "branded";
+    const g = ac[AC_GROUP];
+    const label = AC_GROUP === "branded" ? "Branded" : "Non-Branded";
+    const gseg = k => `<button class="seg-pill ${AC_GROUP === k ? "active" : ""}" data-acg="${k}">${k === "branded" ? "Branded" : "Non-Branded"}</button>`;
+    const gradeRows = g.grades.map(r => `<tr>
+        <td>${stGradePill(r.grade)}</td><td class="num">${fmt.num(r.ads)}</td><td class="num">${fmt.num(r.impr)}</td>
+        <td class="num">${fmt.num(r.clicks)}</td><td class="num">${fmt.pct(r.ctr, 2)}</td><td class="num">${fmt.money(r.spend)}</td>
+        <td class="num">${fmt.pct(r.spend_share, 1)}</td><td class="num">${fmt.num(r.conv, 0)}</td><td class="num">${fmt.pct(r.cvr, 2)}</td></tr>`).join("");
+    const rowFn = r => `<tr>
+        <td class="strong">${esc(r.brand)}</td>
+        <td>${r.category === "Uncategorized" ? '<span class="muted">Uncategorized</span>' : `<span class="tag info">${esc(r.category)}</span>`}</td>
+        <td>${r.region === "—" ? '<span class="muted">—</span>' : esc(r.region)}</td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.ad_group)}</td>
+        <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="muted" style="font-size:11.5px">${esc(r.headline)}</span></td>
+        <td>${stGradePill(r.grade)}</td><td class="num">${fmt.pct(r.ctr, 2)}</td><td class="num">${fmt.num(r.impr)}</td>
+        <td class="num">${fmt.num(r.clicks)}</td><td class="num">${fmt.money(r.cpc, 2)}</td><td class="num">${fmt.money(r.spend)}</td>
+        <td class="num">${fmt.num(r.conv, 1)}</td><td class="num">${fmt.pct(r.cvr, 2)}</td></tr>`;
+    const filterRows = () => {
+      let rws = g.rows;
+      if (AC_CAT !== "all") rws = rws.filter(r => r.category === AC_CAT);
+      if (AC_REG !== "all") rws = rws.filter(r => r.region === AC_REG);
+      if (AC_GRADE !== "all") rws = rws.filter(r => r.grade === AC_GRADE);
+      if (AC_FILTER) { const f = AC_FILTER.toLowerCase(); rws = rws.filter(r => (r.ad_group + " " + r.headline + " " + r.region + " " + r.category).toLowerCase().indexOf(f) >= 0); }
+      return rws;
+    };
+    const shown = filterRows();
+    const opts = (list, cur) => ['<option value="all">All</option>'].concat(list.map(x => `<option value="${esc(x)}"${cur === x ? " selected" : ""}>${esc(x)}</option>`)).join("");
+    el.innerHTML = `
+      <div class="view-head"><div><h2>Ad Copy · ${label}</h2>
+        <div class="muted">Ad-level performance graded by CTR. Branded and non-branded are graded on different scales (branded CTRs are naturally much higher).</div></div>
+        <div class="seg-group">${gseg("nonbranded")}${gseg("branded")}</div></div>
+      <div class="panel"><h3>Performance grades · ad counts · ${label}</h3>
+        <div class="muted" style="margin-bottom:8px">${esc(ac.thresholds[AC_GROUP])}</div>
+        <div class="tbl-wrap"><table class="sortable">
+          <thead><tr><th>Grade</th><th class="num">Ads</th><th class="num">Impressions</th><th class="num">Clicks</th><th class="num">CTR</th>
+            <th class="num">Spend</th><th class="num">% of Spend</th><th class="num">Conv</th><th class="num">CVR</th></tr></thead>
+          <tbody>${gradeRows}</tbody></table></div></div>
+      <div class="panel">
+        <div class="toolbar">
+          <input type="text" id="acFilter" placeholder="Filter ad group / headline / region…" value="${esc(AC_FILTER)}" style="min-width:240px"/>
+          <label>Category:</label><select id="acCat">${opts(g.categories, AC_CAT)}</select>
+          ${g.has_region ? `<label>Region:</label><select id="acReg">${opts(g.regions, AC_REG)}</select>` : ""}
+          <label>Grade:</label><select id="acGrade">${opts(g.grade_labels, AC_GRADE)}</select>
+          <span class="muted" id="acCount" style="margin-left:auto">Showing ${fmt.num(shown.length)} of ${fmt.num(g.count)}${g.count > g.rows.length ? ` · top ${g.rows.length} by spend` : ""}</span>
+        </div>
+        <div class="tbl-wrap"><table class="sortable">
+          <thead><tr><th>Brand</th><th>Category</th><th>Region</th><th>Ad Group</th><th>Headline</th><th>Grade</th>
+            <th class="num">CTR</th><th class="num">Impr</th><th class="num">Clicks</th><th class="num">CPC</th><th class="num">Spend</th><th class="num">Conv</th><th class="num">CVR</th></tr></thead>
+          <tbody id="acBody">${shown.map(rowFn).join("")}</tbody></table></div>
+      </div>`;
+    el.querySelectorAll("[data-acg]").forEach(b => b.addEventListener("click", () => { AC_GROUP = b.dataset.acg; AC_CAT = "all"; AC_REG = "all"; AC_GRADE = "all"; setView("ad-copy", { preserveScroll: true }); }));
+    const bind = (id, set) => { const e = el.querySelector(id); if (e) e.addEventListener("change", () => { set(e.value); setView("ad-copy", { preserveScroll: true }); }); };
+    bind("#acCat", v => AC_CAT = v); bind("#acReg", v => AC_REG = v); bind("#acGrade", v => AC_GRADE = v);
+    const tf = el.querySelector("#acFilter");
+    if (tf) tf.addEventListener("input", () => {
+      AC_FILTER = tf.value; const rws = filterRows();
+      const body = el.querySelector("#acBody"); if (body) body.innerHTML = rws.map(rowFn).join("");
+      const cnt = el.querySelector("#acCount"); if (cnt) cnt.textContent = `Showing ${fmt.num(rws.length)} of ${fmt.num(g.count)}${g.count > g.rows.length ? ` · top ${g.rows.length} by spend` : ""}`;
+    });
     if (typeof enableSortable === "function") enableSortable(el);
   }
   function renderAdLp(el) {
