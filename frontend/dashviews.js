@@ -1315,7 +1315,8 @@
     // Recommendations first, Settings last; every section collapses (closed by default).
     const SECTIONS = [
       ["Recommendations", ["recs"]],
-      ["Performance", ["overview", "trends", "nb-cats", "regions", "campaign-perf", "budget-pacing"]],
+      ["Performance", ["overview", "trends", "nb-cats", "regions", "budget-pacing"]],
+      ["Campaign", ["campaign-perf"]],
       ["Keyword", ["kw-deep-dive", "qs-detail", "qs-breakdown", "region-category"]],
       ["Search Terms", ["st-intent", "st-relevant", "st-competitor", "st-flagged"]],
       ["Ad Copy", ["ad-copy", "ad-lp"]],
