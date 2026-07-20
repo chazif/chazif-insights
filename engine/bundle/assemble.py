@@ -577,6 +577,23 @@ def _search_terms(engine, client_id, config):
 
 ST_GRADES = ["A — Top Performer", "B — Good", "C — Average", "D — Below Average",
              "F — Poor / No Conversions", "Low Volume"]
+
+# Ad Copy grades ads by CTR on separate branded / non-branded scales.
+AD_TH_NB = [(0.10, "A — Top Performer"), (0.06, "B — Good"), (0.04, "C — Average"), (0.02, "D — Below Average")]
+AD_TH_BR = [(0.30, "A — Top Performer"), (0.20, "B — Good"), (0.10, "C — Average"), (0.05, "D — Below Average")]
+AD_THRESH_TEXT = {
+    "nonbranded": "CTR thresholds (Non-Branded): A ≥ 10%, B 6–10%, C 4–6%, D 2–4%, F < 2% with ≥ 100 impressions. Low Volume = < 100 impressions.",
+    "branded": "CTR thresholds (Branded): A ≥ 30%, B 20–30%, C 10–20%, D 5–10%, F < 5% with ≥ 100 impressions. Low Volume = < 100 impressions.",
+}
+
+
+def _grade_ad(ctr, impr, branded):
+    if impr < 100:
+        return "Low Volume"
+    for mn, g in (AD_TH_BR if branded else AD_TH_NB):
+        if ctr >= mn:
+            return g
+    return "F — Poor / No Conversions"
 ST_GRADE_METHOD = [
     ("A — Top Performer", "≥ 40%", "Converts exceptionally well. Protect and scale."),
     ("B — Good", "25–40%", "Solid performer — worth investing in."),
@@ -734,8 +751,22 @@ def _keyword_regions(engine, client_id, config):
                        "regions": len(region_tot)}}
 
 
-def _ads_section(engine, client_id):
-    """RSA inventory + performance (Ad Copy) and ad → landing-page pairing."""
+def _ads_section(engine, client_id, config=None):
+    """RSA inventory + CTR-graded ad performance (Ad Copy) and ad → landing-page pairing."""
+    from collections import Counter
+    config = config or {}
+    brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
+    brand_label = (config.get("brand_terms") or [None])[0] or _client_name(engine, client_id)
+    catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
+             for c in (config.get("product_categories") or [])}
+
+    def categorize(txt):
+        n = (txt or "").lower()
+        for c, kws in catkw.items():
+            if c.lower() in n or any(w in n for w in kws):
+                return c[:1].upper() + c[1:]
+        return "Uncategorized"
+
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT clicks, impressions, cost, conversions, row FROM raw_rows "
@@ -750,14 +781,48 @@ def _ads_section(engine, client_id):
         clicks, impr, cost, cv = _num(clicks), _num(impr), _num(cost), _num(conv)
         if impr <= 0 and cost <= 0:
             continue
-        ads.append({"campaign": d.get("campaign", ""), "ad_group": d.get("ad_group", ""),
-                    "type": d.get("ad_type", ""), "final_url": d.get("ad_final_url") or d.get("final_url") or "",
-                    "headlines": hn, "descriptions": dn, "clicks": round(clicks), "impr": round(impr),
-                    "cost": round(cost, 2), "conv": round(cv, 1), "ctr": round(clicks / impr, 4) if impr else 0})
+        camp = d.get("campaign", ""); ag = d.get("ad_group", "")
+        headline = " | ".join([d.get(f"headline_{i}") for i in range(1, 4) if (d.get(f"headline_{i}") or "").strip()]) \
+            or d.get("headline") or d.get("long_headline") or ""
+        branded = bool(brand_terms and any(b in (camp + " " + ag).lower() for b in brand_terms))
+        ctr = clicks / impr if impr else 0
+        ads.append({"campaign": camp, "ad_group": ag, "type": d.get("ad_type", ""),
+                    "final_url": d.get("ad_final_url") or d.get("final_url") or "",
+                    "headlines": hn, "descriptions": dn, "headline": headline,
+                    "brand": brand_label, "branded": branded, "region": "—",
+                    "category": categorize(ag + " " + headline),
+                    "clicks": round(clicks), "impr": round(impr), "cost": round(cost, 2), "conv": round(cv, 1),
+                    "ctr": round(ctr, 4), "cpc": round(cost / clicks, 2) if clicks else 0,
+                    "cvr": round(cv / clicks, 4) if clicks else 0,
+                    "grade": _grade_ad(ctr, impr, branded)})
     if not ads:
         return None
     ads.sort(key=lambda x: -x["cost"])
-    return {"count": len(ads), "ads": ads[:40]}
+
+    def group_data(subset):
+        gc, gi, gcl, gs, gcv = Counter(), Counter(), Counter(), Counter(), Counter()
+        for a in subset:
+            g = a["grade"]; gc[g] += 1; gi[g] += a["impr"]; gcl[g] += a["clicks"]; gs[g] += a["cost"]; gcv[g] += a["conv"]
+        tot = sum(a["cost"] for a in subset)
+        grades = [{"grade": g, "ads": gc[g], "impr": round(gi[g]), "clicks": round(gcl[g]),
+                   "ctr": round(gcl[g] / gi[g], 4) if gi[g] else 0, "spend": round(gs[g], 2),
+                   "spend_share": round(gs[g] / tot, 4) if tot else 0, "conv": round(gcv[g], 0),
+                   "cvr": round(gcv[g] / gcl[g], 4) if gcl[g] else 0} for g in ST_GRADES if g in gc]
+        detail = [{"brand": a["brand"], "category": a["category"], "region": a["region"], "ad_group": a["ad_group"],
+                   "headline": a["headline"], "grade": a["grade"], "ctr": a["ctr"], "impr": a["impr"],
+                   "clicks": a["clicks"], "cpc": a["cpc"], "spend": a["cost"], "conv": a["conv"], "cvr": a["cvr"]}
+                  for a in subset[:100]]
+        return {"count": len(subset), "grades": grades, "rows": detail,
+                "categories": sorted({a["category"] for a in subset if a["category"] != "Uncategorized"}),
+                "regions": sorted({a["region"] for a in subset if a["region"] != "—"}),
+                "grade_labels": [g["grade"] for g in grades], "has_region": False}
+
+    nb = [a for a in ads if not a["branded"]]
+    br = [a for a in ads if a["branded"]]
+    return {"count": len(ads), "ads": ads[:100],
+            "ad_copy": {"thresholds": AD_THRESH_TEXT,
+                        "nonbranded": group_data(nb) if nb else None,
+                        "branded": group_data(br) if br else None}}
 
 
 def _lp_categories(lps, product_categories):
@@ -1221,7 +1286,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
     kw_regions = _keyword_regions(engine, client_id, config)
     reg_cat = _region_category(engine, client_id, config)
     st = _search_terms_section(engine, client_id, config)
-    ads = _ads_section(engine, client_id)
+    ads = _ads_section(engine, client_id, config)
     lps = _landing_pages(engine, client_id, config)
     nb_cats = _nb_categories(engine, client_id, cm, config) if cm else None
     regions = _regions(engine, client_id, cm, config) if cm else None
