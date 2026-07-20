@@ -586,6 +586,67 @@
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
+  // ---------- Region & Category — CPC by component rating ----------
+  let RC_COMP = "exp_ctr", RC_CAT = "all", RC_REG = "all", RC_FILTER = "";
+  function renderRegionCategory(el) {
+    el.className = "view";
+    const rc = (typeof DATA !== "undefined" && DATA.region_category_section) || null;
+    if (!rc || !rc.components || !rc.components.length) {
+      el.innerHTML = stHead("Region &amp; Category", "") + `<div class="panel">Upload a region-segmented keyword export (joined to Quality Score data) to unlock the Brand × Region × Category CPC breakdown.</div>`;
+      return;
+    }
+    const comp = rc.components.find(c => c.key === RC_COMP) || rc.components[0];
+    RC_COMP = comp.key;
+    const money = v => v == null ? '<span class="muted">—</span>' : fmt.money(v, 2);
+    const spread = v => v == null ? '<span class="muted">—</span>' : `<span class="chg ${v >= 0 ? "dn" : "up"}">${(v >= 0 ? "+" : "") + fmt.money(v, 2)}</span>`;
+    const rowFn = r => `<tr>
+        <td class="strong">${esc(r.brand)}</td><td>${esc(r.region)}</td>
+        <td>${r.category === "Uncategorized" ? '<span class="muted">Uncategorized</span>' : `<span class="tag info">${esc(r.category)}</span>`}</td>
+        <td class="num">${fmt.money(r.total_spend)}</td>
+        <td class="num">${money(r.below_cpc)}</td><td class="num">${fmt.num(r.below_clicks)}</td>
+        <td class="num">${money(r.avg_cpc)}</td><td class="num">${fmt.num(r.avg_clicks)}</td>
+        <td class="num">${money(r.above_cpc)}</td><td class="num">${fmt.num(r.above_clicks)}</td>
+        <td class="num">${spread(r.spread)}</td></tr>`;
+    const filterRows = () => {
+      let rws = comp.rows;
+      if (RC_CAT !== "all") rws = rws.filter(r => r.category === RC_CAT);
+      if (RC_REG !== "all") rws = rws.filter(r => r.region === RC_REG);
+      if (RC_FILTER) { const f = RC_FILTER.toLowerCase(); rws = rws.filter(r => (r.brand + " " + r.region + " " + r.category).toLowerCase().indexOf(f) >= 0); }
+      return rws;
+    };
+    const shown = filterRows();
+    const cbtn = c => `<button class="seg-pill ${RC_COMP === c.key ? "active" : ""}" data-rc="${c.key}">${esc(c.label)}</button>`;
+    const catOpts = ['<option value="all">All categories</option>'].concat(rc.categories.map(c => `<option value="${esc(c)}"${RC_CAT === c ? " selected" : ""}>${esc(c)}</option>`)).join("");
+    const regOpts = ['<option value="all">All regions</option>'].concat(rc.regions.map(c => `<option value="${esc(c)}"${RC_REG === c ? " selected" : ""}>${esc(c)}</option>`)).join("");
+    el.innerHTML = stHead("Region &amp; Category · CPC by component rating",
+        "For each Brand × Region × Category slice, compare avg CPC when the keyword's component rating is Below Avg, Average, or Above Avg.") +
+      `<div class="seg-group" style="margin-bottom:14px">${rc.components.map(cbtn).join("")}</div>
+       <div class="panel">
+         <div class="toolbar">
+           <input type="text" id="rcFilter" placeholder="Filter brand, region, category…" value="${esc(RC_FILTER)}" style="min-width:240px"/>
+           <label>Category:</label><select id="rcCat">${catOpts}</select>
+           <label>Region:</label><select id="rcReg">${regOpts}</select>
+           <span class="muted" id="rcCount" style="margin-left:auto">Showing ${fmt.num(shown.length)} of ${fmt.num(comp.total)}</span>
+         </div>
+         <div class="muted" style="margin-bottom:8px">Showing: <strong>${esc(comp.label)}</strong>. "CPC Spread" = Below CPC − Above CPC. Larger spread = higher financial pain when a component drops to Below Avg.</div>
+         <div class="tbl-wrap"><table class="sortable">
+           <thead><tr><th>Brand</th><th>Region</th><th>Category</th><th class="num">Total Spend</th>
+             <th class="num">Below CPC</th><th class="num">Below Clicks</th><th class="num">Avg CPC</th><th class="num">Avg Clicks</th>
+             <th class="num">Above CPC</th><th class="num">Above Clicks</th><th class="num">CPC Spread</th></tr></thead>
+           <tbody id="rcBody">${shown.map(rowFn).join("")}</tbody></table></div>
+       </div>`;
+    el.querySelectorAll("[data-rc]").forEach(b => b.addEventListener("click", () => { RC_COMP = b.dataset.rc; setView("region-category", { preserveScroll: true }); }));
+    const cf = el.querySelector("#rcCat"); if (cf) cf.addEventListener("change", () => { RC_CAT = cf.value; setView("region-category", { preserveScroll: true }); });
+    const rf = el.querySelector("#rcReg"); if (rf) rf.addEventListener("change", () => { RC_REG = rf.value; setView("region-category", { preserveScroll: true }); });
+    const tf = el.querySelector("#rcFilter");
+    if (tf) tf.addEventListener("input", () => {
+      RC_FILTER = tf.value; const rws = filterRows();
+      const body = el.querySelector("#rcBody"); if (body) body.innerHTML = rws.map(rowFn).join("");
+      const cnt = el.querySelector("#rcCount"); if (cnt) cnt.textContent = `Showing ${fmt.num(rws.length)} of ${fmt.num(comp.total)}`;
+    });
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+
   // ---------- Ad Copy section ----------
   function renderAdCopy(el) {
     el.className = "view"; const a = (typeof DATA !== "undefined" && DATA.ads_section) || null;
@@ -868,6 +929,7 @@
     "qs-detail": ["QS Overview", renderQsDetail],
     "kw-deep-dive": ["Keyword Deep Dive", renderKwDeepDive],
     "qs-breakdown": ["QS Breakdown", renderQsBreakdown],
+    "region-category": ["Region & Category", renderRegionCategory],
     "ad-copy": ["Ad Copy", renderAdCopy],
     "ad-lp": ["Ad ↔ LP Pairing", renderAdLp],
     "lp-perf": ["LP Performance", renderLpPerf],
@@ -884,7 +946,7 @@
   if (meta && Array.isArray(meta.views)) {
     const SECTIONS = [
       ["Performance", ["overview", "trends", "nb-cats", "regions", "campaign-perf", "budget-pacing"]],
-      ["Keyword", ["kw-deep-dive", "qs-detail", "qs-breakdown"]],
+      ["Keyword", ["kw-deep-dive", "qs-detail", "qs-breakdown", "region-category"]],
       ["Search Terms", ["st-intent", "st-relevant", "st-competitor", "st-flagged"]],
       ["Ad Copy", ["ad-copy", "ad-lp"]],
       ["Landing Pages", ["lp-perf", "lp-category"]],
