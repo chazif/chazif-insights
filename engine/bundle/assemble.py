@@ -1060,6 +1060,78 @@ def _lp_performance(engine, client_id):
     return out
 
 
+def _lp_category_grid(engine, client_id, config):
+    """LP × category CVR matrix from ads grouped by final URL × ad category (an LP can
+    serve several categories, each with its own conversion rate). Brand ads bucket to
+    'BR'; the rest to their product category or 'Other'. None if no ad data."""
+    from collections import Counter
+    config = config or {}
+    brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
+    catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
+             for c in (config.get("product_categories") or [])}
+
+    def ad_category(url_text):
+        n = url_text.lower()
+        for c, kws in catkw.items():
+            if c.lower() in n or any(w in n for w in kws):
+                return (c[:1].upper() + c[1:])
+        return "Other"
+
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT clicks, cost, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='ads_performance'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    cell = defaultdict(lambda: defaultdict(lambda: [0.0, 0.0, 0.0]))  # url -> cat -> clicks,conv,cost
+    url_tot = defaultdict(lambda: [0.0, 0.0, 0.0])
+    for clicks, cost, conv, row in rows:
+        d = _asdict(row)
+        url = d.get("ad_final_url") or d.get("final_url") or ""
+        if not url:
+            continue
+        clicks, cost, conv = _num(clicks), _num(cost), _num(conv)
+        branded = bool(brand_terms and any(b in (d.get("campaign", "") + " " + d.get("ad_group", "")).lower() for b in brand_terms))
+        cat = "BR" if branded else ad_category((d.get("ad_group", "") or "") + " " + (d.get("headline_1") or ""))
+        cc = cell[url][cat]; cc[0] += clicks; cc[1] += conv; cc[2] += cost
+        ut = url_tot[url]; ut[0] += clicks; ut[1] += conv; ut[2] += cost
+    if not url_tot:
+        return None
+
+    cat_spend = Counter()
+    for u in cell:
+        for cat, v in cell[u].items():
+            cat_spend[cat] += v[2]
+    categories = [c for c, _ in cat_spend.most_common()]
+
+    rows_out = []
+    for url, (cl, cv, co) in sorted(url_tot.items(), key=lambda kv: -kv[1][2])[:100]:
+        cats = cell[url]
+        rows_out.append({"url": url, "cost": round(co, 2), "clicks": round(cl), "conv": round(cv, 1),
+                         "overall_cvr": round(cv / cl, 4) if cl else 0, "n_cats": len(cats),
+                         "cvr_by_cat": {cat: (round(v[1] / v[0], 4) if v[0] else None) for cat, v in cats.items()}})
+
+    summary = []
+    for cat in categories:
+        entries = [(cell[u][cat][1] / cell[u][cat][0], u, cell[u][cat][2])
+                   for u in cell if cat in cell[u] and cell[u][cat][0]]
+        if not entries:
+            continue
+        entries.sort(key=lambda e: e[0])
+        vals = [e[0] for e in entries]
+        summary.append({"category": cat, "lps_running": len([u for u in cell if cat in cell[u]]),
+                        "spend": round(sum(cell[u][cat][2] for u in cell if cat in cell[u]), 2),
+                        "min_cvr": round(vals[0], 4), "median_cvr": round(vals[len(vals) // 2], 4),
+                        "max_cvr": round(vals[-1], 4), "best_lp": entries[-1][1], "worst_lp": entries[0][1]})
+
+    tc = sum(v[0] for v in url_tot.values()); tv = sum(v[1] for v in url_tot.values())
+    tco = sum(v[2] for v in url_tot.values())
+    return {"categories": categories, "rows": rows_out, "summary": summary, "total": len(url_tot),
+            "stats": {"landing_pages": len(url_tot), "spend": round(tco, 2), "clicks": round(tc),
+                      "conversions": round(tv, 1), "weighted_cvr": round(tv / tc, 4) if tc else 0,
+                      "avg_cats": round(sum(len(cell[u]) for u in cell) / len(cell), 1)}}
+
+
 def _landing_pages(engine, client_id, config):
     """Landing-page performance (clicks/cost/CTR + mobile speed) + a URL-derived category
     grid. The LP export has no conversion or device column, so no CVR / device grid."""
@@ -1377,6 +1449,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None):
         lps = {"count": len(lp_perf), "rows": [], "category_grid": None}
     if lps is not None:
         lps["performance"] = lp_perf
+        lps["category_grid"] = _lp_category_grid(engine, client_id, config)
     nb_cats = _nb_categories(engine, client_id, cm, config) if cm else None
     regions = _regions(engine, client_id, cm, config) if cm else None
 
