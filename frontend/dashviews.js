@@ -1333,8 +1333,13 @@
       document.head.appendChild(s);
     }
     const sidebar = document.getElementById("sidebar");
-    // capture the admin (Settings) items admin.js inserted, then clear the whole nav
-    const wsItems = Array.prototype.slice.call(sidebar.querySelectorAll(".nav-item")).filter(n => (n.dataset.view || "").indexOf("ws-") === 0);
+    // capture the admin items admin.js inserted (keyed by view), then clear the whole nav
+    const wsBy = {};
+    Array.prototype.slice.call(sidebar.querySelectorAll(".nav-item")).forEach(n => {
+      const v = n.dataset.view || "";
+      if (v.indexOf("ws-") === 0) wsBy[v] = n;
+    });
+    const pickWs = keys => keys.map(k => wsBy[k]).filter(Boolean);
     Array.prototype.slice.call(sidebar.querySelectorAll(".nav-section, .nav-item, .nav-group")).forEach(n => n.remove());
 
     const makeGroup = (title, itemNodes) => {
@@ -1358,6 +1363,8 @@
       });
       makeGroup(title, nodes);
     });
-    makeGroup("Settings", wsItems);   // Settings last, using admin.js's items (handlers intact)
+    // admin modules last: Data (ingestion) then Settings (configuration)
+    makeGroup("Data", pickWs(["ws-upload", "ws-inventory"]));
+    makeGroup("Settings", pickWs(["ws-context", "ws-clients"]));
   }
 })();
