@@ -21,19 +21,73 @@
     return;
   }
 
-  var name = META.name || "";
-  var periods = META.periods || {};
-  var cur = periods.current || "";
+  var FILTER_KEYS = ["seg", "campaign", "region", "category", "brand"];
   function setText(id, txt) { var e = document.getElementById(id); if (e && txt) e.textContent = txt; }
 
-  // ---- chrome ----
-  setText("crumbClient", name);
-  setText("footClient", name);
-  setText("periodPill", cur);
-  setText("footPeriod", cur);
-  setText("brandSub", [name, cur].filter(Boolean).join(" · "));
-  setText("gateSub", "Client portal" + (name ? " · " + name : "") + (cur ? " · " + cur + " report" : ""));
-  if (name) document.title = "SearchNex AE · " + name;
+  // ---- chrome (re-applied after every in-place refresh) ----
+  function applyChrome() {
+    var name = META.name || "";
+    var cur = (META.periods || {}).current || "";
+    setText("crumbClient", name);
+    setText("footClient", name);
+    setText("periodPill", cur);
+    setText("footPeriod", cur);
+    setText("brandSub", [name, cur].filter(Boolean).join(" · "));
+    setText("gateSub", "Client portal" + (name ? " · " + name : "") + (cur ? " · " + cur + " report" : ""));
+    if (name) document.title = "SearchNex AE · " + name;
+  }
+  applyChrome();
+
+  // ---- in-place refresh: swap the bundle contents and re-render, no page reload ----
+  function setBusy(on) {
+    if (!document.getElementById("chzBusyStyle")) {
+      var st = document.createElement("style"); st.id = "chzBusyStyle";
+      st.textContent =
+        "#chzBusy{position:fixed;inset:0;background:rgba(252,252,250,.5);z-index:900;display:none;" +
+        "align-items:flex-start;justify-content:center;padding-top:140px;backdrop-filter:saturate(.9)}" +
+        "#chzBusy .chz-sp{width:26px;height:26px;border:3px solid #e2e2da;border-top-color:#1a1a1a;" +
+        "border-radius:50%;animation:chzspin .7s linear infinite}" +
+        "@keyframes chzspin{to{transform:rotate(360deg)}}";
+      document.head.appendChild(st);
+    }
+    var el = document.getElementById("chzBusy");
+    if (!el) {
+      el = document.createElement("div"); el.id = "chzBusy";
+      el.innerHTML = '<div class="chz-sp"></div>';
+      document.body.appendChild(el);
+    }
+    el.style.display = on ? "flex" : "none";
+  }
+
+  function bundleUrl(params) {
+    var period = params.get("period") || "2026-03";
+    var from = params.get("from"), to = params.get("to");
+    var extra = FILTER_KEYS.map(function (k) {
+      var v = params.get(k);
+      return (v && v !== "all") ? "&" + k + "=" + encodeURIComponent(v) : "";
+    }).join("");
+    return "/api/bundle?client=" + encodeURIComponent(META.client_id) + "&period=" + encodeURIComponent(period) +
+      (from ? "&from=" + encodeURIComponent(from) : "") + (to ? "&to=" + encodeURIComponent(to) : "") + extra;
+  }
+
+  function refresh(params) {
+    setBusy(true);
+    try { history.replaceState(null, "", location.pathname + "?" + params.toString()); } catch (e) {}
+    fetch(bundleUrl(params))
+      .then(function (r) { if (!r.ok) throw new Error("bundle HTTP " + r.status); return r.json(); })
+      .then(function (d) {
+        // keep the same object identity — app.js holds `const DATA = window.__BUNDLE__`
+        var B = window.__BUNDLE__;
+        Object.keys(B).forEach(function (k) { delete B[k]; });
+        Object.keys(d).forEach(function (k) { B[k] = d[k]; });
+        META = B.meta || META;
+        applyChrome(); renderFilters(); renderDateRange();
+        var v = (typeof CURRENT_VIEW !== "undefined" && CURRENT_VIEW) ? CURRENT_VIEW : "overview";
+        if (typeof setView === "function") setView(v, { preserveScroll: true });
+      })
+      .catch(function (e) { console.error("filter refresh failed:", e); })
+      .then(function () { setBusy(false); });
+  }
 
   // Client selector in the sidebar, under the logo.
   (function () {
@@ -56,7 +110,7 @@
 
   // Date-range selector (top bar). Filters time-series views today; whole-window reports
   // honour it once date-segmented data is uploaded.
-  (function () {
+  function renderDateRange() {
     var host = document.getElementById("dateRange");
     if (!host || !META.client_id) return;
     var params = new URLSearchParams(location.search);
@@ -84,12 +138,11 @@
         '<button class="dr-apply" id="drApply">Apply</button></span>' +
       '<span class="dr-info" title="The date range filters the time-series views (Overview, Monthly Trends, Campaign Performance, Budget & Pacing). Other reports show the full export window until date-segmented daily data is uploaded.">&#9432;</span>';
     function go(from, to) {
-      try { sessionStorage.setItem("chz_nav", "1"); } catch (e) {}
       var u = new URLSearchParams(location.search);
       u.set("client", META.client_id);
       if (from) u.set("from", from); else u.delete("from");
       if (to) u.set("to", to); else u.delete("to");
-      location.search = u.toString();
+      refresh(u);
     }
     document.getElementById("drSel").addEventListener("change", function () {
       if (this.value === "custom") { document.getElementById("drCustom").style.display = "flex"; return; }
@@ -98,10 +151,11 @@
     document.getElementById("drApply").addEventListener("click", function () {
       go(document.getElementById("drFrom").value, document.getElementById("drTo").value);
     });
-  })();
+  }
+  renderDateRange();
 
   // ---- global filter bar (All/BR/NB buttons + Campaign/Region/Category/Brand dropdowns) ----
-  (function () {
+  function renderFilters() {
     var host = document.getElementById("globalFilters");
     if (!host || !META.client_id || !META.filters_meta) return;   // computed clients only
     var fm = META.filters_meta || {};
@@ -120,11 +174,10 @@
       document.head.appendChild(st);
     }
     function go(k, v) {
-      try { sessionStorage.setItem("chz_nav", "1"); } catch (e) {}
       var u = new URLSearchParams(location.search);
       u.set("client", META.client_id);
       if (v && v !== "all") u.set(k, v); else u.delete(k);
-      location.search = u.toString();
+      refresh(u);
     }
     var seg = cur.seg || "all";
     var segBtns = [["all", "All"], ["br", "BR"], ["nb", "NB"]].map(function (o) {
@@ -146,7 +199,8 @@
     host.querySelectorAll(".gf-sel").forEach(function (s) { s.addEventListener("change", function () { go(s.dataset.key, s.value); }); });
     // our server-side Brand filter replaces the static demo brand switcher
     var bf = document.getElementById("brandFilter"); if (bf) bf.style.display = "none";
-  })();
+  }
+  renderFilters();
 
   // ---- single-brand: drop the brand filter (and keep it dropped across views) ----
   var nBrands = (META.complexity && META.complexity.n_brands) || 1;
