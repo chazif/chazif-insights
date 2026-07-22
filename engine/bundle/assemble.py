@@ -231,6 +231,60 @@ def _budget_section(config):
             "rollups": rollups}
 
 
+def _budget_status(bud, act):
+    if not bud:
+        return "n/a"
+    p = act / bud
+    return "over" if p > 1.05 else "under" if p < 0.9 else "on-track"
+
+
+def _budget_reconciliation(engine, client_id, cm, config):
+    """Reconcile the planned budget against actual spend for the latest complete month:
+    a total budget-vs-actual, plus a per-category breakdown when the budget carries a
+    category dimension (actual bucketed by product category from campaign names —
+    approximate). None if there is no month or no budget to reconcile against."""
+    if not cm:
+        return None
+    total_budget = _effective_budget(config)
+    if not total_budget:
+        return None
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT campaign, cost FROM raw_rows WHERE client_id=:c "
+            "AND report_type='campaign_performance' AND date=:d"),
+            {"c": client_id, "d": cm["full"]}).all()
+    total_actual = round(sum(_num(cost) for _camp, cost in rows), 2)
+
+    recon = {"month": cm["abbr"], "total_budget": round(total_budget, 2), "total_actual": total_actual,
+             "variance": round(total_actual - total_budget, 2),
+             "pct": round(total_actual / total_budget, 4) if total_budget else None,
+             "status": _budget_status(total_budget, total_actual), "by_category": None}
+
+    lines = config.get("budget_lines") or []
+    if any(l.get("category") for l in lines):
+        bud_cat = defaultdict(float)
+        for l in lines:
+            bud_cat[l.get("category") or "(unspecified)"] += _num(l.get("monthly"))
+        catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
+                 for c in (config.get("product_categories") or [])}
+
+        def categorize(name):
+            n = (name or "").lower()
+            for cat, kws in catkw.items():
+                if cat.lower() in n or any(w in n for w in kws):
+                    return cat[:1].upper() + cat[1:]
+            return "Other / uncategorized"
+        act_cat = defaultdict(float)
+        for camp, cost in rows:
+            act_cat[categorize(camp)] += _num(cost)
+        cats = sorted(set(bud_cat) | set(act_cat), key=lambda k: -(bud_cat.get(k, 0) + act_cat.get(k, 0)))
+        recon["by_category"] = [{"category": k, "budget": round(bud_cat.get(k, 0), 2), "actual": round(act_cat.get(k, 0), 2),
+                                 "variance": round(act_cat.get(k, 0) - bud_cat.get(k, 0), 2),
+                                 "pct": round(act_cat.get(k, 0) / bud_cat[k], 4) if bud_cat.get(k) else None,
+                                 "status": _budget_status(bud_cat.get(k, 0), act_cat.get(k, 0))} for k in cats]
+    return recon
+
+
 def _budget(engine, client_id, cm, config, keep=None):
     """Monthly spend vs a configured monthly budget. Intra-month (daily) pacing needs
     day-segmented exports; this reports monthly adherence and latest-month variance."""
@@ -1598,6 +1652,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
     geo = _geo(engine, client_id, keep)
     budget = _budget(engine, client_id, cm, config, keep) if cm else None
     budget_sec = _budget_section(config)
+    budget_sec["reconciliation"] = _budget_reconciliation(engine, client_id, cm, config) if cm else None
     qscore = _quality_score(engine, client_id, cm, config, keep)
     qs_break = _qs_breakdown(engine, client_id, cm, config, keep)
     keyword = _keyword_section(engine, client_id, keep)

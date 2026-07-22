@@ -150,7 +150,36 @@
           <thead><tr><th>Brand</th><th>Region</th><th>Category</th><th class="num">Monthly</th></tr></thead>
           <tbody>${lineRows}<tr class="strong"><td>Total</td><td></td><td></td><td class="num">${fmt.money(b.total_monthly)}</td></tr></tbody></table></div></div>`;
     }
-    el.innerHTML = stHead("Budget", "Monthly budget composition — account-wide (not affected by the top-bar filters)") + cards + panels;
+    // ---- reconciliation: budget vs actual for the latest complete month ----
+    const R = b.reconciliation;
+    let recon = "";
+    if (R) {
+      const statusTag = s => ({ "on-track": '<span class="tag lime">On track</span>', "over": '<span class="tag bad">Over budget</span>', "under": '<span class="tag warn">Under budget</span>' }[s] || '<span class="muted">—</span>');
+      const varCell = v => `<span class="chg ${v <= 0 ? "up" : "dn"}">${v >= 0 ? "+" : ""}${fmt.money(v)}</span>`;
+      const catRows = (R.by_category || []).map(r => `<tr>
+          <td class="strong">${esc(r.category)}</td>
+          <td class="num">${fmt.money(r.budget)}</td><td class="num">${fmt.money(r.actual)}</td>
+          <td class="num">${varCell(r.variance)}</td>
+          <td class="num">${r.pct == null ? "—" : (r.pct * 100).toFixed(0) + "%"}</td>
+          <td>${statusTag(r.status)}</td></tr>`).join("");
+      recon = `
+        <div class="panel"><h3>Reconciliation <span class="muted" style="font-weight:400">· budget vs actual · ${esc(R.month)}</span></h3>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Budgeted</div><div class="stat-value">${fmt.money(R.total_budget)}</div></div>
+            <div class="stat"><div class="stat-label">Actual spend</div><div class="stat-value">${fmt.money(R.total_actual)}</div><div class="stat-chg">${R.pct == null ? "" : (R.pct * 100).toFixed(0) + "% of budget"}</div></div>
+            <div class="stat"><div class="stat-label">Variance</div><div class="stat-value" style="font-size:22px">${varCell(R.variance)}</div></div>
+            <div class="stat"><div class="stat-label">Status</div><div class="stat-value" style="font-size:20px">${statusTag(R.status)}</div></div>
+          </div>
+          ${R.by_category ? `<div class="muted" style="margin:12px 0 6px">By category — actual bucketed from campaign names (approximate).</div>
+            <div class="tbl-wrap"><table class="sortable">
+              <thead><tr><th>Category</th><th class="num">Budgeted</th><th class="num">Actual</th><th class="num">Variance</th><th class="num">% of Budget</th><th>Status</th></tr></thead>
+              <tbody>${catRows}
+                <tr class="strong"><td>Total</td><td class="num">${fmt.money(R.total_budget)}</td><td class="num">${fmt.money(R.total_actual)}</td>
+                  <td class="num">${varCell(R.variance)}</td><td class="num">${R.pct == null ? "—" : (R.pct * 100).toFixed(0) + "%"}</td><td>${statusTag(R.status)}</td></tr>
+              </tbody></table></div>` : ""}
+        </div>`;
+    }
+    el.innerHTML = stHead("Budget", "Monthly budget composition & reconciliation — account-wide (not affected by the top-bar filters)") + cards + recon + panels;
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
