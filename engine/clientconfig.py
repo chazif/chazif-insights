@@ -23,6 +23,9 @@ DEFAULT_CONFIG = {
     "waste_exclusions": [],         # term substrings never flagged as waste
     "seasonality": [],              # [{"label": "...", "months": ["May"]}] — context, suppression later
     "notes": "",
+    # dimensional monthly budgets (from an uploaded budget file); each line:
+    # {"brand": .., "region": .., "category": .., "monthly": <float>} — dims may be None
+    "budget_lines": [],
 }
 
 
@@ -67,4 +70,19 @@ def sanitize(raw):
         out["seasonality"] = raw["seasonality"]
     if "notes" in raw:
         out["notes"] = str(raw["notes"])[:4000]
+    if isinstance(raw.get("budget_lines"), list):
+        lines = []
+        for r in raw["budget_lines"]:
+            if not isinstance(r, dict):
+                continue
+            try:
+                monthly = float(r.get("monthly"))
+            except (TypeError, ValueError):
+                continue
+            def _s(x):
+                x = (str(x).strip() if x not in (None, "") else None)
+                return x
+            lines.append({"brand": _s(r.get("brand")), "region": _s(r.get("region")),
+                          "category": _s(r.get("category")), "monthly": round(monthly, 2)})
+        out["budget_lines"] = lines
     return out

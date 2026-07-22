@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from engine.ingest import service
 from engine.ingest.store import get_engine
 from engine.bundle.assemble import build_bundle
+from engine.budget.parse import parse_budget_file
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "frontend"
@@ -79,6 +80,22 @@ def client_config_put(client_id: str, body: dict):
         return service.update_config(client_id, body, engine=_engine)
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+
+@app.post("/api/clients/{client_id}/budget")
+async def client_budget_upload(client_id: str, file: UploadFile = File(...),
+                               period: str = Form("monthly"), window_months: int = Form(12)):
+    """Parse an uploaded budget file (Brand/Region/Category × amount) into monthly
+    budget_lines and save them on the client config. Returns the parsed summary."""
+    if service.get_config(client_id, engine=_engine) is None:
+        raise HTTPException(404, f"unknown client '{client_id}'")
+    data = await file.read()
+    try:
+        parsed = parse_budget_file(data, file.filename, period=period, window_months=window_months)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    service.update_config(client_id, {"budget_lines": parsed["lines"]}, engine=_engine)
+    return parsed
 
 
 # ---- upload + inventory --------------------------------------------------

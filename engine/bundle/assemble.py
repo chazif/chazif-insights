@@ -193,12 +193,49 @@ def _geo(engine, client_id, keep=None):
                        "conv_value": round(tot[3], 2), "cost": round(tot[4], 2)}}
 
 
+def _effective_budget(config):
+    """Effective monthly budget: sum of uploaded dimensional budget_lines if any,
+    otherwise the manually-entered thresholds.monthly_budget. None if neither is set."""
+    lines = config.get("budget_lines") or []
+    if lines:
+        return round(sum(_num(l.get("monthly")) for l in lines), 2)
+    m = (config.get("thresholds") or {}).get("monthly_budget")
+    try:
+        return float(m) if m not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _budget_section(config):
+    """Budget composition for the Budget tab: effective monthly total, its source
+    (file / manual / none), the dimensional lines, and per-dimension rollups."""
+    lines = config.get("budget_lines") or []
+    manual = (config.get("thresholds") or {}).get("monthly_budget")
+    try:
+        manual = float(manual) if manual not in (None, "") else None
+    except (TypeError, ValueError):
+        manual = None
+    total = _effective_budget(config)
+    source = "file" if lines else ("manual" if manual else "none")
+
+    def rollup(dim):
+        agg = defaultdict(float)
+        for l in lines:
+            agg[l.get(dim) or "(unspecified)"] += _num(l.get("monthly"))
+        return [{"key": k, "monthly": round(v, 2)} for k, v in sorted(agg.items(), key=lambda x: -x[1])]
+    rollups = {dim: rollup(dim) for dim in ("brand", "region", "category") if any(l.get(dim) for l in lines)}
+    return {"total_monthly": total, "source": source, "manual": round(manual, 2) if manual else None,
+            "line_count": len(lines),
+            "lines": [{"brand": l.get("brand"), "region": l.get("region"), "category": l.get("category"),
+                       "monthly": round(_num(l.get("monthly")), 2)} for l in lines],
+            "rollups": rollups}
+
+
 def _budget(engine, client_id, cm, config, keep=None):
     """Monthly spend vs a configured monthly budget. Intra-month (daily) pacing needs
     day-segmented exports; this reports monthly adherence and latest-month variance."""
     keep = keep or (lambda d: True)
-    budget = (config.get("thresholds") or {}).get("monthly_budget")
-    budget = float(budget) if budget else None
+    budget = _effective_budget(config)
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT date, cost, row FROM raw_rows WHERE client_id=:c "
@@ -1560,6 +1597,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
     campaigns = _campaigns(engine, client_id, cm, keep) if cm else None
     geo = _geo(engine, client_id, keep)
     budget = _budget(engine, client_id, cm, config, keep) if cm else None
+    budget_sec = _budget_section(config)
     qscore = _quality_score(engine, client_id, cm, config, keep)
     qs_break = _qs_breakdown(engine, client_id, cm, config, keep)
     keyword = _keyword_section(engine, client_id, keep)
@@ -1586,7 +1624,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         view_list.append("nb-cats")
     if regions:
         view_list.append("regions")
-    view_list += ["campaign-perf", "budget-pacing"]
+    view_list += ["campaign-perf", "budget", "pacing", "budget-input"]
     if keyword or kw_regions:
         view_list.append("kw-deep-dive")
     if qscore:
@@ -1625,7 +1663,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
                 "from": date_from, "to": date_to,
                 "applied": bool(rng_from or rng_to),
                 # views that honour the range today (month-grained); the rest are whole-window
-                "windowed_views": ["overview", "trends", "campaign-perf", "budget-pacing"],
+                "windowed_views": ["overview", "trends", "campaign-perf", "pacing"],
             },
             "filters": {"seg": (filters or {}).get("seg") or "all", "campaign": (filters or {}).get("campaign") or "all",
                         "region": (filters or {}).get("region") or "all", "category": (filters or {}).get("category") or "all",
@@ -1640,6 +1678,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         "campaigns": campaigns,
         "geo_performance": geo,
         "budget_pacing": budget,
+        "budget_section": budget_sec,
         "quality_score": qscore,
         "keyword_section": keyword,
         "qs_breakdown_section": qs_break,
