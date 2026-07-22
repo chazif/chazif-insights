@@ -117,12 +117,49 @@
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
-  // ---------- Budget & Pacing ----------
-  function renderBudgetPacing(el) {
+  // ---------- Budget (composition) ----------
+  const capWord = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+  function renderBudget(el) {
+    el.className = "view";
+    const b = (typeof DATA !== "undefined" && DATA.budget_section) || {};
+    if (b.total_monthly == null) {
+      el.innerHTML = stHead("Budget", "Monthly budget composition") +
+        `<div class="panel">No budget set yet. Add one in <a href="#" id="bGo">Budget Input</a>.</div>`;
+      const go = el.querySelector("#bGo"); if (go) go.addEventListener("click", e => { e.preventDefault(); setView("budget-input"); });
+      return;
+    }
+    const srcLabel = { file: "from uploaded file", manual: "manual entry" }[b.source] || "";
+    const cards = `<div class="stat-grid">
+        <div class="stat hl"><div class="stat-label">Monthly Budget</div><div class="stat-value">${fmt.money(b.total_monthly)}</div><div class="stat-chg">${esc(srcLabel)}</div></div>
+        ${b.source === "file" ? `<div class="stat"><div class="stat-label">Budget Lines</div><div class="stat-value">${fmt.num(b.line_count)}</div><div class="stat-chg">dimensional</div></div>` : ""}
+      </div>`;
+    let panels = "";
+    if (b.source === "file") {
+      const rollups = Object.keys(b.rollups || {}).map(dim => {
+        const rows = b.rollups[dim].map(r => `<tr><td class="strong">${esc(r.key)}</td><td class="num">${fmt.money(r.monthly)}</td></tr>`).join("");
+        return `<div class="panel"><h3>By ${esc(capWord(dim))}</h3><div class="tbl-wrap"><table class="sortable">
+          <thead><tr><th>${esc(capWord(dim))}</th><th class="num">Monthly</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+      }).join("");
+      const lineRows = b.lines.map(l => `<tr>
+          <td>${l.brand ? esc(l.brand) : '<span class="muted">—</span>'}</td>
+          <td>${l.region ? esc(l.region) : '<span class="muted">—</span>'}</td>
+          <td>${l.category ? esc(l.category) : '<span class="muted">—</span>'}</td>
+          <td class="num">${fmt.money(l.monthly)}</td></tr>`).join("");
+      panels = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px">${rollups}</div>
+        <div class="panel"><h3>Budget lines</h3><div class="tbl-wrap"><table class="sortable">
+          <thead><tr><th>Brand</th><th>Region</th><th>Category</th><th class="num">Monthly</th></tr></thead>
+          <tbody>${lineRows}<tr class="strong"><td>Total</td><td></td><td></td><td class="num">${fmt.money(b.total_monthly)}</td></tr></tbody></table></div></div>`;
+    }
+    el.innerHTML = stHead("Budget", "Monthly budget composition — account-wide (not affected by the top-bar filters)") + cards + panels;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+
+  // ---------- Pacing (spend vs budget) ----------
+  function renderPacing(el) {
     el.className = "view";
     const b = (typeof DATA !== "undefined" && DATA.budget_pacing) || null;
     if (!b || !b.months || !b.months.length) {
-      el.innerHTML = `<div class="view-head"><div><h2>Budget &amp; Pacing</h2></div></div><div class="panel">No spend data.</div>`;
+      el.innerHTML = stHead("Pacing", "") + `<div class="panel">No spend data.</div>`;
       return;
     }
     const hasBudget = b.monthly_budget != null;
@@ -134,23 +171,96 @@
            <div class="stat"><div class="stat-label">Variance</div><div class="stat-value">${fmt.money(L.variance)}</div><div class="stat-chg ${L.variance <= 0 ? "up" : "dn"}">${(L.pct * 100).toFixed(0)}% of budget</div></div>
            <div class="stat"><div class="stat-label">Status</div><div class="stat-value" style="font-size:20px">${statusTag}</div></div>
          </div>`
-      : `<div class="panel" style="background:#FCFEF0"><strong>No monthly budget set.</strong> Add one in <a href="#" id="bpGo">Business Context</a> to see pacing vs target. Showing spend by month below.</div>`;
+      : `<div class="panel" style="background:#FCFEF0"><strong>No monthly budget set.</strong> Add one in <a href="#" id="bpGo">Budget Input</a> to see pacing vs target. Showing spend by month below.</div>`;
     const body = b.months.slice().reverse().map(m => `<tr>
         <td class="strong">${esc(m.month)}</td>
         <td class="num">${fmt.money(m.spend)}</td>
         <td class="num">${m.budget == null ? "—" : fmt.money(m.budget)}</td>
         <td class="num ${m.variance == null ? "" : (m.variance <= 0 ? "chg up" : "chg dn")}">${m.variance == null ? "—" : fmt.money(m.variance)}</td>
         <td class="num">${m.pct == null ? "—" : (m.pct * 100).toFixed(0) + "%"}</td></tr>`).join("");
-    el.innerHTML = `
-      <div class="view-head"><div><h2>Budget &amp; Pacing</h2>
-        <div class="muted">Monthly spend vs budget · intra-month daily pacing needs day-segmented exports</div></div></div>
-      ${header}
-      <div class="panel"><div class="tbl-wrap"><table>
+    el.innerHTML = stHead("Pacing", "Monthly spend vs budget · intra-month daily pacing needs day-segmented exports") +
+      header +
+      `<div class="panel"><div class="tbl-wrap"><table>
         <thead><tr><th>Month</th><th class="num">Spend</th><th class="num">Budget</th>
           <th class="num">Variance</th><th class="num">% of Budget</th></tr></thead>
         <tbody>${body}</tbody></table></div></div>`;
     const go = el.querySelector("#bpGo");
-    if (go) go.addEventListener("click", e => { e.preventDefault(); setView("ws-context"); });
+    if (go) go.addEventListener("click", e => { e.preventDefault(); setView("budget-input"); });
+  }
+
+  // ---------- Budget Input (manual entry + file upload) ----------
+  function renderBudgetInput(el) {
+    el.className = "view";
+    const b = (typeof DATA !== "undefined" && DATA.budget_section) || {};
+    const meta = (window.__BUNDLE__ && window.__BUNDLE__.meta) || {};
+    const cid = meta.client_id;
+    const curPanel = () => {
+      if (b.total_monthly == null) return `<div class="muted">No budget set yet.</div>`;
+      const src = { file: "Calculated from an uploaded file", manual: "Manual entry" }[b.source] || "";
+      let t = `<div style="margin-bottom:8px"><strong style="font-size:20px">${fmt.money(b.total_monthly)}</strong> / month <span class="muted">· ${esc(src)}</span></div>`;
+      if (b.source === "file" && b.lines.length) {
+        t += `<div class="tbl-wrap" style="max-height:280px;overflow:auto"><table class="sortable"><thead><tr><th>Brand</th><th>Region</th><th>Category</th><th class="num">Monthly</th></tr></thead><tbody>` +
+          b.lines.map(l => `<tr><td>${l.brand ? esc(l.brand) : '<span class="muted">—</span>'}</td><td>${l.region ? esc(l.region) : '<span class="muted">—</span>'}</td><td>${l.category ? esc(l.category) : '<span class="muted">—</span>'}</td><td class="num">${fmt.money(l.monthly)}</td></tr>`).join("") +
+          `</tbody></table></div>`;
+      }
+      return t;
+    };
+    el.innerHTML = stHead("Budget Input", "Set the monthly budget manually, or upload a file to calculate it by Brand / Region / Category") +
+      `<div class="two-col">
+        <div class="panel"><h3>Manual monthly budget</h3>
+          <div class="muted" style="margin-bottom:10px">Direct entry — one figure for the whole account. Saving this clears any uploaded budget lines.</div>
+          <div class="ws-row" style="gap:10px;align-items:center;flex-wrap:wrap">
+            <input type="number" id="bmVal" class="ws-input" style="max-width:200px" placeholder="e.g. 5000" value="${b.manual != null ? b.manual : ""}"/>
+            <button class="ws-btn primary" id="bmSave">Save budget</button>
+            <span class="muted" id="bmStatus"></span>
+          </div>
+        </div>
+        <div class="panel"><h3>Upload budget file</h3>
+          <div class="muted" style="margin-bottom:10px">CSV or Excel with any of Brand / Region / Category columns plus an amount column. It's auto-detected and summed to a monthly figure.</div>
+          <div class="ws-row" style="gap:10px;align-items:center;flex-wrap:wrap">
+            <input type="file" id="bfFile" accept=".csv,.xlsx"/>
+            <label class="gf-lbl">Amount is</label>
+            <select id="bfPeriod" class="gf-sel"><option value="monthly">Monthly</option><option value="annual">Annual</option><option value="total">Total (spread)</option></select>
+            <span id="bfWinWrap" style="display:none"><label class="gf-lbl">over</label><input type="number" id="bfWin" class="ws-input" style="max-width:80px" value="12"/><label class="gf-lbl">months</label></span>
+            <button class="ws-btn primary" id="bfUpload">Upload &amp; calculate</button>
+          </div>
+          <div class="muted" id="bfStatus" style="margin-top:10px"></div>
+        </div>
+      </div>
+      <div class="panel"><h3>Current budget</h3><div id="bCur">${curPanel()}</div></div>`;
+
+    const bmSave = el.querySelector("#bmSave");
+    bmSave.addEventListener("click", async () => {
+      const val = el.querySelector("#bmVal").value;
+      const st = el.querySelector("#bmStatus"); st.textContent = "Saving…";
+      try {
+        const r = await fetch("/api/clients/" + encodeURIComponent(cid) + "/config", {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ thresholds: { monthly_budget: val === "" ? null : Number(val) }, budget_lines: [] }),
+        });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        st.textContent = "Saved.";
+        if (window.chzRefresh) window.chzRefresh();
+      } catch (e) { st.textContent = "Error: " + e.message; }
+    });
+
+    const bfPeriod = el.querySelector("#bfPeriod");
+    bfPeriod.addEventListener("change", () => { el.querySelector("#bfWinWrap").style.display = bfPeriod.value === "total" ? "inline" : "none"; });
+    el.querySelector("#bfUpload").addEventListener("click", async () => {
+      const f = el.querySelector("#bfFile").files[0];
+      const st = el.querySelector("#bfStatus");
+      if (!f) { st.textContent = "Choose a CSV or Excel file first."; return; }
+      const fd = new FormData();
+      fd.append("file", f); fd.append("period", bfPeriod.value); fd.append("window_months", el.querySelector("#bfWin").value || "12");
+      st.textContent = "Parsing…";
+      try {
+        const r = await fetch("/api/clients/" + encodeURIComponent(cid) + "/budget", { method: "POST", body: fd });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || ("HTTP " + r.status));
+        st.innerHTML = `Parsed ${fmt.num(d.count)} lines across ${esc((d.dimensions || []).join(", "))} → <strong>${fmt.money(d.total_monthly)}/mo</strong>. Saved.`;
+        if (window.chzRefresh) setTimeout(window.chzRefresh, 700);
+      } catch (e) { st.textContent = "Error: " + e.message; }
+    });
   }
 
   // ---------- Quality Score Overview ----------
@@ -1292,7 +1402,9 @@
     "nb-cats": ["Non-Brand Categories", renderNbCats],
     "regions": ["Regions", renderRegions],
     "campaign-perf": ["Campaign Performance", renderCampaignPerf],
-    "budget-pacing": ["Budget & Pacing", renderBudgetPacing],
+    "budget": ["Budget", renderBudget],
+    "pacing": ["Pacing", renderPacing],
+    "budget-input": ["Budget Input", renderBudgetInput],
     "geo-perf": ["Geo Performance", renderGeoPerf],
     "qs-detail": ["QS Overview", renderQsDetail],
     "kw-deep-dive": ["Keyword Deep Dive", renderKwDeepDive],
@@ -1315,8 +1427,9 @@
     // Recommendations first, Settings last; every section collapses (closed by default).
     const SECTIONS = [
       ["Recommendations", ["recs"]],
-      ["Business", ["overview", "trends", "nb-cats", "regions", "budget-pacing"]],
+      ["Business", ["overview", "trends", "nb-cats", "regions"]],
       ["Campaign", ["campaign-perf"]],
+      ["Budget", ["budget", "pacing", "budget-input"]],
       ["Keyword", ["kw-deep-dive", "qs-detail", "qs-breakdown", "region-category"]],
       ["Search Terms", ["st-intent", "st-relevant", "st-competitor", "st-flagged"]],
       ["Ad Copy", ["ad-copy", "ad-lp"]],

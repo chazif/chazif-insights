@@ -4,3 +4,4 @@ python-multipart>=0.0.9
 sqlalchemy>=2.0
 psycopg[binary]>=3.1
 anthropic>=0.40   # search-term relevance LLM (used only when ANTHROPIC_API_KEY is set)
+openpyxl>=3.1     # parse .xlsx budget-file uploads (CSV needs no extra deps)

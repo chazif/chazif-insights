@@ -88,6 +88,8 @@
       .catch(function (e) { console.error("filter refresh failed:", e); })
       .then(function () { setBusy(false); });
   }
+  // let other scripts (e.g. Budget Input) trigger an in-place bundle refresh
+  window.chzRefresh = function () { refresh(new URLSearchParams(location.search)); };
 
   // Client selector in the sidebar, under the logo.
   (function () {
