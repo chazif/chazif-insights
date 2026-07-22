@@ -1457,8 +1457,8 @@
     const SECTIONS = [
       ["Recommendations", ["recs"]],
       ["Business", ["overview", "trends", "nb-cats", "regions"]],
-      ["Campaign", ["campaign-perf"]],
       ["Budget", ["budget", "pacing", "budget-input"]],
+      ["Campaign", ["campaign-perf"]],
       ["Keyword", ["kw-deep-dive", "qs-detail", "qs-breakdown", "region-category"]],
       ["Search Terms", ["st-intent", "st-relevant", "st-competitor", "st-flagged"]],
       ["Ad Copy", ["ad-copy", "ad-lp"]],
