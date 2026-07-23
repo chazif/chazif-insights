@@ -66,8 +66,13 @@
       var v = params.get(k);
       return (v && v !== "all") ? "&" + k + "=" + encodeURIComponent(v) : "";
     }).join("");
+    var cmp = "";
+    ["compare", "cfrom", "cto"].forEach(function (k) {
+      var v = params.get(k);
+      if (v) cmp += "&" + k + "=" + encodeURIComponent(v);
+    });
     return "/api/bundle?client=" + encodeURIComponent(META.client_id) + "&period=" + encodeURIComponent(period) +
-      (from ? "&from=" + encodeURIComponent(from) : "") + (to ? "&to=" + encodeURIComponent(to) : "") + extra;
+      (from ? "&from=" + encodeURIComponent(from) : "") + (to ? "&to=" + encodeURIComponent(to) : "") + extra + cmp;
   }
 
   function refresh(params) {
@@ -117,6 +122,8 @@
     if (!host || !META.client_id) return;
     var params = new URLSearchParams(location.search);
     var curFrom = params.get("from") || "", curTo = params.get("to") || "";
+    var cmpMode = params.get("compare") || "yoy";
+    var cmpFrom = params.get("cfrom") || "", cmpTo = params.get("cto") || "";
     var pad = function (n) { return (n < 10 ? "0" : "") + n; };
     var ymd = function (d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); };
     var now = new Date();
@@ -138,12 +145,31 @@
       '<span id="drCustom" style="display:' + (curKey === "custom" ? "flex" : "none") + ';gap:6px;align-items:center">' +
         '<input type="date" id="drFrom" value="' + curFrom + '"><input type="date" id="drTo" value="' + curTo + '">' +
         '<button class="dr-apply" id="drApply">Apply</button></span>' +
-      '<span class="dr-info" title="The date range applies to the campaign-time-series views — Overview, Monthly Trends, Campaign Performance, Pacing, NB Categories and Regions. The other reports (Keyword, QS, Search Terms, Ad Copy, Landing Pages, Geo) arrive as a single whole-window export with no per-row date, so they always show the full window until date-segmented (daily) exports are uploaded.">&#9432; time-series only</span>';
+      '<span class="dr-info" title="The date range applies to the campaign-time-series views — Overview, Monthly Trends, Campaign Performance, Pacing, NB Categories and Regions. The other reports (Keyword, QS, Search Terms, Ad Copy, Landing Pages, Geo) arrive as a single whole-window export with no per-row date, so they always show the full window until date-segmented (daily) exports are uploaded.">&#9432; time-series only</span>' +
+      // ---- VS comparison (YoY / MoM / Custom) ----
+      '<span class="dr-vs" style="display:inline-flex;align-items:center;gap:6px;margin-left:16px">' +
+        '<label>VS</label><span class="gf-seg-group">' +
+        ["yoy", "mom", "custom"].map(function (m) {
+          return '<button class="gf-seg' + (cmpMode === m ? " active" : "") + '" data-vs="' + m + '">' +
+            { yoy: "YoY", mom: "MoM", custom: "Custom" }[m] + "</button>";
+        }).join("") + "</span>" +
+        '<span id="vsCustom" style="display:' + (cmpMode === "custom" ? "inline-flex" : "none") + ';gap:6px;align-items:center">' +
+          '<input type="month" id="vsFrom" value="' + cmpFrom + '"><input type="month" id="vsTo" value="' + cmpTo + '">' +
+          '<button class="dr-apply" id="vsApply">Apply</button></span>' +
+      "</span>";
     function go(from, to) {
       var u = new URLSearchParams(location.search);
       u.set("client", META.client_id);
       if (from) u.set("from", from); else u.delete("from");
       if (to) u.set("to", to); else u.delete("to");
+      refresh(u);
+    }
+    function setCompare(mode, cf, ct) {
+      var u = new URLSearchParams(location.search);
+      u.set("client", META.client_id);
+      if (mode && mode !== "yoy") u.set("compare", mode); else u.delete("compare");
+      if (mode === "custom" && cf) u.set("cfrom", cf); else u.delete("cfrom");
+      if (mode === "custom" && ct) u.set("cto", ct); else u.delete("cto");
       refresh(u);
     }
     document.getElementById("drSel").addEventListener("change", function () {
@@ -152,6 +178,21 @@
     });
     document.getElementById("drApply").addEventListener("click", function () {
       go(document.getElementById("drFrom").value, document.getElementById("drTo").value);
+    });
+    host.querySelectorAll("[data-vs]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var m = b.dataset.vs;
+        if (m === "custom") {   // reveal the range inputs; apply commits it
+          host.querySelectorAll("[data-vs]").forEach(function (x) { x.classList.toggle("active", x === b); });
+          document.getElementById("vsCustom").style.display = "inline-flex";
+          return;
+        }
+        setCompare(m);
+      });
+    });
+    var vsApply = document.getElementById("vsApply");
+    if (vsApply) vsApply.addEventListener("click", function () {
+      setCompare("custom", document.getElementById("vsFrom").value, document.getElementById("vsTo").value);
     });
   }
   renderDateRange();

@@ -1027,7 +1027,7 @@ def _nb_category_of(name, catkw, brand_terms):
     return "Other Non-Brand"
 
 
-def _nb_categories(engine, client_id, cm, config, keep=None):
+def _nb_categories(engine, client_id, cm, config, keep=None, compare="yoy"):
     """YoY non-brand spend/conversions by category, bucketed from campaign structure
     (the date-segmented source), latest complete month vs same month prior year — with a
     prior-calendar-month fallback when the account has under a year of history, matching
@@ -1054,11 +1054,11 @@ def _nb_categories(engine, client_id, cm, config, keep=None):
                 a = agg[cat]; a[0] += _num(cost); a[1] += _num(conv)
         return agg
 
-    prior = _yoy_prior(cm)
+    prior = _prior_month(cm) if compare in ("mom", "custom") else _yoy_prior(cm)
     cur_agg, pri_agg = month_agg(cm["full"]), month_agg(prior["full"])
     if not cur_agg and not pri_agg:
         return None
-    if not pri_agg:                                # < 1yr of history -> compare prior month
+    if not pri_agg and compare not in ("mom", "custom"):   # < 1yr of history -> prior month
         prior = _prior_month(cm)
         pri_agg = month_agg(prior["full"])
 
@@ -1094,7 +1094,7 @@ def _region_of(name):
     return label or None
 
 
-def _regions(engine, client_id, cm, config, keep=None):
+def _regions(engine, client_id, cm, config, keep=None, compare="yoy"):
     """YoY non-brand spend/conversions by region, parsed from geo-segmented campaign
     names (mirrors the reference 'Non-Brand campaigns · YoY by region'). Returns per
     (region, category) cells so the frontend can filter by category; None if no
@@ -1124,11 +1124,11 @@ def _regions(engine, client_id, cm, config, keep=None):
                 a = agg[(region, cat)]; a[0] += _num(cost); a[1] += _num(conv)
         return agg
 
-    prior = _yoy_prior(cm)
+    prior = _prior_month(cm) if compare in ("mom", "custom") else _yoy_prior(cm)
     cur_agg, pri_agg = month_cells(cm["full"]), month_cells(prior["full"])
     if not cur_agg and not pri_agg:
         return None
-    if not pri_agg:
+    if not pri_agg and compare not in ("mom", "custom"):
         prior = _prior_month(cm)
         pri_agg = month_cells(prior["full"])
 
@@ -1598,7 +1598,8 @@ def _filters_meta(engine, client_id, config):
             "categories": categories, "brands": [brand_label] if brand_label else []}
 
 
-def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=None):
+def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=None,
+                 compare="yoy", compare_from=None, compare_to=None):
     """Return the DATA bundle dict for a client, or None if there's no campaign data.
     date_from/date_to (YYYY-MM or YYYY-MM-DD) filter the month-grained series/KPIs; the global
     `filters` (seg/campaign/region/category/brand) re-compute every section server-side."""
@@ -1650,23 +1651,39 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
             "CVR": round(conv / clicks, 4) if clicks else 0,
         } for (mk, cost, clicks, conv) in series]
 
-        # ---- YoY kpis: latest month vs same month prior year (fallback: vs previous month) ----
+        # ---- KPI scorecard: current month vs a comparison period (YoY / MoM / Custom) ----
+        compare = (compare or "yoy").lower()
+        cmp_from, cmp_to = _ym_bound(compare_from), _ym_bound(compare_to)
         kpis, meta_periods = [], {}
         if series:
             by_key = {mk[2]: (cost, clicks, conv) for (mk, cost, clicks, conv) in series}
             cur_mk = series[-1][0]
-            prior_key = f"{cur_mk[0]-1}-{cur_mk[1]:02d}"
-            if prior_key in by_key:
-                prior_mk_label = f"{MABBR[cur_mk[1]-1]} {cur_mk[0]-1}"
-            elif len(series) >= 2:
-                pmk = series[-2][0]; prior_key = pmk[2]; prior_mk_label = pmk[3]
-            else:
-                prior_key = None; prior_mk_label = "—"
             cur_label = cur_mk[3]
-            meta_periods = {"current": cur_label, "prior": prior_mk_label}
-
             cc, ccl, ccv = by_key[cur_mk[2]]
-            pc, pcl, pcv = by_key.get(prior_key, (0, 0, 0)) if prior_key else (0, 0, 0)
+
+            if compare == "custom" and (cmp_from or cmp_to):
+                lo = cmp_from or (0, 0)
+                hi = cmp_to or (9999, 12)
+                psel = [s for s in series if lo <= s[0][:2] <= hi and s[0][2] != cur_mk[2]]
+                pc = sum(s[1] for s in psel); pcl = sum(s[2] for s in psel); pcv = sum(s[3] for s in psel)
+                if psel:
+                    prior_mk_label = psel[0][0][3] + ("–" + psel[-1][0][3] if len(psel) > 1 else "")
+                else:
+                    prior_mk_label = "—"
+            elif compare == "mom":
+                pmk = series[-2][0] if len(series) >= 2 else None
+                pc, pcl, pcv = by_key.get(pmk[2], (0, 0, 0)) if pmk else (0, 0, 0)
+                prior_mk_label = pmk[3] if pmk else "—"
+            else:                                    # yoy (default): same month prior year, else prior month
+                compare = "yoy"
+                yk = f"{cur_mk[0]-1}-{cur_mk[1]:02d}"
+                if yk in by_key:
+                    pc, pcl, pcv = by_key[yk]; prior_mk_label = f"{MABBR[cur_mk[1]-1]} {cur_mk[0]-1}"
+                elif len(series) >= 2:
+                    pmk = series[-2][0]; pc, pcl, pcv = by_key[pmk[2]]; prior_mk_label = pmk[3]
+                else:
+                    pc, pcl, pcv = 0, 0, 0; prior_mk_label = "—"
+            meta_periods = {"current": cur_label, "prior": prior_mk_label}
 
             def chg(cur, prev):
                 return round((cur - prev) / prev, 4) if prev else None
@@ -1714,8 +1731,8 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
     if lps is not None:
         lps["performance"] = lp_perf
         lps["category_grid"] = _lp_category_grid(engine, client_id, config, keep)
-    nb_cats = _nb_categories(engine, client_id, cm, config, keep) if cm else None
-    regions = _regions(engine, client_id, cm, config, keep) if cm else None
+    nb_cats = _nb_categories(engine, client_id, cm, config, keep, compare) if cm else None
+    regions = _regions(engine, client_id, cm, config, keep, compare) if cm else None
 
     # Performance section — mirrors the reference nav order (Overview, Monthly Trends,
     # NB Categories, Regions, Campaign, Budget). NB Categories and Regions are both
@@ -1771,6 +1788,8 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
             "filters": {"seg": (filters or {}).get("seg") or "all", "campaign": (filters or {}).get("campaign") or "all",
                         "region": (filters or {}).get("region") or "all", "category": (filters or {}).get("category") or "all",
                         "brand": (filters or {}).get("brand") or "all", "active": _flt_active},
+            "compare": {"mode": compare, "from": compare_from, "to": compare_to,
+                        "label": {"yoy": "YoY", "mom": "MoM", "custom": "vs " + (meta_periods.get("prior") or "custom")}.get(compare, "YoY")},
             "filters_meta": _filters_meta(engine, client_id, config),
             "generated_from": "warehouse",
         },

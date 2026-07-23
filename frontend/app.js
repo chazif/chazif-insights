@@ -7,6 +7,9 @@ const CLIENT_LABEL = META.name || 'Mavis Tire';
 const PERIOD_LABEL = (META.periods && META.periods.current) || 'March 2026';
 const PRIOR_LABEL  = (META.periods && META.periods.prior)   || 'Mar 2025';
 const CUR_LABEL    = (META.periods && META.periods.current) || 'Mar 2026';
+const CMP_MODE     = (META.compare && META.compare.mode)    || 'yoy';
+const CMP_LABEL    = (META.compare && META.compare.label)   || 'YoY';
+const CMP_SHORT    = CMP_MODE === 'mom' ? 'MoM' : CMP_MODE === 'custom' ? 'Chg' : 'YoY';
 
 
 
@@ -201,6 +204,14 @@ function renderOverview(el) {
   const trend = useBrand ? DATA.brand_trends[BRAND] : DATA.total_trend;
   const find = (DATA.findings||[]).slice(0, 6);
   const tot = trend[trend.length-1];
+  // Read comparison labels fresh each render (in-place refresh swaps the bundle,
+  // so the load-time PRIOR_LABEL/CMP_* consts would be stale after a VS change).
+  const _m = (window.__BUNDLE__ && window.__BUNDLE__.meta) || {};
+  const PRIOR_LABEL = (_m.periods && _m.periods.prior) || 'Mar 2025';
+  const CUR_LABEL = (_m.periods && _m.periods.current) || 'Mar 2026';
+  const CMP_LABEL = (_m.compare && _m.compare.label) || 'YoY';
+  const _cmpMode = (_m.compare && _m.compare.mode) || 'yoy';
+  const CMP_SHORT = _cmpMode === 'mom' ? 'MoM' : _cmpMode === 'custom' ? 'Chg' : 'YoY';
 
   // KPIs: when a brand is selected, derive from brand_yoy; else use global kpis
   let k;
@@ -260,10 +271,10 @@ function renderOverview(el) {
         <canvas id="ovTrend" height="180"></canvas>
       </div>
       <div class="panel">
-        <h3>YoY KPI scorecard</h3>
+        <h3>KPI scorecard <span class="muted" style="font-weight:400">· ${CMP_LABEL}</span></h3>
         <div class="tbl-wrap">
           <table class="sortable">
-            <thead><tr><th>Metric</th><th class="num">${PRIOR_LABEL}</th><th class="num">${CUR_LABEL}</th><th class="num">YoY</th></tr></thead>
+            <thead><tr><th>Metric</th><th class="num">${PRIOR_LABEL}</th><th class="num">${CUR_LABEL}</th><th class="num">${CMP_SHORT}</th></tr></thead>
             <tbody>
               ${k.map(r => {
                 const isCost = /CPA|CPC|Cost/.test(r.Metric);
