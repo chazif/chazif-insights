@@ -423,6 +423,12 @@
         <td class="chg ${gradeCls(t.grade)}">${esc(t.grade)}</td>
         ${withIntent ? intentCell(t) : ""}</tr>`).join("")}</tbody></table></div>`;
   const stData = () => (typeof DATA !== "undefined" && DATA.search_terms_section) || null;
+  // Campaign/Region can't be resolved for search terms (no campaign or ad-group column)
+  const stFilterNote = s => {
+    const ig = (s && s.filters_ignored) || [];
+    if (!ig.length) return "";
+    return `<div class="panel" style="background:#FCFEF0">The <strong>${ig.join("</strong> and <strong>")}</strong> filter${ig.length > 1 ? "s are" : " is"} not applied on this tab — the search-terms export carries no campaign or ad-group column. Segment, Category and Brand filters do apply.</div>`;
+  };
   const stHead = (title, sub) => `<div class="view-head"><div><h2>${title}</h2><div class="muted">${sub}</div></div></div>`;
 
   const stGradePill = g => {
@@ -452,6 +458,7 @@
         <div class="muted" style="margin-bottom:8px">Paid-search spend on queries that target named competitor brands.</div>
         <div style="position:relative;height:${Math.max(160, comp.length * 42)}px"><canvas id="stCompChart"></canvas></div></div>` : "";
     el.innerHTML = stHead("Search Term · Intent &amp; Grades", `${fmt.num(s.total_terms)} terms · ${fmt.money(s.total_spend)} spend`) +
+      stFilterNote(s) +
       `<div class="stat-grid">${cards}</div>
        <div class="two-col">
          <div class="panel"><h3>Service categories by spend</h3><canvas id="stSvcChart" height="230"></canvas></div>
@@ -514,6 +521,7 @@
     const shown = filterRows();
     const catOpts = ['<option value="all">All categories</option>'].concat((s.relevant_categories || []).map(c => `<option value="${esc(c)}"${STR_CAT === c ? " selected" : ""}>${esc(c)}</option>`)).join("");
     el.innerHTML = stHead("Relevant Terms", `Top ${fmt.num(rows.length)} Intent=Relevant terms by spend`) +
+      stFilterNote(s) +
       `<div class="stat-grid">${cards}</div>
        <div class="two-col">
          <div class="panel"><h3>Service categories by spend</h3><canvas id="strSvcChart" height="230"></canvas></div>
@@ -563,6 +571,7 @@
     const filterRows = () => STC_FILTER ? rows.filter(r => (r.term + " " + r.competitor).toLowerCase().indexOf(STC_FILTER.toLowerCase()) >= 0) : rows;
     const shown = filterRows();
     el.innerHTML = stHead("Competitor Terms", `Top ${fmt.num(rows.length)} search terms targeting competitor brands`) +
+      stFilterNote(s) +
       `<div class="two-col">
          <div class="panel"><h3>Competitor types by spend</h3><canvas id="stcDonut" height="230"></canvas></div>
          <div class="panel"><h3>Competitor type summary</h3>
@@ -607,6 +616,7 @@
     const filterRows = () => STF_FILTER ? rows.filter(r => r.term.toLowerCase().indexOf(STF_FILTER.toLowerCase()) >= 0) : rows;
     const shown = filterRows();
     el.innerHTML = stHead("Flagged / Needs Review", `Top ${fmt.num(rows.length)} terms flagged for review based on intent/relevance`) +
+      stFilterNote(s) +
       `<div class="panel">
          <div class="toolbar"><input type="text" id="stfFilter" placeholder="Filter term…" value="${esc(STF_FILTER)}" style="min-width:240px"/>
            <span class="muted" id="stfCount" style="margin-left:auto">Showing ${fmt.num(shown.length)} of ${fmt.num(s.flagged_total)}</span></div>
