@@ -244,7 +244,7 @@ function renderOverview(el) {
               : fmt.num(m.val);
     const chg = m.chg;
     const inv = m.invert ? (chg!=null&&chg<=0?'up':'dn') : (chg!=null&&chg>=0?'up':'dn');
-    const chgStr = chg==null?'—':(chg>=0?'+':'')+(chg*100).toFixed(1)+'% YoY';
+    const chgStr = chg==null?'—':(chg>=0?'+':'')+(chg*100).toFixed(1)+'% '+CMP_SHORT;
     return `<div class="stat ${i===0?'hl':''}">
       <div class="stat-label">${m.label}</div>
       <div class="stat-value">${val}</div>
@@ -259,7 +259,7 @@ function renderOverview(el) {
         <div class="muted">${useBrand ? `${BRAND} brand performance` : (META.name ? 'Account performance overview' : 'YoY performance across all 5 brands')} · All campaign types</div>
       </div>
       <div>
-        <span class="tag lime">${useBrand ? `Brand: ${BRAND}` : 'YoY Improving'}</span>
+        <span class="tag lime">${useBrand ? `Brand: ${BRAND}` : (CMP_LABEL + ' comparison')}</span>
       </div>
     </div>
 
