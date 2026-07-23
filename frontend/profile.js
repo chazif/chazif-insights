@@ -127,24 +127,42 @@
     var pad = function (n) { return (n < 10 ? "0" : "") + n; };
     var ymd = function (d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); };
     var now = new Date();
-    var monthsAgo = function (n) { var d = new Date(now); d.setMonth(d.getMonth() - n); return d; };
+    var addDays = function (base, n) { var d = new Date(base); d.setDate(d.getDate() + n); return d; };
+    var Y = now.getFullYear(), M = now.getMonth();
+    var yst = addDays(now, -1);
+    var monthFirst = new Date(Y, M, 1);
+    var lmFirst = new Date(M === 0 ? Y - 1 : Y, M === 0 ? 11 : M - 1, 1);   // first of last month
+    var lmLast = new Date(Y, M, 0);                                        // last of last month
+    var sunday = addDays(now, -now.getDay());                              // most recent Sunday (0=Sun)
+    var lwEnd = addDays(sunday, -1);                                       // Sat before this Sunday
+    var lwStart = addDays(lwEnd, -6);
+    // Requested order: MTD, Last Month, YTD; then the Google-Ads-style presets.
     var presets = {
+      mtd: { label: "MTD (month to date)", from: ymd(monthFirst), to: ymd(now) },
+      lastmonth: { label: "Last month", from: ymd(lmFirst), to: ymd(lmLast) },
+      ytd: { label: "YTD (year to date)", from: Y + "-01-01", to: ymd(now) },
+      today: { label: "Today", from: ymd(now), to: ymd(now) },
+      yesterday: { label: "Yesterday", from: ymd(yst), to: ymd(yst) },
+      thisweek: { label: "This week (Sun – Today)", from: ymd(sunday), to: ymd(now) },
+      last7: { label: "Last 7 days", from: ymd(addDays(now, -7)), to: ymd(yst) },
+      lastweek: { label: "Last week (Sun – Sat)", from: ymd(lwStart), to: ymd(lwEnd) },
+      last14: { label: "Last 14 days", from: ymd(addDays(now, -14)), to: ymd(yst) },
+      last30: { label: "Last 30 days", from: ymd(addDays(now, -30)), to: ymd(yst) },
       all: { label: "All time", from: "", to: "" },
-      m3: { label: "Last 3 months", from: ymd(monthsAgo(3)), to: ymd(now) },
-      m6: { label: "Last 6 months", from: ymd(monthsAgo(6)), to: ymd(now) },
-      m12: { label: "Last 12 months", from: ymd(monthsAgo(12)), to: ymd(now) },
-      ytd: { label: "Year to date", from: now.getFullYear() + "-01-01", to: ymd(now) },
     };
     var curKey = (!curFrom && !curTo) ? "all" : "custom";
     for (var k in presets) { if (presets[k].from === curFrom && presets[k].to === curTo) { curKey = k; break; } }
     var opts = Object.keys(presets).map(function (k) {
       return '<option value="' + k + '"' + (k === curKey ? " selected" : "") + ">" + presets[k].label + "</option>";
-    }).join("") + '<option value="custom"' + (curKey === "custom" ? " selected" : "") + ">Custom…</option>";
+    }).join("") +
+      '<option value="days"' + (curKey === "custom" ? "" : "") + ">Last N days…</option>" +
+      '<option value="custom"' + (curKey === "custom" ? " selected" : "") + ">Custom range…</option>";
     host.innerHTML =
       "<label>Dates</label><select id=\"drSel\">" + opts + "</select>" +
       '<span id="drCustom" style="display:' + (curKey === "custom" ? "flex" : "none") + ';gap:6px;align-items:center">' +
         '<input type="date" id="drFrom" value="' + curFrom + '"><input type="date" id="drTo" value="' + curTo + '">' +
         '<button class="dr-apply" id="drApply">Apply</button></span>' +
+      '<span id="drDays" style="display:none;gap:6px;align-items:center">Last <input type="number" id="drNdays" value="30" min="1" style="width:58px"> days up to <select id="drUpto"><option value="today">today</option><option value="yesterday" selected>yesterday</option></select><button class="dr-apply" id="drDaysApply">Apply</button></span>' +
       '<span class="dr-info" title="The date range applies to the campaign-time-series views — Overview, Monthly Trends, Campaign Performance, Pacing, NB Categories and Regions. The other reports (Keyword, QS, Search Terms, Ad Copy, Landing Pages, Geo) arrive as a single whole-window export with no per-row date, so they always show the full window until date-segmented (daily) exports are uploaded.">&#9432; time-series only</span>' +
       // ---- VS comparison (YoY / MoM / Custom) ----
       '<span class="dr-vs" style="display:inline-flex;align-items:center;gap:6px;margin-left:16px">' +
@@ -173,11 +191,18 @@
       refresh(u);
     }
     document.getElementById("drSel").addEventListener("change", function () {
-      if (this.value === "custom") { document.getElementById("drCustom").style.display = "flex"; return; }
+      document.getElementById("drCustom").style.display = this.value === "custom" ? "flex" : "none";
+      document.getElementById("drDays").style.display = this.value === "days" ? "inline-flex" : "none";
+      if (this.value === "custom" || this.value === "days") return;   // wait for that control's Apply
       var pr = presets[this.value]; go(pr.from, pr.to);
     });
     document.getElementById("drApply").addEventListener("click", function () {
       go(document.getElementById("drFrom").value, document.getElementById("drTo").value);
+    });
+    document.getElementById("drDaysApply").addEventListener("click", function () {
+      var n = Math.max(1, parseInt(document.getElementById("drNdays").value, 10) || 1);
+      var end = document.getElementById("drUpto").value === "today" ? now : yst;
+      go(ymd(addDays(end, -(n - 1))), ymd(end));
     });
     host.querySelectorAll("[data-vs]").forEach(function (b) {
       b.addEventListener("click", function () {
