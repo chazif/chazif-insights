@@ -4,6 +4,8 @@
 (function () {
   "use strict";
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  // Active comparison label (YoY / MoM / Chg) from the current bundle — read fresh each render.
+  const cmpTag = () => { const m = (((window.__BUNDLE__ || {}).meta || {}).compare || {}).mode || "yoy"; return m === "mom" ? "MoM" : m === "custom" ? "Chg" : "YoY"; };
   const chgCell = v => {
     if (v == null) return '<td class="num">—</td>';
     const cls = v >= 0 ? "up" : "dn";
@@ -23,21 +25,31 @@
       options: { responsive: true, maintainAspectRatio: true, cutout: "58%",
         plugins: { legend: { position: "right", labels: { color: "#1A1A1A", font: { family: "Inter", size: 11 }, boxWidth: 10, padding: 8 } } } } });
   }
-  function bars(id, labels, data, label, color) {
+  // apply {x, y} axis titles to a Chart.js options object
+  function axisTitles(opt, axes) {
+    if (!axes) return opt;
+    opt.scales = opt.scales || {};
+    if (axes.x) { opt.scales.x = opt.scales.x || {}; opt.scales.x.title = { display: true, text: axes.x, color: "#888", font: { size: 11 } }; }
+    if (axes.y) { opt.scales.y = opt.scales.y || {}; opt.scales.y.title = { display: true, text: axes.y, color: "#888", font: { size: 11 } }; }
+    return opt;
+  }
+  function bars(id, labels, data, label, color, axes) {
     const c = document.getElementById(id);
     if (!c || typeof Chart === "undefined") return;
     const opt = (typeof chartOpts === "function") ? chartOpts({}) : { responsive: true, maintainAspectRatio: true };
     if (opt.plugins && opt.plugins.legend) opt.plugins.legend.display = false;
+    axisTitles(opt, axes);
     new Chart(c, { type: "bar",
       data: { labels, datasets: [{ label: label || "", data, backgroundColor: color || "#CFFF04", borderColor: "#1A1A1A", borderWidth: 1 }] },
       options: opt });
   }
   // grouped prior-vs-current bars (grey / lime) — matches the reference YoY chart
-  function groupedBars(id, labels, prior, cur, priorLabel, curLabel, moneyAxis) {
+  function groupedBars(id, labels, prior, cur, priorLabel, curLabel, moneyAxis, axes) {
     const c = document.getElementById(id);
     if (!c || typeof Chart === "undefined") return;
     const opt = (typeof chartOpts === "function") ? chartOpts({ moneyAxis: !!moneyAxis }) : { responsive: true, maintainAspectRatio: true };
     if (opt.plugins && opt.plugins.legend) { opt.plugins.legend.display = true; opt.plugins.legend.position = "top"; }
+    axisTitles(opt, axes);
     new Chart(c, { type: "bar",
       data: { labels, datasets: [
         { label: priorLabel, data: prior, backgroundColor: "#9CA3AF", borderRadius: 4 },
@@ -79,7 +91,7 @@
             <td class="num">${fmt.num(cp.totals.conv, 1)}</td>
             <td></td><td></td><td class="num">100%</td><td></td></tr>
         </tbody></table></div></div>`;
-    bars("campChart", cp.rows.map(r => r.campaign), cp.rows.map(r => r.cost), "Cost");
+    bars("campChart", cp.rows.map(r => r.campaign), cp.rows.map(r => r.cost), "Cost", null, { x: "Campaign", y: "Cost ($)" });
     if (typeof enableSortable === "function") enableSortable(el);
   }
 
@@ -355,7 +367,7 @@
           { type: "bar", label: "Keywords", data: P.map(r => r.keywords), backgroundColor: P.map(r => qsBarColor(r.qs)), yAxisID: "y", order: 2 },
           { type: "line", label: "% of Spend", data: P.map(r => +(r.spend_share * 100).toFixed(2)), borderColor: "#1A1A1A", backgroundColor: "#1A1A1A", yAxisID: "y1", tension: 0.35, pointRadius: 2, fill: false, order: 1 } ] },
         options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
-          scales: { y: { position: "left", title: { display: true, text: "Keywords" } },
+          scales: { x: { title: { display: true, text: "Quality Score" } }, y: { position: "left", title: { display: true, text: "Keywords" } },
             y1: { position: "right", title: { display: true, text: "% of Spend" }, grid: { drawOnChartArea: false }, ticks: { callback: v => v + "%" } } },
           plugins: { legend: { position: "bottom", labels: { font: { family: "Inter", size: 11 }, boxWidth: 12 } } } } });
       const cc = document.getElementById("qsCpcChart");
@@ -363,7 +375,7 @@
           { label: "Avg CPC", data: P.map(r => r.cpc), borderColor: "#1A1A1A", backgroundColor: "#1A1A1A", yAxisID: "y", tension: 0.35, pointRadius: 2, fill: false },
           { label: "CTR", data: P.map(r => +(r.ctr * 100).toFixed(2)), borderColor: "#CFFF04", backgroundColor: "#CFFF04", yAxisID: "y1", tension: 0.35, pointRadius: 2, fill: false } ] },
         options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
-          scales: { y: { position: "left", title: { display: true, text: "Avg CPC" }, ticks: { callback: v => "$" + v } },
+          scales: { x: { title: { display: true, text: "Quality Score" } }, y: { position: "left", title: { display: true, text: "Avg CPC ($)" }, ticks: { callback: v => "$" + v } },
             y1: { position: "right", title: { display: true, text: "CTR" }, grid: { drawOnChartArea: false }, ticks: { callback: v => v + "%" } } },
           plugins: { legend: { position: "bottom", labels: { font: { family: "Inter", size: 11 }, boxWidth: 12 } } } } });
     }
@@ -480,7 +492,8 @@
       if (cc) new Chart(cc, { type: "bar",
         data: { labels: comp.map(c => c.segment), datasets: [{ data: comp.map(c => Math.round(c.spend)), backgroundColor: "#1A1A1A", borderRadius: 3 }] },
         options: { indexAxis: "y", responsive: true, maintainAspectRatio: false,
-          scales: { x: { ticks: { callback: v => "$" + v.toLocaleString() } } }, plugins: { legend: { display: false } } } });
+          scales: { x: { ticks: { callback: v => "$" + v.toLocaleString() }, title: { display: true, text: "Spend ($)", color: "#888", font: { size: 11 } } },
+            y: { title: { display: true, text: "Competitor", color: "#888", font: { size: 11 } } } }, plugins: { legend: { display: false } } } });
     }
     if (typeof enableSortable === "function") enableSortable(el);
   }
@@ -1247,8 +1260,8 @@
       return;
     }
     const M = NBC_METRIC === "conv"
-      ? { prior: "conv_prior", cur: "conv_cur", money: false, donut: "conversions share", bar: "YoY Conversions" }
-      : { prior: "spend_prior", cur: "spend_cur", money: true, donut: "spend share", bar: "YoY Spend" };
+      ? { prior: "conv_prior", cur: "conv_cur", money: false, donut: "conversions share", bar: cmpTag() + " Conversions" }
+      : { prior: "spend_prior", cur: "spend_cur", money: true, donut: "spend share", bar: cmpTag() + " Spend" };
     const pill = (v, l) => `<button class="seg-pill ${NBC_METRIC === v ? "active" : ""}" data-nbc="${v}">${l}</button>`;
     // Spend/Conv: up is good (green). CPA: down is good (invert).
     const rowHtml = (r, strong) => `<tr${strong ? ' class="strong"' : ""}>
@@ -1257,7 +1270,7 @@
         <td class="num">${fmt.num(r.conv_prior, 1)}</td><td class="num">${fmt.num(r.conv_cur, 1)}</td><td class="num">${yoyUp(r.conv_chg)}</td>
         <td class="num">${fmt.money(r.cpa_prior, 2)}</td><td class="num">${fmt.money(r.cpa_cur, 2)}</td><td class="num">${yoyDn(r.cpa_chg)}</td></tr>`;
     const P = esc(n.prior_label), C = esc(n.cur_label);
-    const cmp = (String(n.prior_label).slice(-4) !== String(n.cur_label).slice(-4)) ? "YoY" : "period-over-period";
+    const cmp = cmpTag() === "YoY" && String(n.prior_label).slice(-4) === String(n.cur_label).slice(-4) ? "period-over-period" : cmpTag();
     el.innerHTML = `
       <div class="view-head">
         <div><h2>Non-Brand Categories</h2>
@@ -1269,7 +1282,7 @@
         <div class="panel"><h3>${C} ${M.donut}</h3><canvas id="nbDonut" height="220"></canvas></div>
         <div class="panel"><h3>${M.bar}</h3><canvas id="nbBars" height="220"></canvas></div>
       </div>
-      <div class="panel"><h3>Category YoY detail</h3><div class="tbl-wrap"><table class="sortable">
+      <div class="panel"><h3>Category ${cmpTag()} detail</h3><div class="tbl-wrap"><table class="sortable">
         <thead><tr><th>Category</th>
           <th class="num">${P} Spend</th><th class="num">${C} Spend</th><th class="num">Chg</th>
           <th class="num">${P} Conv</th><th class="num">${C} Conv</th><th class="num">Chg</th>
@@ -1279,7 +1292,7 @@
         </tbody></table></div></div>`;
     const labels = n.rows.map(r => r.category);
     donut("nbDonut", labels, n.rows.map(r => Math.round(r[M.cur])));
-    groupedBars("nbBars", labels, n.rows.map(r => r[M.prior]), n.rows.map(r => r[M.cur]), n.prior_label, n.cur_label, M.money);
+    groupedBars("nbBars", labels, n.rows.map(r => r[M.prior]), n.rows.map(r => r[M.cur]), n.prior_label, n.cur_label, M.money, { x: "Category", y: M.money ? "Spend ($)" : "Conversions" });
     el.querySelectorAll("[data-nbc]").forEach(b => b.addEventListener("click", () => {
       NBC_METRIC = b.dataset.nbc; setView("nb-cats", { preserveScroll: true });
     }));
@@ -1323,7 +1336,7 @@
     T.cpa_prior = cpa(T.spend_prior, T.conv_prior); T.cpa_cur = cpa(T.spend_cur, T.conv_cur); T.cpa_chg = chg(T.cpa_cur, T.cpa_prior);
 
     const P = esc(rs.prior_label), C = esc(rs.cur_label);
-    const cmp = (String(rs.prior_label).slice(-4) !== String(rs.cur_label).slice(-4)) ? "YoY" : "period-over-period";
+    const cmp = cmpTag() === "YoY" && String(rs.prior_label).slice(-4) === String(rs.cur_label).slice(-4) ? "period-over-period" : cmpTag();
     const top = rows.slice(0, 12);
     const rowHtml = (r, strong) => `<tr${strong ? ' class="strong"' : ""}>
         <td>${strong ? esc(r.region) : `<span class="tag info">${esc(r.region)}</span>`}</td>
@@ -1344,12 +1357,12 @@
               ${allCats.map(c => `<label><input type="checkbox" value="${esc(c)}" ${REG_CATS.has(c) ? "checked" : ""}> ${esc(c)}</label>`).join("")}
             </div>
           </div>
-          <span class="muted" style="margin-left:12px">NB-campaign YoY · ${esc(filterNote)}</span>
+          <span class="muted" style="margin-left:12px">NB-campaign ${cmpTag()} · ${esc(filterNote)}</span>
         </div>
         <h3 style="margin-top:12px">Top ${top.length} regions by ${C} spend</h3>
         <canvas id="regChart" height="150"></canvas>
       </div>
-      <div class="panel"><h3>Region YoY detail</h3><div class="tbl-wrap"><table class="sortable">
+      <div class="panel"><h3>Region ${cmpTag()} detail</h3><div class="tbl-wrap"><table class="sortable">
         <thead><tr><th>Region</th>
           <th class="num">${P} Spend</th><th class="num">${C} Spend</th><th class="num">Chg</th>
           <th class="num">${P} Conv</th><th class="num">${C} Conv</th><th class="num">Chg</th>
@@ -1357,7 +1370,7 @@
         <tbody>${rows.map(r => rowHtml(r, false)).join("")}
           ${rowHtml(T, true)}
         </tbody></table></div></div>`;
-    groupedBars("regChart", top.map(r => r.region), top.map(r => r.spend_prior), top.map(r => r.spend_cur), rs.prior_label, rs.cur_label, true);
+    groupedBars("regChart", top.map(r => r.region), top.map(r => r.spend_prior), top.map(r => r.spend_cur), rs.prior_label, rs.cur_label, true, { x: "Region", y: "Spend ($)" });
     // category multi-select
     const btn = el.querySelector("#regCatBtn"), menu = el.querySelector("#regCatMenu");
     if (btn) btn.addEventListener("click", () => menu.classList.toggle("hidden"));
