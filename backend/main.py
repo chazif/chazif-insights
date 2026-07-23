@@ -137,16 +137,18 @@ def inventory(client: str = Query(...)):
 def bundle(client: str = Query("mavis"), period: str = Query("2026-03"),
            date_from: str = Query(None, alias="from"), date_to: str = Query(None, alias="to"),
            seg: str = Query("all"), campaign: str = Query("all"), region: str = Query("all"),
-           category: str = Query("all"), brand: str = Query("all")):
+           category: str = Query("all"), brand: str = Query("all"),
+           compare: str = Query("yoy"), cfrom: str = Query(None), cto: str = Query(None)):
     _safe_seg(client, period)
     filters = {"seg": seg, "campaign": campaign, "region": region, "category": category, "brand": brand}
     has_filter = any(v and v != "all" for v in filters.values())
     # Pre-baked bundle (e.g. the Mavis demo) wins if present (ignores date range + filters).
     path = CLIENTS / client / period / "bundle.json"
-    if path.is_file() and not (date_from or date_to or has_filter):
+    if path.is_file() and not (date_from or date_to or has_filter or compare != "yoy"):
         return FileResponse(path, media_type="application/json")
     # Otherwise compute it from the warehouse, honoring the date range + global filters.
-    computed = build_bundle(client, _engine, date_from=date_from, date_to=date_to, filters=filters)
+    computed = build_bundle(client, _engine, date_from=date_from, date_to=date_to, filters=filters,
+                            compare=compare, compare_from=cfrom, compare_to=cto)
     if computed is None:
         raise HTTPException(404, f"no data for client '{client}'")
     return JSONResponse(computed)
