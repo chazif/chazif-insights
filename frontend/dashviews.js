@@ -1435,9 +1435,34 @@
     }));
   }
 
+  // ---------- Competition · Auction Insights (scaffold; data feature to come) ----------
+  function renderAuctionInsights(el) {
+    el.className = "view";
+    const a = (typeof DATA !== "undefined" && DATA.auction_insights_section) || null;
+    if (!a || !a.rows || !a.rows.length) {
+      el.innerHTML = stHead("Auction Insights", "Competitive share of the auction — impression share, overlap, position-above and outranking share by competitor domain") +
+        `<div class="panel"><div class="ws-empty" style="padding:28px;text-align:center;color:var(--grey)">
+          <div style="font-size:15px;color:var(--ink);font-weight:600;margin-bottom:6px">No Auction Insights data yet</div>
+          Upload the Google Ads <strong>Auction Insights</strong> export (Campaigns → ⋯ → Auction insights → Download) to see the competitor landscape here.
+        </div></div>`;
+      return;
+    }
+    // (data rendering added when the Auction Insights report is ingested)
+    el.innerHTML = stHead("Auction Insights", "Competitive share of the auction by competitor domain") +
+      `<div class="panel"><div class="tbl-wrap"><table class="sortable"><thead><tr>
+        <th>Domain</th><th class="num">Impr. Share</th><th class="num">Overlap Rate</th>
+        <th class="num">Position Above</th><th class="num">Top of Page</th><th class="num">Outranking Share</th></tr></thead>
+        <tbody>${a.rows.map(r => `<tr><td class="strong">${esc(r.domain)}</td>
+          <td class="num">${fmt.pct(r.impr_share, 1)}</td><td class="num">${fmt.pct(r.overlap_rate, 1)}</td>
+          <td class="num">${fmt.pct(r.position_above, 1)}</td><td class="num">${fmt.pct(r.top_of_page, 1)}</td>
+          <td class="num">${fmt.pct(r.outranking, 1)}</td></tr>`).join("")}</tbody></table></div></div>`;
+    if (typeof enableSortable === "function") enableSortable(el);
+  }
+
   // ---- register renderers ----
   const REG = {
     "recs": ["Recommendations", renderRecs],
+    "auction-insights": ["Auction Insights", renderAuctionInsights],
     "nb-cats": ["Non-Brand Categories", renderNbCats],
     "regions": ["Regions", renderRegions],
     "campaign-perf": ["Campaign Performance", renderCampaignPerf],
@@ -1474,6 +1499,7 @@
       ["Ad Copy", ["ad-copy", "ad-lp"]],
       ["Landing Pages", ["lp-perf", "lp-category"]],
       ["Geo", ["geo-perf"]],
+      ["Competition", ["auction-insights"]],
     ];
     if (!document.getElementById("navGroupStyle")) {
       const s = document.createElement("style"); s.id = "navGroupStyle";
