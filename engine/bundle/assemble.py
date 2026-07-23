@@ -1765,7 +1765,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
                 "from": date_from, "to": date_to,
                 "applied": bool(rng_from or rng_to),
                 # views that honour the range today (month-grained); the rest are whole-window
-                "windowed_views": ["overview", "trends", "campaign-perf", "pacing"],
+                "windowed_views": ["overview", "trends", "campaign-perf", "pacing", "nb-cats", "regions"],
             },
             "filters": {"seg": (filters or {}).get("seg") or "all", "campaign": (filters or {}).get("campaign") or "all",
                         "region": (filters or {}).get("region") or "all", "category": (filters or {}).get("category") or "all",

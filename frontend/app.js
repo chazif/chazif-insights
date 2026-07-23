@@ -85,8 +85,23 @@ function setView(name, opts) {
   if (bf) bf.style.display = BRAND_FILTER_HIDDEN_VIEWS.has(name) ? 'none' : '';
   const root = $('#view-root');
   root.innerHTML = '<div class="view" id="view-pane"></div>';
-  (views[name]||renderOverview)(document.getElementById('view-pane'));
+  const pane = document.getElementById('view-pane');
+  (views[name]||renderOverview)(pane);
+  maybeDateNote(pane, name);
   window.scrollTo({top: prevScroll, behavior:'instant'});
+}
+
+// When a date range is applied but this view can't honour it (whole-window export,
+// no per-row date), prepend a small note so the tab doesn't look "broken".
+function maybeDateNote(pane, name) {
+  const meta = (window.__BUNDLE__ && window.__BUNDLE__.meta) || {};
+  const dr = meta.date_range || {};
+  if (!dr.applied || (dr.windowed_views || []).indexOf(name) >= 0) return;
+  const note = document.createElement('div');
+  note.className = 'panel';
+  note.style.cssText = 'background:#FCFEF0;border-left:3px solid var(--lime,#CFFF04);margin-bottom:14px;font-size:12.5px;color:var(--grey,#666)';
+  note.innerHTML = 'This report is a single whole-window export with no per-row date, so it ignores the selected date range and shows the full window. The date range applies to the time-series views (Overview, Monthly Trends, Campaign Performance, Pacing, NB Categories, Regions).';
+  pane.insertBefore(note, pane.firstChild);
 }
 
 $$('.nav-item').forEach(n => n.addEventListener('click', () => setView(n.dataset.view)));
