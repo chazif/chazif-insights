@@ -1749,6 +1749,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
             view_list.append("lp-category")
     if geo:
         view_list.append("geo-perf")
+    view_list.append("auction-insights")   # Competition module (scaffold; data feature to come)
     view_list.append("recs")
 
     return {
@@ -1791,4 +1792,5 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         "landing_pages_section": lps,
         "nb_categories_section": nb_cats,
         "regions_section": regions,
+        "auction_insights_section": None,   # populated once the Auction Insights export is ingested
     }
