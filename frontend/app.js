@@ -253,16 +253,6 @@ function renderOverview(el) {
   }).join('');
 
   el.innerHTML = `
-    <div class="view-head">
-      <div>
-        <h2>${useBrand ? BRAND : CLIENT_LABEL} · ${PERIOD_LABEL}</h2>
-        <div class="muted">${useBrand ? `${BRAND} brand performance` : (META.name ? 'Account performance overview' : 'YoY performance across all 5 brands')} · All campaign types</div>
-      </div>
-      <div>
-        <span class="tag lime">${useBrand ? `Brand: ${BRAND}` : (CMP_LABEL + ' comparison')}</span>
-      </div>
-    </div>
-
     <div class="stat-grid">${statCards}</div>
 
     <div class="two-col">
@@ -314,7 +304,7 @@ function renderOverview(el) {
       { label:'Spend', data: spend, borderColor: '#1A1A1A', backgroundColor:'rgba(26,26,26,0.06)', tension:.3, fill:true, yAxisID:'y', borderWidth: 2 },
       { label:'Main Conv', data: conv, borderColor: '#CFFF04', backgroundColor:'rgba(207,255,4,0.25)', tension:.3, fill:false, yAxisID:'y1', borderWidth: 3, pointBackgroundColor:'#1A1A1A' },
     ]},
-    options: chartOpts({ dualY:true })
+    options: chartOpts({ dualY:true, axes:{ x:'Month', y:'Spend ($)', y1:'Conversions' } })
   });
   enableSortable(el);
 }
@@ -405,7 +395,7 @@ function renderTrends(el) {
       borderColor:'#1A1A1A', backgroundColor:'rgba(207,255,4,0.35)',
       tension:.3, fill:true, borderWidth: 2, pointBackgroundColor:'#CFFF04', pointBorderColor:'#1A1A1A'
     }];
-    const opts = chartOpts({ moneyAxis: f1.money, pctAxis: f1.pct });
+    const opts = chartOpts({ moneyAxis: f1.money, pctAxis: f1.pct, axes: { x: 'Month', y: metric } });
     if (metric2) {
       const f2 = fmtFor(metric2);
       const data2 = trend.map(r => r[metric2]);
@@ -4102,6 +4092,12 @@ function chartOpts(opts) {
   };
   if (opts.dualY) {
     common.scales.y1 = { position:'right', ticks:{ color:'#6B7280', font:{family:'Inter', size:11}, callback: v=>Number(v).toLocaleString() }, grid:{drawOnChartArea:false} };
+  }
+  if (opts.axes) {
+    const t = txt => ({ display:true, text:txt, color:'#888', font:{size:11} });
+    if (opts.axes.x) common.scales.x.title = t(opts.axes.x);
+    if (opts.axes.y) common.scales.y.title = t(opts.axes.y);
+    if (opts.axes.y1 && common.scales.y1) common.scales.y1.title = t(opts.axes.y1);
   }
   return common;
 }

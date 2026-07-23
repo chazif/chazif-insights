@@ -30,7 +30,7 @@
     var cur = (META.periods || {}).current || "";
     setText("crumbClient", name);
     setText("footClient", name);
-    setText("periodPill", cur);
+    setText("periodPill", name || cur);   // the top-bar pill shows the client name
     setText("footPeriod", cur);
     setText("brandSub", [name, cur].filter(Boolean).join(" · "));
     setText("gateSub", "Client portal" + (name ? " · " + name : "") + (cur ? " · " + cur + " report" : ""));
