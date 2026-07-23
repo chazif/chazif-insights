@@ -138,7 +138,7 @@
       '<span id="drCustom" style="display:' + (curKey === "custom" ? "flex" : "none") + ';gap:6px;align-items:center">' +
         '<input type="date" id="drFrom" value="' + curFrom + '"><input type="date" id="drTo" value="' + curTo + '">' +
         '<button class="dr-apply" id="drApply">Apply</button></span>' +
-      '<span class="dr-info" title="The date range filters the time-series views (Overview, Monthly Trends, Campaign Performance, Budget & Pacing). Other reports show the full export window until date-segmented daily data is uploaded.">&#9432;</span>';
+      '<span class="dr-info" title="The date range applies to the campaign-time-series views — Overview, Monthly Trends, Campaign Performance, Pacing, NB Categories and Regions. The other reports (Keyword, QS, Search Terms, Ad Copy, Landing Pages, Geo) arrive as a single whole-window export with no per-row date, so they always show the full window until date-segmented (daily) exports are uploaded.">&#9432; time-series only</span>';
     function go(from, to) {
       var u = new URLSearchParams(location.search);
       u.set("client", META.client_id);
