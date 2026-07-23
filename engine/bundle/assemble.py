@@ -1490,10 +1490,14 @@ def _row_text(d):
     return " ".join(str(d.get(f) or "") for f in _FILTER_TEXT_FIELDS).lower()
 
 
-def _row_filter(filters, config):
-    """Build a keep(row_dict) predicate for the global topbar filters. Each filter only
-    drops rows that actually carry the relevant dimension (so e.g. a Region filter is a
-    no-op on keyword/ad rows that have no geography), keeping it best-effort per tab."""
+def _row_filter(filters, config, engine=None, client_id=None):
+    """Build a keep(row_dict) predicate for the global topbar filters.
+
+    Most exports carry only some of the filter dimensions, so we bridge through
+    ad_group where possible: ad_group_performance maps ad_group -> campaign, and the
+    geographic report maps ad_group -> region. That lets a Campaign or Region filter
+    reach keyword / ad / landing-page / geo rows that have no such column of their own.
+    A filter is only skipped for a row when there is genuinely no way to resolve it."""
     filters = filters or {}
     seg = (filters.get("seg") or "all").lower()
     campaign = filters.get("campaign") or "all"
@@ -1514,16 +1518,44 @@ def _row_filter(filters, config):
                 return c[:1].upper() + c[1:]
         return None
 
+    # ---- ad_group bridges, built only for the filters actually in use ----
+    ag2camp, region_ags, region_camps = {}, None, None
+    if active and engine is not None and client_id and (campaign != "all" or region != "all"):
+        with engine.connect() as c:
+            for ag, camp in c.execute(text(
+                "SELECT DISTINCT ad_group, campaign FROM raw_rows WHERE client_id=:c "
+                "AND report_type='ad_group_performance'"), {"c": client_id}):
+                if ag:
+                    ag2camp[ag] = camp
+        if region != "all":
+            region_ags = set()
+            with engine.connect() as c:
+                for ag, row in c.execute(text(
+                    "SELECT ad_group, row FROM raw_rows WHERE client_id=:c "
+                    "AND report_type='geographic'"), {"c": client_id}):
+                    if ag and _region_value(_asdict(row)) == region:
+                        region_ags.add(ag)
+            # ad_group -> campaign lets the region filter also reach campaign-keyed rows
+            region_camps = {ag2camp[a] for a in region_ags if a in ag2camp}
+
     def keep(d):
         if not active:
             return True
-        camp = d.get("campaign") or ""
-        if campaign != "all" and camp and camp != campaign:
-            return False
+        if campaign != "all":
+            camp = d.get("campaign")
+            if camp:
+                if camp != campaign:
+                    return False
+            else:                                   # bridge: ad_group -> campaign
+                ag = d.get("ad_group")
+                if ag and ag in ag2camp and ag2camp[ag] != campaign:
+                    return False
         txt = _row_text(d)
         if seg == "br" and not is_brand(txt):
             return False
         if seg == "nb" and is_brand(txt):
+            return False
+        if brand != "all" and brand.lower() not in txt:
             return False
         if category != "all":
             c = cat_of(txt)
@@ -1531,8 +1563,18 @@ def _row_filter(filters, config):
                 return False
         if region != "all":
             rv = _region_value(d)
-            if rv is not None and rv != region:
-                return False
+            if rv is not None:
+                if rv != region:
+                    return False
+            elif region_ags is not None:
+                ag = d.get("ad_group")
+                if ag:                                          # bridge: ad_group -> region
+                    if ag not in region_ags:
+                        return False
+                else:                                           # bridge: campaign -> region
+                    camp = d.get("campaign")
+                    if camp and region_camps and camp not in region_camps:
+                        return False
         return True
 
     return keep, active
@@ -1563,7 +1605,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
     engine = engine or get_engine()
     rng_from, rng_to = _ym_bound(date_from), _ym_bound(date_to)
     config = get_config(client_id, engine) or {}
-    keep, _flt_active = _row_filter(filters, config)
+    keep, _flt_active = _row_filter(filters, config, engine, client_id)
     with engine.connect() as c:
         has = c.execute(text("SELECT COUNT(*) FROM raw_rows WHERE client_id=:c AND report_type='campaign_performance'"),
                         {"c": client_id}).scalar()
@@ -1659,6 +1701,11 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
     kw_regions = _keyword_regions(engine, client_id, config, keep)
     reg_cat = _region_category(engine, client_id, config, keep)
     st = _search_terms_section(engine, client_id, config, keep)
+    if st is not None:
+        # the search-terms export has no campaign/ad_group column, so those filters
+        # cannot be resolved for this report — tell the UI rather than silently ignoring
+        st["filters_ignored"] = [k for k in ("campaign", "region")
+                                 if (filters or {}).get(k) not in (None, "", "all")]
     ads = _ads_section(engine, client_id, config, keep)
     lps = _landing_pages(engine, client_id, config, keep)
     lp_perf = _lp_performance(engine, client_id, keep)
