@@ -29,12 +29,15 @@ def _kw_key(row):
 
 def _row_record(client_id, upload_id, rtype, idx, row):
     ent_col = ENTITY_COL.get(rtype)
-    date_col = DATE_COL.get(rtype)
+    date_cols = DATE_COL.get(rtype) or ()
+    if isinstance(date_cols, str):
+        date_cols = (date_cols,)
+    date = next((row.get(dc) for dc in date_cols if row.get(dc)), None)
     rec = dict(
         client_id=client_id, upload_id=upload_id, report_type=rtype, row_index=idx,
         campaign=row.get("campaign"), ad_group=row.get("ad_group"),
         entity=(row.get(ent_col) if ent_col else None),
-        date=(row.get(date_col) if date_col else None),
+        date=date,
         row=row,
     )
     for slug, canon in CORE_METRICS.items():
