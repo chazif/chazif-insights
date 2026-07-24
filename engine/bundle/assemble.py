@@ -35,17 +35,40 @@ def _mk(yr, mo):
     return (yr, mo, f"{yr}-{mo:02d}", f"{MABBR[mo-1]} {yr}") if 1 <= mo <= 12 else None
 
 
-def _month_key(label):
-    """Normalize a Google Ads Month cell to (year, month, 'YYYY-MM', 'Mon YYYY'); None
-    if unparseable. Accepts the formats Report Editor emits across locales/settings:
-    'March 2026', 'Mar 2026', '2026-03', '2026-03-01', '3/2026', '03/01/2026'."""
+def _slash_order(dates):
+    """Infer day/month order for D/M or M/D slash dates by finding a disambiguating
+    value (a component > 12). 'dmy' (day-first, most locales) or 'mdy' (US default)."""
+    for d in dates:
+        m = re.match(r"^\s*(\d{1,2})/(\d{1,2})/\d{2,4}\s*$", str(d or ""))
+        if m:
+            a, b = int(m.group(1)), int(m.group(2))
+            if a > 12:
+                return "dmy"
+            if b > 12:
+                return "mdy"
+    return "mdy"
+
+
+def _month_key(label, order="mdy"):
+    """Normalize a Google Ads Month/Day cell to (year, month, 'YYYY-MM', 'Mon YYYY');
+    None if unparseable. Accepts the formats Report Editor emits across locales/settings:
+    'March 2026', 'Mar 2026', '2026-03', '2026-03-01', '2026/03/01', '3/2026', and day
+    dates '23/10/2025' / '10/23/2025' (order disambiguated via `order`)."""
     if not label:
         return None
     s = str(label).strip()
-    m = re.match(r"^(\d{4})-(\d{1,2})(?:-\d{1,2})?$", s)              # 2026-03 / 2026-03-15
+    m = re.match(r"^(\d{4})[-/](\d{1,2})(?:[-/]\d{1,2})?$", s)        # 2026-03 / 2026-03-15 / 2026/03/15
     if m:
         return _mk(int(m.group(1)), int(m.group(2)))
-    m = re.match(r"^(\d{1,2})/(?:\d{1,2}/)?(\d{2,4})$", s)            # 3/2026 / 03/15/2026 (month first)
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{2,4})$", s)              # D/M/YYYY or M/D/YYYY (day date)
+    if m:
+        a, b = int(m.group(1)), int(m.group(2))
+        yr = int(m.group(3)); yr += 2000 if yr < 100 else 0
+        mo = b if order == "dmy" else a
+        if not 1 <= mo <= 12:                                        # impossible -> use the other component
+            mo = a if order == "dmy" else b
+        return _mk(yr, mo)
+    m = re.match(r"^(\d{1,2})/(\d{2,4})$", s)                        # M/YYYY
     if m:
         yr = int(m.group(2)); yr += 2000 if yr < 100 else 0
         return _mk(yr, int(m.group(1)))
@@ -142,11 +165,12 @@ def _campaigns(engine, client_id, cm, keep=None, dateless=False):
         allrows = c.execute(text(
             "SELECT date, campaign, clicks, cost, conversions, row FROM raw_rows "
             "WHERE client_id=:c AND report_type='campaign_performance'"), {"c": client_id}).all()
+    order = _slash_order(r[0] for r in allrows)
 
     def month_map(target, allow_dateless):
         out = {}
         for date, camp, clicks, cost, conv, row in allrows:
-            mk = _month_key(date)
+            mk = _month_key(date, order)
             match = (mk[:2] == target) if mk else (allow_dateless and target == (cm["year"], cm["month"]))
             if not match or not keep(_asdict(row)):
                 continue
@@ -273,9 +297,10 @@ def _budget_reconciliation(engine, client_id, cm, config, dateless=False):
         allrows = c.execute(text(
             "SELECT date, campaign, cost FROM raw_rows WHERE client_id=:c "
             "AND report_type='campaign_performance'"), {"c": client_id}).all()
+    order = _slash_order(r[0] for r in allrows)
     target = (cm["year"], cm["month"])
     rows = [(camp, cost) for date, camp, cost in allrows
-            if (_month_key(date)[:2] == target if _month_key(date) else dateless)]
+            if (_month_key(date, order)[:2] == target if _month_key(date, order) else dateless)]
     total_actual = round(sum(_num(cost) for _camp, cost in rows), 2)
 
     recon = {"month": cm["abbr"], "total_budget": round(total_budget, 2), "total_actual": total_actual,
@@ -318,11 +343,12 @@ def _budget(engine, client_id, cm, config, keep=None, dateless=False):
         rows = c.execute(text(
             "SELECT date, cost, row FROM raw_rows WHERE client_id=:c "
             "AND report_type='campaign_performance'"), {"c": client_id}).all()
+    order = _slash_order(r[0] for r in rows)
     magg = defaultdict(float)      # (year, month) -> spend
     for date, cost, row in rows:
         if not keep(_asdict(row)):
             continue
-        mk = _month_key(date)
+        mk = _month_key(date, order)
         if mk:
             magg[mk[:2]] += _num(cost)
         elif dateless:
@@ -1697,9 +1723,10 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
             "SELECT date, cost, clicks, conversions, row FROM raw_rows "
             "WHERE client_id=:c AND report_type='campaign_performance'"),
             {"c": client_id}).all()
+        order = _slash_order(r[0] for r in allrows)
         magg = defaultdict(lambda: [0.0, 0.0, 0.0])
         for date, cost, clicks, conv, row in allrows:
-            mk = _month_key(date)
+            mk = _month_key(date, order)
             if not mk or not keep(_asdict(row)):
                 continue
             m = magg[mk]; m[0] += float(cost or 0); m[1] += float(clicks or 0); m[2] += float(conv or 0)

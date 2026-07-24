@@ -40,7 +40,10 @@ ENTITY_COL = {
     "auction_insights": "display_url_domain",
     "schedule_dow_hod": None,
 }
-DATE_COL = {"campaign_performance": "month", "schedule_dow_hod": "day", "auction_insights": "day"}
+# Candidate date columns per report, most-preferred first. Campaign Performance may be
+# exported segmented by Month OR by Day (daily export) — accept either.
+DATE_COL = {"campaign_performance": ("month", "day"), "schedule_dow_hod": ("day",),
+            "auction_insights": ("day",)}
 
 # Account-identifying columns present only in MCC-level exports (Manager account).
 ACCOUNT_ID_SLUGS = ("customer_id", "account_id")
