@@ -25,6 +25,15 @@
       await new Promise(r => setTimeout(r, 1500));
     }
   }
+  // Gzip a CSV in the browser before upload so a big export (search terms can be
+  // 100MB+) goes over the wire ~10x smaller — the server gunzips it on arrival.
+  // Falls back to the raw file if the browser lacks CompressionStream.
+  async function gzipFile(file) {
+    if (typeof CompressionStream === "undefined" || !file.stream) return file;
+    const stream = file.stream().pipeThrough(new CompressionStream("gzip"));
+    const blob = await new Response(stream).blob();
+    return new File([blob], file.name + ".gz", { type: "application/gzip" });
+  }
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const REPORT_COUNT = 12; // expected report set size
 
@@ -200,11 +209,12 @@
       btn.addEventListener("click", async () => {
         const errEl = el.querySelector("#wsUpErr"); errEl.style.display = "none";
         const status = el.querySelector("#wsStatus");
+        btn.disabled = true; status.textContent = "Compressing…";
         const fd = new FormData();
         fd.append("client", el.querySelector("#wsClient").value);
         fd.append("period", el.querySelector("#wsPeriod").value.trim() || "unspecified");
-        getFiles().forEach(f => fd.append("files", f, f.name));
-        btn.disabled = true; status.textContent = "Uploading…";
+        for (const f of getFiles()) { const g = await gzipFile(f); fd.append("files", g, g.name); }
+        status.textContent = "Uploading…";
         try {
           const job = await api("POST", "/api/upload", { form: fd });
           status.textContent = "Ingesting… (large files can take a minute)";
@@ -228,8 +238,10 @@
       fs => { mccBtn.disabled = fs.length === 0; });
     mccBtn.addEventListener("click", async () => {
       const status = el.querySelector("#mccStatus"), errEl = el.querySelector("#mccErr"); errEl.style.display = "none";
-      const fd = new FormData(); getMccFiles().forEach(f => fd.append("files", f, f.name));
-      mccBtn.disabled = true; status.textContent = "Parsing accounts…";
+      mccBtn.disabled = true; status.textContent = "Compressing…";
+      const fd = new FormData();
+      for (const f of getMccFiles()) { const g = await gzipFile(f); fd.append("files", g, g.name); }
+      status.textContent = "Parsing accounts…";
       try {
         preview = await api("POST", "/api/upload/mcc/preview", { form: fd });
         status.textContent = `${preview.accounts.length} account(s) across ${preview.files.length} file(s)` +
