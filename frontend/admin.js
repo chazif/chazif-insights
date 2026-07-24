@@ -107,71 +107,153 @@
   }
 
   // ---------- Upload ----------
-  async function renderWsUpload(el) {
-    el.className = "view ws";
-    let clients = [];
-    try { clients = await api("GET", "/api/clients"); } catch (e) { /* shown below */ }
-    if (!clients.length) {
-      el.innerHTML = `<div class="view-head"><div><h2>Upload Data</h2></div></div>
-        <div class="ws-panel"><div class="ws-empty">No clients yet. Add a client on the <a href="#" id="goClients">Clients</a> tab first.</div></div>`;
-      el.querySelector("#goClients").addEventListener("click", e => { e.preventDefault(); setView("ws-clients"); });
-      return;
-    }
-    const now = new Date();
-    const defPeriod = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
-    el.innerHTML = `<div class="view-head"><div><h2>Upload Data</h2>
-        <div class="sub">Select a client and reporting period, then drop the Google Ads CSV exports.</div></div></div>
-      <div class="ws-panel">
-        <div class="ws-row" style="margin-bottom:14px">
-          <select class="ws-select" id="wsClient">${clients.map(c => `<option value="${esc(c.client_id)}">${esc(c.name)}</option>`).join("")}</select>
-          <input class="ws-input" id="wsPeriod" value="${defPeriod}" placeholder="YYYY-MM" style="min-width:120px"/>
-        </div>
-        <div class="ws-drop" id="wsDrop">
-          <div><strong>Drop CSV exports here</strong> or click to choose</div>
-          <div class="ws-note" id="wsFiles" style="margin-top:8px">No files selected</div>
-          <input type="file" id="wsFileInput" accept=".csv" multiple style="display:none"/>
-        </div>
-        <div class="ws-row" style="margin-top:14px">
-          <button class="ws-btn primary" id="wsUpload" disabled>Upload &amp; ingest</button>
-          <span class="ws-note" id="wsStatus"></span>
-        </div>
-        <div class="ws-err" id="wsUpErr" style="display:none"></div>
-      </div>
-      <div class="ws-panel" id="wsResult" style="display:none"><h3>Result</h3><div id="wsResultBody"></div></div>`;
-
+  // shared drop-zone wiring for a file input
+  function wireDrop(drop, input, filesEl, onChange) {
     let files = [];
-    const drop = el.querySelector("#wsDrop"), input = el.querySelector("#wsFileInput");
-    const filesEl = el.querySelector("#wsFiles"), btn = el.querySelector("#wsUpload");
-    function setFiles(list) {
+    const setFiles = list => {
       files = Array.from(list).filter(f => f.name.toLowerCase().endsWith(".csv"));
       filesEl.textContent = files.length ? files.length + " CSV file(s): " + files.map(f => f.name).join(", ") : "No files selected";
-      btn.disabled = files.length === 0;
-    }
+      onChange(files);
+    };
     drop.addEventListener("click", () => input.click());
     input.addEventListener("change", () => setFiles(input.files));
     ["dragover", "dragenter"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
     ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
     drop.addEventListener("drop", e => setFiles(e.dataTransfer.files));
+    return () => files;
+  }
 
-    btn.addEventListener("click", async () => {
-      const errEl = el.querySelector("#wsUpErr"); errEl.style.display = "none";
-      const status = el.querySelector("#wsStatus");
-      const fd = new FormData();
-      fd.append("client", el.querySelector("#wsClient").value);
-      fd.append("period", el.querySelector("#wsPeriod").value.trim() || "unspecified");
-      files.forEach(f => fd.append("files", f, f.name));
-      btn.disabled = true; status.textContent = "Uploading & ingesting…";
+  async function renderWsUpload(el) {
+    el.className = "view ws";
+    let clients = [];
+    try { clients = await api("GET", "/api/clients"); } catch (e) {}
+    const now = new Date();
+    const defPeriod = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+    const clientOpts = clients.map(c => `<option value="${esc(c.client_id)}">${esc(c.name)}</option>`).join("");
+
+    el.innerHTML = `<div class="view-head"><div><h2>Upload Data</h2>
+        <div class="sub">Drop Google Ads CSV exports. Use MCC mode for a manager-account download that spans several accounts.</div></div></div>
+      <div class="ws-row" style="margin-bottom:14px"><div class="seg-group">
+        <button class="seg-pill active" data-upmode="single">Single account</button>
+        <button class="seg-pill" data-upmode="mcc">MCC · multi-account</button></div></div>
+
+      <div id="upSingle">${clients.length ? `
+        <div class="ws-panel">
+          <div class="ws-row" style="margin-bottom:14px">
+            <select class="ws-select" id="wsClient">${clientOpts}</select>
+            <input class="ws-input" id="wsPeriod" value="${defPeriod}" placeholder="YYYY-MM" style="min-width:120px"/>
+          </div>
+          <div class="ws-drop" id="wsDrop"><div><strong>Drop CSV exports here</strong> or click to choose</div>
+            <div class="ws-note" id="wsFiles" style="margin-top:8px">No files selected</div>
+            <input type="file" id="wsFileInput" accept=".csv" multiple style="display:none"/></div>
+          <div class="ws-row" style="margin-top:14px"><button class="ws-btn primary" id="wsUpload" disabled>Upload &amp; ingest</button>
+            <span class="ws-note" id="wsStatus"></span></div>
+          <div class="ws-err" id="wsUpErr" style="display:none"></div>
+        </div>
+        <div class="ws-panel" id="wsResult" style="display:none"><h3>Result</h3><div id="wsResultBody"></div></div>`
+        : `<div class="ws-panel"><div class="ws-empty">No clients yet. Add one on the <a href="#" id="goClients">Clients</a> tab, or switch to MCC mode to create clients straight from the export.</div></div>`}
+      </div>
+
+      <div id="upMcc" style="display:none">
+        <div class="ws-panel">
+          <div class="ws-drop" id="mccDrop"><div><strong>Drop the MCC export CSV(s) here</strong> or click to choose</div>
+            <div class="ws-note" id="mccFiles" style="margin-top:8px">No files selected</div>
+            <input type="file" id="mccFileInput" accept=".csv" multiple style="display:none"/></div>
+          <div class="ws-row" style="margin-top:14px"><button class="ws-btn primary" id="mccPreview" disabled>Preview accounts</button>
+            <span class="ws-note" id="mccStatus"></span></div>
+          <div class="ws-err" id="mccErr" style="display:none"></div>
+        </div>
+        <div class="ws-panel" id="mccMapPanel" style="display:none">
+          <h3>Accounts in this export</h3>
+          <div class="ws-note" style="margin-bottom:10px">Confirm where each account's data goes, then commit. Matched accounts are pre-selected; unmatched default to creating a new client.</div>
+          <div class="tbl-wrap"><table class="ws-table"><thead><tr><th>Account</th><th>Customer ID</th><th class="ws-num">Rows</th><th>Reports</th><th>Maps to</th></tr></thead>
+            <tbody id="mccMapBody"></tbody></table></div>
+          <div class="ws-row" style="margin-top:14px"><button class="ws-btn primary" id="mccCommit">Commit ingest</button>
+            <span class="ws-note" id="mccCommitStatus"></span></div>
+        </div>
+        <div class="ws-panel" id="mccResult" style="display:none"><h3>Ingested</h3><div id="mccResultBody"></div></div>
+      </div>`;
+
+    el.querySelectorAll("[data-upmode]").forEach(b => b.addEventListener("click", () => {
+      el.querySelectorAll("[data-upmode]").forEach(x => x.classList.toggle("active", x === b));
+      el.querySelector("#upSingle").style.display = b.dataset.upmode === "single" ? "" : "none";
+      el.querySelector("#upMcc").style.display = b.dataset.upmode === "mcc" ? "" : "none";
+    }));
+    const goC = el.querySelector("#goClients"); if (goC) goC.addEventListener("click", e => { e.preventDefault(); setView("ws-clients"); });
+
+    // ---- single-account ----
+    if (clients.length) {
+      const btn = el.querySelector("#wsUpload");
+      const getFiles = wireDrop(el.querySelector("#wsDrop"), el.querySelector("#wsFileInput"), el.querySelector("#wsFiles"),
+        fs => { btn.disabled = fs.length === 0; });
+      btn.addEventListener("click", async () => {
+        const errEl = el.querySelector("#wsUpErr"); errEl.style.display = "none";
+        const status = el.querySelector("#wsStatus");
+        const fd = new FormData();
+        fd.append("client", el.querySelector("#wsClient").value);
+        fd.append("period", el.querySelector("#wsPeriod").value.trim() || "unspecified");
+        getFiles().forEach(f => fd.append("files", f, f.name));
+        btn.disabled = true; status.textContent = "Uploading & ingesting…";
+        try {
+          const res = await api("POST", "/api/upload", { form: fd });
+          status.textContent = "Done.";
+          const loaded = res.loaded.map(r => `<tr><td>${esc(r.report_type)}</td><td class="ws-num">${(r.rows || 0).toLocaleString()}</td></tr>`).join("");
+          el.querySelector("#wsResult").style.display = "";
+          el.querySelector("#wsResultBody").innerHTML = `
+            <div class="ws-note" style="margin-bottom:10px">Loaded <strong>${res.loaded.length}</strong> report(s)${res.unmapped.length ? `, skipped ${res.unmapped.length} unmapped file(s)` : ""}.</div>
+            <table class="ws-table" style="margin-bottom:16px"><thead><tr><th>Report</th><th class="ws-num">Rows</th></tr></thead><tbody>${loaded}</tbody></table>
+            <h3>Coverage</h3>${invTables(res.inventory)}`;
+        } catch (e) { errEl.textContent = e.message; errEl.style.display = "block"; status.textContent = ""; }
+        finally { btn.disabled = getFiles().length === 0; }
+      });
+    }
+
+    // ---- MCC multi-account ----
+    let preview = null;
+    const mccBtn = el.querySelector("#mccPreview");
+    const getMccFiles = wireDrop(el.querySelector("#mccDrop"), el.querySelector("#mccFileInput"), el.querySelector("#mccFiles"),
+      fs => { mccBtn.disabled = fs.length === 0; });
+    mccBtn.addEventListener("click", async () => {
+      const status = el.querySelector("#mccStatus"), errEl = el.querySelector("#mccErr"); errEl.style.display = "none";
+      const fd = new FormData(); getMccFiles().forEach(f => fd.append("files", f, f.name));
+      mccBtn.disabled = true; status.textContent = "Parsing accounts…";
       try {
-        const res = await api("POST", "/api/upload", { form: fd });
-        status.textContent = "Done.";
-        const loaded = res.loaded.map(r => `<tr><td>${esc(r.report_type)}</td><td class="ws-num">${(r.rows || 0).toLocaleString()}</td></tr>`).join("");
-        el.querySelector("#wsResult").style.display = "";
-        el.querySelector("#wsResultBody").innerHTML = `
-          <div class="ws-note" style="margin-bottom:10px">Loaded <strong>${res.loaded.length}</strong> report(s)${res.unmapped.length ? `, skipped ${res.unmapped.length} unmapped file(s)` : ""}.</div>
-          <table class="ws-table" style="margin-bottom:16px"><thead><tr><th>Report</th><th class="ws-num">Rows</th></tr></thead><tbody>${loaded}</tbody></table>
-          <h3>Coverage</h3>${invTables(res.inventory)}`;
+        preview = await api("POST", "/api/upload/mcc/preview", { form: fd });
+        status.textContent = `${preview.accounts.length} account(s) across ${preview.files.length} file(s)` +
+          (preview.unknown_files.length ? ` · ${preview.unknown_files.length} unrecognized file(s) will be skipped` : "");
+        el.querySelector("#mccMapBody").innerHTML = preview.accounts.map(a => {
+          const reps = Object.entries(a.reports).map(([k, v]) => `${esc(k)} (${v})`).join(", ");
+          const opts = `<option value="__new__" ${a.client_id ? "" : "selected"}>＋ Create new: ${esc(a.account_name || a.suggested_slug)}</option>` +
+            clients.map(c => `<option value="${esc(c.client_id)}" ${a.client_id === c.client_id ? "selected" : ""}>${esc(c.name)}</option>`).join("");
+          return `<tr><td class="strong">${esc(a.account_name || "—")}</td><td>${esc(a.customer_id || "—")}</td>
+            <td class="ws-num">${(a.rows || 0).toLocaleString()}</td><td class="ws-note">${reps}</td>
+            <td><select class="ws-select" data-mcckey="${esc(a.key)}">${opts}</select></td></tr>`;
+        }).join("");
+        el.querySelector("#mccMapPanel").style.display = "";
       } catch (e) { errEl.textContent = e.message; errEl.style.display = "block"; status.textContent = ""; }
-      finally { btn.disabled = files.length === 0; }
+      finally { mccBtn.disabled = getMccFiles().length === 0; }
+    });
+    el.querySelector("#mccCommit").addEventListener("click", async () => {
+      if (!preview) return;
+      const cs = el.querySelector("#mccCommitStatus"); cs.textContent = "Ingesting…";
+      const byKey = {}; preview.accounts.forEach(a => byKey[a.key] = a);
+      const mapping = {};
+      el.querySelectorAll("[data-mcckey]").forEach(sel => {
+        const a = byKey[sel.dataset.mcckey], val = sel.value;
+        mapping[sel.dataset.mcckey] = val === "__new__"
+          ? { create: true, name: a.account_name || sel.dataset.mcckey, slug: a.suggested_slug, customer_id: a.customer_id }
+          : { client_id: val, customer_id: a.customer_id };
+      });
+      try {
+        const res = await api("POST", "/api/upload/mcc/commit", { json: { batch_id: preview.batch_id, mapping } });
+        cs.textContent = "Done.";
+        const byClient = {}; res.ingested.forEach(r => { byClient[r.client_id] = (byClient[r.client_id] || 0) + r.rows; });
+        const body = Object.entries(byClient).map(([c, n]) => `<tr><td>${esc(c)}</td><td class="ws-num">${n.toLocaleString()}</td></tr>`).join("");
+        el.querySelector("#mccResult").style.display = "";
+        el.querySelector("#mccResultBody").innerHTML = `
+          <div class="ws-note" style="margin-bottom:10px">Ingested into <strong>${Object.keys(byClient).length}</strong> account(s)${res.skipped.length ? `, skipped ${res.skipped.length}` : ""}. Reload to see new clients in the switcher.</div>
+          <table class="ws-table"><thead><tr><th>Client</th><th class="ws-num">Rows</th></tr></thead><tbody>${body}</tbody></table>`;
+      } catch (e) { cs.textContent = "Error: " + e.message; }
     });
   }
 
