@@ -8,6 +8,7 @@ Run locally:  py -m uvicorn backend.main:app --reload --port 8000
 Railway:      Procfile -> uvicorn backend.main:app --host 0.0.0.0 --port $PORT
 """
 import uuid
+import zlib
 from pathlib import Path
 from typing import Optional, List
 
@@ -125,6 +126,36 @@ def _safe_seg(*parts):
             raise HTTPException(400, "invalid client or period")
 
 
+UPLOAD_CHUNK = 1024 * 1024  # 1 MB
+
+
+async def _save_upload(f, dest_dir):
+    """Stream an uploaded file to disk in 1 MB chunks (constant memory, no full read
+    into RAM). Files gzipped by the browser (.csv.gz) are gunzipped on the way in, so
+    everything downstream still sees a plain .csv. Returns the saved Path, or None if
+    the upload isn't a .csv / .csv.gz."""
+    fname = f.filename or ""
+    low = fname.lower()
+    if low.endswith(".gz"):
+        out_name = Path(fname[:-3]).name            # strip .gz -> .csv
+        dec = zlib.decompressobj(16 + zlib.MAX_WBITS)   # gzip stream
+    elif low.endswith(".csv"):
+        out_name = Path(fname).name
+        dec = None
+    else:
+        return None
+    dest_path = dest_dir / out_name
+    with open(dest_path, "wb") as out:
+        while True:
+            chunk = await f.read(UPLOAD_CHUNK)
+            if not chunk:
+                break
+            out.write(dec.decompress(chunk) if dec else chunk)
+        if dec:
+            out.write(dec.flush())
+    return dest_path
+
+
 @app.post("/api/upload")
 async def upload(background: BackgroundTasks, client: str = Form(...), period: str = Form(...),
                  files: List[UploadFile] = File(...)):
@@ -133,11 +164,8 @@ async def upload(background: BackgroundTasks, client: str = Form(...), period: s
     dest.mkdir(parents=True, exist_ok=True)
     saved = 0
     for f in files:
-        if not f.filename.lower().endswith(".csv"):
-            continue
-        with open(dest / Path(f.filename).name, "wb") as out:
-            out.write(await f.read())
-        saved += 1
+        if await _save_upload(f, dest):
+            saved += 1
     if saved == 0:
         raise HTTPException(400, "no .csv files in upload")
     job_id = uuid.uuid4().hex[:12]
@@ -167,11 +195,8 @@ async def mcc_preview(files: List[UploadFile] = File(...)):
     dest.mkdir(parents=True, exist_ok=True)
     saved = 0
     for f in files:
-        if not (f.filename or "").lower().endswith(".csv"):
-            continue
-        with open(dest / Path(f.filename).name, "wb") as out:
-            out.write(await f.read())
-        saved += 1
+        if await _save_upload(f, dest):
+            saved += 1
     if saved == 0:
         raise HTTPException(400, "no .csv files in upload")
     result = await run_in_threadpool(service.preview_mcc, str(dest), engine=_engine)
