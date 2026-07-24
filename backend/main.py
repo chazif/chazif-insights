@@ -7,12 +7,14 @@ Serves the static frontend, the per-client DATA bundle, and the admin API
 Run locally:  py -m uvicorn backend.main:app --reload --port 8000
 Railway:      Procfile -> uvicorn backend.main:app --host 0.0.0.0 --port $PORT
 """
+import uuid
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form, Request
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form, Request, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from engine.ingest import service
@@ -27,6 +29,24 @@ UPLOADS = ROOT / "data" / "uploads"
 
 app = FastAPI(title="SearchNex AE", version="0.3.0")
 _engine = get_engine()
+
+# Ingestion is heavy (parse + insert of large exports). Doing it inside the request
+# blocks the worker long enough that Railway's edge times the connection out with a
+# 502. Instead we run it as a background job and let the UI poll for completion.
+_JOBS = {}   # job_id -> {"status": processing|done|error, "result"/"error": ...}
+
+
+def _run_job(job_id, fn):
+    """Run a blocking ingest fn in the threadpool and record its result on the job."""
+    try:
+        _JOBS[job_id] = {"status": "done", "result": fn()}
+    except ValueError as e:
+        _JOBS[job_id] = {"status": "error", "error": str(e)}
+    except Exception as e:                       # noqa: BLE001 — surface any ingest failure
+        _JOBS[job_id] = {"status": "error", "error": f"{type(e).__name__}: {e}"}
+    if len(_JOBS) > 100:                          # keep the registry small
+        for k in list(_JOBS)[:-50]:
+            _JOBS.pop(k, None)
 
 
 @app.middleware("http")
@@ -106,7 +126,7 @@ def _safe_seg(*parts):
 
 
 @app.post("/api/upload")
-async def upload(client: str = Form(...), period: str = Form(...),
+async def upload(background: BackgroundTasks, client: str = Form(...), period: str = Form(...),
                  files: List[UploadFile] = File(...)):
     _safe_seg(client, period)
     dest = UPLOADS / client / period
@@ -120,10 +140,18 @@ async def upload(client: str = Form(...), period: str = Form(...),
         saved += 1
     if saved == 0:
         raise HTTPException(400, "no .csv files in upload")
-    try:
-        return service.ingest_folder(client, str(dest), engine=_engine)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    job_id = uuid.uuid4().hex[:12]
+    _JOBS[job_id] = {"status": "processing"}
+    background.add_task(_run_job, job_id, lambda: service.ingest_folder(client, str(dest), engine=_engine))
+    return {"job_id": job_id, "status": "processing"}
+
+
+@app.get("/api/upload/status/{job_id}")
+def upload_status(job_id: str):
+    j = _JOBS.get(job_id)
+    if not j:
+        raise HTTPException(404, "unknown or expired job")
+    return j
 
 
 MCC_STAGE = UPLOADS / "_mcc"
@@ -146,20 +174,24 @@ async def mcc_preview(files: List[UploadFile] = File(...)):
         saved += 1
     if saved == 0:
         raise HTTPException(400, "no .csv files in upload")
-    result = service.preview_mcc(str(dest), engine=_engine)
+    result = await run_in_threadpool(service.preview_mcc, str(dest), engine=_engine)
     result["batch_id"] = batch_id
     return result
 
 
 @app.post("/api/upload/mcc/commit")
-def mcc_commit(body: dict):
+def mcc_commit(body: dict, background: BackgroundTasks):
     batch_id = body.get("batch_id")
     if not batch_id or any(s in str(batch_id) for s in ("..", "/", "\\")):
         raise HTTPException(400, "invalid batch_id")
     dest = MCC_STAGE / batch_id
     if not dest.is_dir():
         raise HTTPException(404, "batch not found (re-run preview)")
-    return service.commit_mcc(str(dest), body.get("mapping") or {}, engine=_engine)
+    mapping = body.get("mapping") or {}
+    job_id = uuid.uuid4().hex[:12]
+    _JOBS[job_id] = {"status": "processing"}
+    background.add_task(_run_job, job_id, lambda: service.commit_mcc(str(dest), mapping, engine=_engine))
+    return {"job_id": job_id, "status": "processing"}
 
 
 @app.get("/api/inventory")
