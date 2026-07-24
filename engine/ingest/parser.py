@@ -149,6 +149,54 @@ def detect_report(header_slugs):
     return None
 
 
+def _read_google_header(f):
+    """Consume the 3-line Google header from an open file object.
+    Returns (window_raw, cols) or (None, None) if the file is too short."""
+    f.readline()                                   # line 1: report title (ignored)
+    window_line = f.readline()
+    header_line = f.readline()
+    if not header_line:
+        return None, None
+    window_raw = window_line.strip().strip('"').split('",')[0].strip('"')
+    header = next(csv.reader([header_line]))
+    while header and header[-1].strip() == "":
+        header.pop()
+    return window_raw, dedupe([slug(h) for h in header])
+
+
+def stream_report(path):
+    """Streaming counterpart to parse_csv for large exports: returns (info, rows_iter)
+    where info carries report_type/columns/window_* and rows_iter yields cleaned row
+    dicts ONE AT A TIME (constant memory, no full materialization). Skips the unused
+    numeric-column scan. Returns (None, None) if the file is too short to parse.
+
+    The caller must fully consume rows_iter or call rows_iter.close() to release the
+    underlying file handle. csv.reader streams over the file object, so multi-line
+    quoted fields are handled correctly."""
+    f = open(path, encoding="utf-8-sig")
+    window_raw, cols = _read_google_header(f)
+    if not cols:
+        f.close()
+        return None, None
+    ws, we = parse_window(window_raw)
+    info = dict(report_type=detect_report(cols), columns=cols, window_raw=window_raw,
+                window_start=ws, window_end=we)
+
+    def rows_iter():
+        try:
+            for r in csv.reader(f):
+                if not r or r[0].strip().lower() == "total":
+                    continue
+                if all((c or "").strip() == "" for c in r):
+                    continue
+                r = r[: len(cols)] + [None] * (len(cols) - len(r))
+                yield {c: clean(v) for c, v in zip(cols, r)}
+        finally:
+            f.close()
+
+    return info, rows_iter()
+
+
 def parse_csv(path):
     """Return dict(report_type, columns, rows, window_raw, window_start, window_end,
     numeric_cols) where rows is a list of dict(slug->cleaned value)."""

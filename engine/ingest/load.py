@@ -12,7 +12,7 @@ Usage:
 import argparse, datetime, glob, json, os
 from sqlalchemy import delete, select, func
 
-from .parser import parse_csv, to_number, CORE_METRICS, ENTITY_COL, DATE_COL, EXPECTED_REPORTS
+from .parser import parse_csv, stream_report, to_number, CORE_METRICS, ENTITY_COL, DATE_COL, EXPECTED_REPORTS
 from .store import get_engine, init_db, uploads, raw_rows
 
 CHUNK = 5000
@@ -44,7 +44,9 @@ def _row_record(client_id, upload_id, rtype, idx, row):
 
 def replace_report(conn, client_id, rtype, rows, source_file, window_raw, window_start, window_end, now):
     """Snapshot-replace one client's rows for one report_type within an open transaction.
-    Reused by single-account (load_folder) and MCC (per-account) ingestion."""
+    Reused by single-account (load_folder) and MCC (per-account) ingestion. `rows` may be
+    a list OR a lazy iterator (streaming ingest) — it's consumed once, in CHUNK batches,
+    so peak memory stays flat regardless of file size. Returns the number of rows written."""
     preserve_fields = PRESERVE_ON_REUPLOAD.get(rtype)
     old = conn.execute(select(uploads.c.upload_id).where(
         (uploads.c.client_id == client_id) & (uploads.c.report_type == rtype))).scalars().all()
@@ -62,24 +64,27 @@ def replace_report(conn, client_id, rtype, rows, source_file, window_raw, window
         conn.execute(delete(raw_rows).where(raw_rows.c.upload_id.in_(old)))
         conn.execute(delete(uploads).where(uploads.c.upload_id.in_(old)))
 
+    # row_count is filled in after streaming, since `rows` may be a lazy iterator.
     res = conn.execute(uploads.insert().values(
         client_id=client_id, report_type=rtype, source_file=source_file,
         window_raw=window_raw, window_start=window_start, window_end=window_end,
-        row_count=len(rows), uploaded_at=now))
+        row_count=0, uploaded_at=now))
     upload_id = res.inserted_primary_key[0]
 
-    batch = []
-    for i, row in enumerate(rows):
+    batch, n = [], 0
+    for row in rows:
         if preserve:
             ov = preserve.get(_kw_key(row))
             if ov:
                 row = dict(row); row.update(ov)
-        batch.append(_row_record(client_id, upload_id, rtype, i, row))
+        batch.append(_row_record(client_id, upload_id, rtype, n, row))
+        n += 1
         if len(batch) >= CHUNK:
             conn.execute(raw_rows.insert(), batch); batch = []
     if batch:
         conn.execute(raw_rows.insert(), batch)
-    return upload_id
+    conn.execute(uploads.update().where(uploads.c.upload_id == upload_id).values(row_count=n))
+    return n
 
 
 def load_folder(client_id, folder, engine=None):
@@ -90,15 +95,19 @@ def load_folder(client_id, folder, engine=None):
     loaded, unmapped = [], []
     for path in sorted(glob.glob(os.path.join(folder, "*.csv"))):
         name = os.path.basename(path)
-        parsed = parse_csv(path)
-        if not parsed or not parsed["report_type"]:
+        info, rows = stream_report(path)          # streaming parse: constant memory
+        if not info:
             unmapped.append(name)
             continue
-        rtype, rows = parsed["report_type"], parsed["rows"]
+        if not info["report_type"]:
+            rows.close()                          # release the file handle we won't read
+            unmapped.append(name)
+            continue
+        rtype = info["report_type"]
         with engine.begin() as conn:
-            replace_report(conn, client_id, rtype, rows, name,
-                           parsed["window_raw"], parsed["window_start"], parsed["window_end"], now)
-        loaded.append((rtype, name, parsed["window_raw"], len(rows)))
+            n = replace_report(conn, client_id, rtype, rows, name,
+                               info["window_raw"], info["window_start"], info["window_end"], now)
+        loaded.append((rtype, name, info["window_raw"], n))
     return dict(loaded=loaded, unmapped=unmapped, engine=engine)
 
 
