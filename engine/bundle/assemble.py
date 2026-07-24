@@ -28,23 +28,37 @@ MONTHS = {m: i for i, m in enumerate(
     ["january", "february", "march", "april", "may", "june", "july",
      "august", "september", "october", "november", "december"], 1)}
 MABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+_MONTH_ABBR = {a.lower(): FULL_MONTHS[i].lower() for i, a in enumerate(MABBR)}  # 'mar' -> 'march'
+
+
+def _mk(yr, mo):
+    return (yr, mo, f"{yr}-{mo:02d}", f"{MABBR[mo-1]} {yr}") if 1 <= mo <= 12 else None
 
 
 def _month_key(label):
-    """'March 2026' -> (2026, 3, '2026-03', 'Mar 2026'); None if unparseable."""
+    """Normalize a Google Ads Month cell to (year, month, 'YYYY-MM', 'Mon YYYY'); None
+    if unparseable. Accepts the formats Report Editor emits across locales/settings:
+    'March 2026', 'Mar 2026', '2026-03', '2026-03-01', '3/2026', '03/01/2026'."""
     if not label:
         return None
-    parts = str(label).strip().split()
-    if len(parts) != 2:
-        return None
-    mo = MONTHS.get(parts[0].lower())
-    try:
-        yr = int(parts[1])
-    except ValueError:
-        return None
-    if not mo:
-        return None
-    return (yr, mo, f"{yr}-{mo:02d}", f"{MABBR[mo-1]} {yr}")
+    s = str(label).strip()
+    m = re.match(r"^(\d{4})-(\d{1,2})(?:-\d{1,2})?$", s)              # 2026-03 / 2026-03-15
+    if m:
+        return _mk(int(m.group(1)), int(m.group(2)))
+    m = re.match(r"^(\d{1,2})/(?:\d{1,2}/)?(\d{2,4})$", s)            # 3/2026 / 03/15/2026 (month first)
+    if m:
+        yr = int(m.group(2)); yr += 2000 if yr < 100 else 0
+        return _mk(yr, int(m.group(1)))
+    parts = s.split()                                                # March 2026 / Mar 2026
+    if len(parts) == 2:
+        mo = MONTHS.get(parts[0].lower()) or MONTHS.get(_MONTH_ABBR.get(parts[0][:3].lower(), ""))
+        try:
+            yr = int(parts[1])
+        except ValueError:
+            return None
+        if mo:
+            return _mk(yr, mo)
+    return None
 
 
 def _client_name(engine, client_id):
@@ -107,7 +121,7 @@ def _prior_month(cm):
     pm, py = cm["month"] - 1, cm["year"]
     if pm == 0:
         pm, py = 12, py - 1
-    return {"full": f"{FULL_MONTHS[pm-1]} {py}", "abbr": f"{MABBR[pm-1]} {py}"}
+    return {"year": py, "month": pm, "full": f"{FULL_MONTHS[pm-1]} {py}", "abbr": f"{MABBR[pm-1]} {py}"}
 
 
 def _yoy_prior(cm):
@@ -117,25 +131,32 @@ def _yoy_prior(cm):
             "full": f"{FULL_MONTHS[cm['month']-1]} {py}", "abbr": f"{MABBR[cm['month']-1]} {py}"}
 
 
-def _campaigns(engine, client_id, cm, keep=None):
-    """Per-campaign snapshot for the latest complete month + month-over-month deltas."""
+def _campaigns(engine, client_id, cm, keep=None, dateless=False):
+    """Per-campaign snapshot for the latest complete month + month-over-month deltas.
+    Rows are matched to a month via _month_key (robust to 'June 2026' / '2026-06' / ...).
+    When `dateless` (the export carries no parseable month), all rows are treated as the
+    current snapshot and there is no prior month to compare against."""
     keep = keep or (lambda d: True)
     prior = _prior_month(cm)
+    with engine.connect() as c:
+        allrows = c.execute(text(
+            "SELECT date, campaign, clicks, cost, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='campaign_performance'"), {"c": client_id}).all()
 
-    def month_map(label):
+    def month_map(target, allow_dateless):
         out = {}
-        with engine.connect() as c:
-            for camp, clicks, cost, conv, row in c.execute(text(
-                "SELECT campaign, clicks, cost, conversions, row FROM raw_rows "
-                "WHERE client_id=:c AND report_type='campaign_performance' AND date=:d"),
-                {"c": client_id, "d": label}):
-                if not keep(_asdict(row)):
-                    continue
-                out[camp] = {"clicks": _num(clicks), "cost": _num(cost), "conv": _num(conv),
-                             "type": _asdict(row).get("campaign_type", "")}
+        for date, camp, clicks, cost, conv, row in allrows:
+            mk = _month_key(date)
+            match = (mk[:2] == target) if mk else (allow_dateless and target == (cm["year"], cm["month"]))
+            if not match or not keep(_asdict(row)):
+                continue
+            e = out.setdefault(camp, {"clicks": 0.0, "cost": 0.0, "conv": 0.0,
+                                      "type": _asdict(row).get("campaign_type", "")})
+            e["clicks"] += _num(clicks); e["cost"] += _num(cost); e["conv"] += _num(conv)
         return out
 
-    cur, pri = month_map(cm["full"]), month_map(prior["full"])
+    cur = month_map((cm["year"], cm["month"]), dateless)
+    pri = month_map((prior["year"], prior["month"]), False)
     total_cost = sum(v["cost"] for v in cur.values())
     rows = []
     for camp, d in sorted(cur.items(), key=lambda kv: -kv[1]["cost"]):
@@ -238,7 +259,7 @@ def _budget_status(bud, act):
     return "over" if p > 1.05 else "under" if p < 0.9 else "on-track"
 
 
-def _budget_reconciliation(engine, client_id, cm, config):
+def _budget_reconciliation(engine, client_id, cm, config, dateless=False):
     """Reconcile the planned budget against actual spend for the latest complete month:
     a total budget-vs-actual, plus a per-category breakdown when the budget carries a
     category dimension (actual bucketed by product category from campaign names —
@@ -249,10 +270,12 @@ def _budget_reconciliation(engine, client_id, cm, config):
     if not total_budget:
         return None
     with engine.connect() as c:
-        rows = c.execute(text(
-            "SELECT campaign, cost FROM raw_rows WHERE client_id=:c "
-            "AND report_type='campaign_performance' AND date=:d"),
-            {"c": client_id, "d": cm["full"]}).all()
+        allrows = c.execute(text(
+            "SELECT date, campaign, cost FROM raw_rows WHERE client_id=:c "
+            "AND report_type='campaign_performance'"), {"c": client_id}).all()
+    target = (cm["year"], cm["month"])
+    rows = [(camp, cost) for date, camp, cost in allrows
+            if (_month_key(date)[:2] == target if _month_key(date) else dateless)]
     total_actual = round(sum(_num(cost) for _camp, cost in rows), 2)
 
     recon = {"month": cm["abbr"], "total_budget": round(total_budget, 2), "total_actual": total_actual,
@@ -285,28 +308,33 @@ def _budget_reconciliation(engine, client_id, cm, config):
     return recon
 
 
-def _budget(engine, client_id, cm, config, keep=None):
+def _budget(engine, client_id, cm, config, keep=None, dateless=False):
     """Monthly spend vs a configured monthly budget. Intra-month (daily) pacing needs
-    day-segmented exports; this reports monthly adherence and latest-month variance."""
+    day-segmented exports; this reports monthly adherence and latest-month variance.
+    A dateless export is reported as a single current-month bucket."""
     keep = keep or (lambda d: True)
     budget = _effective_budget(config)
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT date, cost, row FROM raw_rows WHERE client_id=:c "
-            "AND report_type='campaign_performance' AND date IS NOT NULL"), {"c": client_id}).all()
-    magg = defaultdict(float)
+            "AND report_type='campaign_performance'"), {"c": client_id}).all()
+    magg = defaultdict(float)      # (year, month) -> spend
     for date, cost, row in rows:
+        if not keep(_asdict(row)):
+            continue
         mk = _month_key(date)
-        if mk and keep(_asdict(row)):
-            magg[mk] += _num(cost)
-    series = sorted(magg.items(), key=lambda x: (x[0][0], x[0][1]))
-    series = [s for s in series if (s[0][0], s[0][1]) <= (cm["year"], cm["month"])]
+        if mk:
+            magg[mk[:2]] += _num(cost)
+        elif dateless:
+            magg[(cm["year"], cm["month"])] += _num(cost)
+    series = sorted(magg.items())
+    series = [s for s in series if s[0] <= (cm["year"], cm["month"])]
     months = [{
-        "month": mk[3], "spend": round(cost, 2),
+        "month": f"{MABBR[mo-1]} {yr}", "spend": round(cost, 2),
         "budget": round(budget, 2) if budget else None,
         "variance": round(cost - budget, 2) if budget else None,
         "pct": round(cost / budget, 4) if budget else None,
-    } for (mk, cost) in series[-12:]]
+    } for ((yr, mo), cost) in series[-12:]]
     latest = months[-1] if months else None
     status = None
     if latest and budget:
@@ -1598,6 +1626,57 @@ def _filters_meta(engine, client_id, config):
             "categories": categories, "brands": [brand_label] if brand_label else []}
 
 
+def _pct_frac(v):
+    """'34.78%' -> 0.3478; None for '--'/blank/unparseable (so fmt.pct renders '—')."""
+    if v is None:
+        return None
+    s = str(v).replace("%", "").replace(",", "").strip()
+    if s in ("", "--", "-"):
+        return None
+    try:
+        return float(s) / 100.0
+    except ValueError:
+        return None
+
+
+def _auction_insights_section(engine, client_id):
+    """Competitor share-of-voice from the Auction Insights export. Rows are per
+    day × campaign × domain; we average each share metric per domain across the
+    window. Returns {rows, count} or None if the report wasn't ingested."""
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT entity, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='auction_insights'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    FIELDS = {
+        "impr_share": "search_impr_share_auction_insights",
+        "overlap_rate": "search_overlap_rate",
+        "position_above": "position_above_rate",
+        "top_of_page": "top_of_page_rate",
+        "outranking": "search_outranking_share",
+    }
+    agg = defaultdict(lambda: {k: [0.0, 0] for k in FIELDS})   # metric -> [sum, count]
+    for ent, row in rows:
+        d = _asdict(row)
+        domain = (ent or d.get("display_url_domain") or "").strip()
+        if not domain:
+            continue
+        a = agg[domain]
+        for key, slug in FIELDS.items():
+            frac = _pct_frac(d.get(slug))
+            if frac is not None:
+                a[key][0] += frac
+                a[key][1] += 1
+    if not agg:
+        return None
+    avg = lambda p: round(p[0] / p[1], 4) if p[1] else None
+    out = [{"domain": dom, **{k: avg(a[k]) for k in FIELDS}} for dom, a in agg.items()]
+    # highest impression share first; "You" (the account itself) is kept in the list.
+    out.sort(key=lambda r: (r["impr_share"] is None, -(r["impr_share"] or 0)))
+    return {"rows": out, "count": len(out)}
+
+
 def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=None,
                  compare="yoy", compare_from=None, compare_to=None):
     """Return the DATA bundle dict for a client, or None if there's no campaign data.
@@ -1614,18 +1693,23 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
             return None
 
         # ---- monthly aggregates -> total_trend (row-level so the global filter applies) ----
-        rows = c.execute(text(
+        allrows = c.execute(text(
             "SELECT date, cost, clicks, conversions, row FROM raw_rows "
-            "WHERE client_id=:c AND report_type='campaign_performance' AND date IS NOT NULL"),
+            "WHERE client_id=:c AND report_type='campaign_performance'"),
             {"c": client_id}).all()
         magg = defaultdict(lambda: [0.0, 0.0, 0.0])
-        for date, cost, clicks, conv, row in rows:
+        for date, cost, clicks, conv, row in allrows:
             mk = _month_key(date)
             if not mk or not keep(_asdict(row)):
                 continue
             m = magg[mk]; m[0] += float(cost or 0); m[1] += float(clicks or 0); m[2] += float(conv or 0)
         series = [(mk, v[0], v[1], v[2]) for mk, v in magg.items()]
         series.sort(key=lambda x: (x[0][0], x[0][1]))
+
+        # A campaign_performance export with no parseable Month (no time segment, or a
+        # format we don't recognize) yields no series — fall back to a single snapshot
+        # for the export window so Business/Budget/Campaign still populate (no trend).
+        dateless = not series
 
         # keep only fully-covered months (drop the partial trailing export month), then
         # apply the requested date range at month granularity.
@@ -1641,6 +1725,14 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
             ly, lm = series[-1][0][0], series[-1][0][1]
             cm = {"year": ly, "month": lm, "ym": f"{ly}-{lm:02d}",
                   "full": f"{FULL_MONTHS[lm-1]} {ly}", "abbr": f"{MABBR[lm-1]} {ly}"}
+        elif dateless and cm:           # synthesize one period from the whole snapshot
+            agg = [0.0, 0.0, 0.0]
+            for date, cost, clicks, conv, row in allrows:
+                if not keep(_asdict(row)):
+                    continue
+                agg[0] += float(cost or 0); agg[1] += float(clicks or 0); agg[2] += float(conv or 0)
+            mk = (cm["year"], cm["month"], cm["ym"], cm["abbr"])
+            series = [(mk, agg[0], agg[1], agg[2])]
 
         total_trend = [{
             "Month": mk[2],
@@ -1707,11 +1799,11 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
     analyzer_findings = run_analyzers(engine, client_id, cm, config) if cm else []
     findings = _to_overview_findings(analyzer_findings)
     recommendations = _to_recommendations(analyzer_findings)
-    campaigns = _campaigns(engine, client_id, cm, keep) if cm else None
+    campaigns = _campaigns(engine, client_id, cm, keep, dateless) if cm else None
     geo = _geo(engine, client_id, keep)
-    budget = _budget(engine, client_id, cm, config, keep) if cm else None
+    budget = _budget(engine, client_id, cm, config, keep, dateless) if cm else None
     budget_sec = _budget_section(config)
-    budget_sec["reconciliation"] = _budget_reconciliation(engine, client_id, cm, config) if cm else None
+    budget_sec["reconciliation"] = _budget_reconciliation(engine, client_id, cm, config, dateless) if cm else None
     qscore = _quality_score(engine, client_id, cm, config, keep)
     qs_break = _qs_breakdown(engine, client_id, cm, config, keep)
     keyword = _keyword_section(engine, client_id, keep)
@@ -1811,5 +1903,5 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         "landing_pages_section": lps,
         "nb_categories_section": nb_cats,
         "regions_section": regions,
-        "auction_insights_section": None,   # populated once the Auction Insights export is ingested
+        "auction_insights_section": _auction_insights_section(engine, client_id),
     }
