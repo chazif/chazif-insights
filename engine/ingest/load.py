@@ -42,6 +42,46 @@ def _row_record(client_id, upload_id, rtype, idx, row):
     return rec
 
 
+def replace_report(conn, client_id, rtype, rows, source_file, window_raw, window_start, window_end, now):
+    """Snapshot-replace one client's rows for one report_type within an open transaction.
+    Reused by single-account (load_folder) and MCC (per-account) ingestion."""
+    preserve_fields = PRESERVE_ON_REUPLOAD.get(rtype)
+    old = conn.execute(select(uploads.c.upload_id).where(
+        (uploads.c.client_id == client_id) & (uploads.c.report_type == rtype))).scalars().all()
+
+    # capture QS-component values from the EXISTING rows before delete (keep earliest measured QS)
+    preserve = {}
+    if preserve_fields and old:
+        for (rj,) in conn.execute(select(raw_rows.c.row).where(raw_rows.c.upload_id.in_(old))):
+            d = rj if isinstance(rj, dict) else (json.loads(rj) if rj else {})
+            kept = {f: d.get(f) for f in preserve_fields if d.get(f) is not None}
+            if kept:
+                preserve[_kw_key(d)] = kept
+
+    if old:
+        conn.execute(delete(raw_rows).where(raw_rows.c.upload_id.in_(old)))
+        conn.execute(delete(uploads).where(uploads.c.upload_id.in_(old)))
+
+    res = conn.execute(uploads.insert().values(
+        client_id=client_id, report_type=rtype, source_file=source_file,
+        window_raw=window_raw, window_start=window_start, window_end=window_end,
+        row_count=len(rows), uploaded_at=now))
+    upload_id = res.inserted_primary_key[0]
+
+    batch = []
+    for i, row in enumerate(rows):
+        if preserve:
+            ov = preserve.get(_kw_key(row))
+            if ov:
+                row = dict(row); row.update(ov)
+        batch.append(_row_record(client_id, upload_id, rtype, i, row))
+        if len(batch) >= CHUNK:
+            conn.execute(raw_rows.insert(), batch); batch = []
+    if batch:
+        conn.execute(raw_rows.insert(), batch)
+    return upload_id
+
+
 def load_folder(client_id, folder, engine=None):
     engine = engine or get_engine()
     init_db(engine)
@@ -55,45 +95,9 @@ def load_folder(client_id, folder, engine=None):
             unmapped.append(name)
             continue
         rtype, rows = parsed["report_type"], parsed["rows"]
-
-        preserve_fields = PRESERVE_ON_REUPLOAD.get(rtype)
         with engine.begin() as conn:
-            # snapshot replace for this client + report
-            old = conn.execute(select(uploads.c.upload_id).where(
-                (uploads.c.client_id == client_id) & (uploads.c.report_type == rtype))).scalars().all()
-
-            # capture QS-component values from the EXISTING rows before we delete them,
-            # so a fresh export can't overwrite the earlier measured Quality Score.
-            preserve = {}
-            if preserve_fields and old:
-                for (rj,) in conn.execute(select(raw_rows.c.row).where(raw_rows.c.upload_id.in_(old))):
-                    d = rj if isinstance(rj, dict) else (json.loads(rj) if rj else {})
-                    kept = {f: d.get(f) for f in preserve_fields if d.get(f) is not None}
-                    if kept:
-                        preserve[_kw_key(d)] = kept
-
-            if old:
-                conn.execute(delete(raw_rows).where(raw_rows.c.upload_id.in_(old)))
-                conn.execute(delete(uploads).where(uploads.c.upload_id.in_(old)))
-
-            res = conn.execute(uploads.insert().values(
-                client_id=client_id, report_type=rtype, source_file=name,
-                window_raw=parsed["window_raw"], window_start=parsed["window_start"],
-                window_end=parsed["window_end"], row_count=len(rows), uploaded_at=now))
-            upload_id = res.inserted_primary_key[0]
-
-            batch = []
-            for i, row in enumerate(rows):
-                if preserve:                       # carry forward the earlier QS values
-                    ov = preserve.get(_kw_key(row))
-                    if ov:
-                        row = dict(row); row.update(ov)
-                batch.append(_row_record(client_id, upload_id, rtype, i, row))
-                if len(batch) >= CHUNK:
-                    conn.execute(raw_rows.insert(), batch); batch = []
-            if batch:
-                conn.execute(raw_rows.insert(), batch)
-
+            replace_report(conn, client_id, rtype, rows, name,
+                           parsed["window_raw"], parsed["window_start"], parsed["window_end"], now)
         loaded.append((rtype, name, parsed["window_raw"], len(rows)))
     return dict(loaded=loaded, unmapped=unmapped, engine=engine)
 

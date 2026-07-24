@@ -126,6 +126,42 @@ async def upload(client: str = Form(...), period: str = Form(...),
         raise HTTPException(400, str(e))
 
 
+MCC_STAGE = UPLOADS / "_mcc"
+
+
+@app.post("/api/upload/mcc/preview")
+async def mcc_preview(files: List[UploadFile] = File(...)):
+    """Stage an MCC export and report the accounts inside it (no writes). Returns a
+    batch_id to pass to /commit along with the confirmed account→client mapping."""
+    import uuid
+    batch_id = uuid.uuid4().hex[:12]
+    dest = MCC_STAGE / batch_id
+    dest.mkdir(parents=True, exist_ok=True)
+    saved = 0
+    for f in files:
+        if not (f.filename or "").lower().endswith(".csv"):
+            continue
+        with open(dest / Path(f.filename).name, "wb") as out:
+            out.write(await f.read())
+        saved += 1
+    if saved == 0:
+        raise HTTPException(400, "no .csv files in upload")
+    result = service.preview_mcc(str(dest), engine=_engine)
+    result["batch_id"] = batch_id
+    return result
+
+
+@app.post("/api/upload/mcc/commit")
+def mcc_commit(body: dict):
+    batch_id = body.get("batch_id")
+    if not batch_id or any(s in str(batch_id) for s in ("..", "/", "\\")):
+        raise HTTPException(400, "invalid batch_id")
+    dest = MCC_STAGE / batch_id
+    if not dest.is_dir():
+        raise HTTPException(404, "batch not found (re-run preview)")
+    return service.commit_mcc(str(dest), body.get("mapping") or {}, engine=_engine)
+
+
 @app.get("/api/inventory")
 def inventory(client: str = Query(...)):
     _safe_seg(client)

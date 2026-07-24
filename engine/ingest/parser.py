@@ -37,9 +37,22 @@ ENTITY_COL = {
     "audiences": "audience_segment",
     "products_sold": "product_title_sold",
     "distance_from_location": "distance_from_location_assets",
+    "auction_insights": "display_url_domain",
     "schedule_dow_hod": None,
 }
-DATE_COL = {"campaign_performance": "month", "schedule_dow_hod": "day"}
+DATE_COL = {"campaign_performance": "month", "schedule_dow_hod": "day", "auction_insights": "day"}
+
+# Account-identifying columns present only in MCC-level exports (Manager account).
+ACCOUNT_ID_SLUGS = ("customer_id", "account_id")
+ACCOUNT_NAME_SLUGS = ("account_name", "account")
+
+
+def account_cols(header_slugs):
+    """(customer_id_col, account_name_col) if this export is tagged by account, else (None, None)."""
+    cols = set(header_slugs)
+    cid = next((s for s in ACCOUNT_ID_SLUGS if s in cols), None)
+    nm = next((s for s in ACCOUNT_NAME_SLUGS if s in cols), None)
+    return cid, nm
 
 # ordered detection rules: (required slug present) -> report_type. Specific first.
 _DETECT = [
@@ -52,6 +65,7 @@ _DETECT = [
     ("item_id_sold", "products_sold"),
     ("product_title_sold", "products_sold"),
     ("distance_from_location_assets", "distance_from_location"),
+    ("display_url_domain", "auction_insights"),
     ("state_matched", "geographic"),
     ("headline_1", "ads_performance"),
     ("keywords_active", "ad_group_performance"),
