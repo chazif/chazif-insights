@@ -14,6 +14,17 @@
     if (!r.ok) throw new Error((data && data.detail) || ("HTTP " + r.status));
     return data;
   }
+  // Ingestion runs as a background job on the server (so long uploads don't time out
+  // the request → 502). Poll the job until it finishes; return its result or throw.
+  async function pollJob(jobId, onTick) {
+    while (true) {
+      const j = await api("GET", "/api/upload/status/" + encodeURIComponent(jobId));
+      if (j.status === "done") return j.result;
+      if (j.status === "error") throw new Error(j.error || "ingestion failed");
+      if (onTick) onTick();
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  }
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const REPORT_COUNT = 12; // expected report set size
 
@@ -193,9 +204,11 @@
         fd.append("client", el.querySelector("#wsClient").value);
         fd.append("period", el.querySelector("#wsPeriod").value.trim() || "unspecified");
         getFiles().forEach(f => fd.append("files", f, f.name));
-        btn.disabled = true; status.textContent = "Uploading & ingesting…";
+        btn.disabled = true; status.textContent = "Uploading…";
         try {
-          const res = await api("POST", "/api/upload", { form: fd });
+          const job = await api("POST", "/api/upload", { form: fd });
+          status.textContent = "Ingesting… (large files can take a minute)";
+          const res = await pollJob(job.job_id);
           status.textContent = "Done.";
           const loaded = res.loaded.map(r => `<tr><td>${esc(r.report_type)}</td><td class="ws-num">${(r.rows || 0).toLocaleString()}</td></tr>`).join("");
           el.querySelector("#wsResult").style.display = "";
@@ -245,7 +258,9 @@
           : { client_id: val, customer_id: a.customer_id };
       });
       try {
-        const res = await api("POST", "/api/upload/mcc/commit", { json: { batch_id: preview.batch_id, mapping } });
+        const job = await api("POST", "/api/upload/mcc/commit", { json: { batch_id: preview.batch_id, mapping } });
+        cs.textContent = "Ingesting… (large files can take a minute)";
+        const res = await pollJob(job.job_id);
         cs.textContent = "Done.";
         const byClient = {}; res.ingested.forEach(r => { byClient[r.client_id] = (byClient[r.client_id] || 0) + r.rows; });
         const body = Object.entries(byClient).map(([c, n]) => `<tr><td>${esc(c)}</td><td class="ws-num">${n.toLocaleString()}</td></tr>`).join("");
