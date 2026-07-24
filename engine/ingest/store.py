@@ -12,7 +12,7 @@ The normalized dimensional model (Layer 2) is built on top of this in Phase 2.
 import os
 from pathlib import Path
 from sqlalchemy import (create_engine, MetaData, Table, Column, Integer, BigInteger,
-                        String, Float, Date, DateTime, JSON, ForeignKey, Index)
+                        String, Float, Date, DateTime, JSON, ForeignKey, Index, inspect, text)
 
 REPO = Path(__file__).resolve().parents[2]
 metadata = MetaData()
@@ -21,6 +21,8 @@ clients = Table(
     "clients", metadata,
     Column("client_id", String(64), primary_key=True),   # slug, e.g. "chiarelli"
     Column("name", String(256), nullable=False),          # display name
+    Column("google_customer_id", String(32)),             # Google Ads CID (digits), the MCC-export join key
+    Column("mcc_id", String(64)),                         # parent manager account (for owner rollups)
     Column("created_at", DateTime),
     Column("config", JSON),                               # business context + complexity profile (Phase 3)
 )
@@ -90,3 +92,9 @@ def get_engine(url=None, echo=False):
 
 def init_db(engine):
     metadata.create_all(engine)
+    # add-column-if-missing migration for existing DBs (SQLite + Postgres both take this form)
+    have = {c["name"] for c in inspect(engine).get_columns("clients")}
+    for col in ("google_customer_id", "mcc_id"):
+        if col not in have:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE clients ADD COLUMN {col} VARCHAR(64)"))
