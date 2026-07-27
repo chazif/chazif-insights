@@ -1093,28 +1093,34 @@ def _nb_categories(engine, client_id, cm, config, keep=None, compare="yoy"):
              for c in (config.get("product_categories") or [])}
     brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
 
-    def month_agg(full_label):
+    with engine.connect() as c:
+        allrows = c.execute(text(
+            "SELECT date, campaign, cost, conversions FROM raw_rows WHERE client_id=:c "
+            "AND report_type='campaign_performance'"), {"c": client_id}).all()
+    order = _slash_order(r[0] for r in allrows)
+    dateless = not any(_month_key(r[0], order) for r in allrows)
+
+    def month_agg(target, allow_dateless):
         agg = defaultdict(lambda: [0.0, 0.0])  # spend, conv
-        with engine.connect() as c:
-            for camp, cost, conv in c.execute(text(
-                "SELECT campaign, cost, conversions FROM raw_rows WHERE client_id=:c "
-                "AND report_type='campaign_performance' AND date=:d"),
-                {"c": client_id, "d": full_label}):
-                if not keep({"campaign": camp}):
-                    continue
-                cat = _nb_category_of(camp, catkw, brand_terms)
-                if cat is None:
-                    continue
-                a = agg[cat]; a[0] += _num(cost); a[1] += _num(conv)
+        for date, camp, cost, conv in allrows:
+            mk = _month_key(date, order)
+            match = (mk[:2] == target) if mk else (allow_dateless and target == (cm["year"], cm["month"]))
+            if not match or not keep({"campaign": camp}):
+                continue
+            cat = _nb_category_of(camp, catkw, brand_terms)
+            if cat is None:
+                continue
+            a = agg[cat]; a[0] += _num(cost); a[1] += _num(conv)
         return agg
 
     prior = _prior_month(cm) if compare in ("mom", "custom") else _yoy_prior(cm)
-    cur_agg, pri_agg = month_agg(cm["full"]), month_agg(prior["full"])
+    cur_agg = month_agg((cm["year"], cm["month"]), dateless)
+    pri_agg = month_agg((prior["year"], prior["month"]), False)
     if not cur_agg and not pri_agg:
         return None
-    if not pri_agg and compare not in ("mom", "custom"):   # < 1yr of history -> prior month
+    if not pri_agg and compare not in ("mom", "custom") and not dateless:   # < 1yr of history -> prior month
         prior = _prior_month(cm)
-        pri_agg = month_agg(prior["full"])
+        pri_agg = month_agg((prior["year"], prior["month"]), False)
 
     def chg(cur, prev):
         return round((cur - prev) / prev, 4) if prev else None
@@ -1160,31 +1166,37 @@ def _regions(engine, client_id, cm, config, keep=None, compare="yoy"):
              for c in (config.get("product_categories") or [])}
     brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
 
-    def month_cells(full_label):
+    with engine.connect() as c:
+        allrows = c.execute(text(
+            "SELECT date, campaign, cost, conversions FROM raw_rows WHERE client_id=:c "
+            "AND report_type='campaign_performance'"), {"c": client_id}).all()
+    order = _slash_order(r[0] for r in allrows)
+    dateless = not any(_month_key(r[0], order) for r in allrows)
+
+    def month_cells(target, allow_dateless):
         agg = defaultdict(lambda: [0.0, 0.0])  # (region, category) -> spend, conv
-        with engine.connect() as c:
-            for camp, cost, conv in c.execute(text(
-                "SELECT campaign, cost, conversions FROM raw_rows WHERE client_id=:c "
-                "AND report_type='campaign_performance' AND date=:d"),
-                {"c": client_id, "d": full_label}):
-                if not keep({"campaign": camp}):
-                    continue
-                cat = _nb_category_of(camp, catkw, brand_terms)
-                if cat is None:                 # brand campaign
-                    continue
-                region = _region_of(camp)
-                if region is None:              # not region-segmented
-                    continue
-                a = agg[(region, cat)]; a[0] += _num(cost); a[1] += _num(conv)
+        for date, camp, cost, conv in allrows:
+            mk = _month_key(date, order)
+            match = (mk[:2] == target) if mk else (allow_dateless and target == (cm["year"], cm["month"]))
+            if not match or not keep({"campaign": camp}):
+                continue
+            cat = _nb_category_of(camp, catkw, brand_terms)
+            if cat is None:                 # brand campaign
+                continue
+            region = _region_of(camp)
+            if region is None:              # not region-segmented
+                continue
+            a = agg[(region, cat)]; a[0] += _num(cost); a[1] += _num(conv)
         return agg
 
     prior = _prior_month(cm) if compare in ("mom", "custom") else _yoy_prior(cm)
-    cur_agg, pri_agg = month_cells(cm["full"]), month_cells(prior["full"])
+    cur_agg = month_cells((cm["year"], cm["month"]), dateless)
+    pri_agg = month_cells((prior["year"], prior["month"]), False)
     if not cur_agg and not pri_agg:
         return None
-    if not pri_agg and compare not in ("mom", "custom"):
+    if not pri_agg and compare not in ("mom", "custom") and not dateless:
         prior = _prior_month(cm)
-        pri_agg = month_cells(prior["full"])
+        pri_agg = month_cells((prior["year"], prior["month"]), False)
 
     cats, cells = set(), []
     for key in sorted(set(cur_agg) | set(pri_agg)):
