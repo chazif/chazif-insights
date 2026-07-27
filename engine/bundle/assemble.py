@@ -12,7 +12,7 @@ from collections import defaultdict
 from sqlalchemy import text, select, func
 from ..ingest.store import get_engine, clients, uploads
 from ..ingest.service import get_config
-from ..ingest.parser import GEO_SLUGS
+from ..ingest.parser import GEO_SLUGS, impr_share_frac
 from ..analyze.analyzers import run_analyzers, _asdict, _num
 
 FULL_MONTHS = ["January", "February", "March", "April", "May", "June",
@@ -1664,29 +1664,27 @@ def _filters_meta(engine, client_id, config):
             "categories": categories, "brands": [brand_label] if brand_label else []}
 
 
-def _pct_frac(v):
-    """'34.78%' -> 0.3478; None for '--'/blank/unparseable (so fmt.pct renders '—')."""
-    if v is None:
-        return None
-    s = str(v).replace("%", "").replace(",", "").strip()
-    if s in ("", "--", "-"):
-        return None
-    try:
-        return float(s) / 100.0
-    except ValueError:
-        return None
-
-
 def _auction_insights_section(engine, client_id):
-    """Competitor share-of-voice from the Auction Insights export. Rows are per
-    day × campaign × domain; we average each share metric per domain across the
-    window. Returns {rows, count} or None if the report wasn't ingested."""
+    """Competitor share-of-voice from the Auction Insights export (per day × campaign ×
+    domain). Each share metric is IMPRESSION-WEIGHTED per domain, not averaged: the
+    weight is our own campaign impressions for that (campaign, day) — Google reports a
+    competitor's share only over the auctions we were eligible for, so our impression
+    count is the shared denominator. Falls back to an equal-weighted average for a
+    domain when no (campaign, day) impressions can be joined (e.g. campaign_performance
+    not yet re-uploaded at day level). Returns {rows, count, weighted} or None."""
     with engine.connect() as c:
         rows = c.execute(text(
-            "SELECT entity, row FROM raw_rows "
+            "SELECT entity, campaign, date_norm, row FROM raw_rows "
             "WHERE client_id=:c AND report_type='auction_insights'"), {"c": client_id}).all()
-    if not rows:
-        return None
+        if not rows:
+            return None
+        our_impr = defaultdict(float)   # (campaign, day) -> our impressions
+        for camp, dn, impr in c.execute(text(
+                "SELECT campaign, date_norm, impressions FROM raw_rows "
+                "WHERE client_id=:c AND report_type='campaign_performance'"), {"c": client_id}):
+            if impr:
+                our_impr[(camp, dn)] += float(impr)
+
     FIELDS = {
         "impr_share": "search_impr_share_auction_insights",
         "overlap_rate": "search_overlap_rate",
@@ -1694,25 +1692,40 @@ def _auction_insights_section(engine, client_id):
         "top_of_page": "top_of_page_rate",
         "outranking": "search_outranking_share",
     }
-    agg = defaultdict(lambda: {k: [0.0, 0] for k in FIELDS})   # metric -> [sum, count]
-    for ent, row in rows:
+    wsum = defaultdict(lambda: {k: [0.0, 0.0] for k in FIELDS})   # [Σ share*w, Σ w]
+    flat = defaultdict(lambda: {k: [0.0, 0] for k in FIELDS})     # fallback [Σ share, count]
+    any_weighted = False
+    for ent, camp, dn, row in rows:
         d = _asdict(row)
         domain = (ent or d.get("display_url_domain") or "").strip()
         if not domain:
             continue
-        a = agg[domain]
+        w = our_impr.get((camp, dn), 0.0)
+        if w > 0:
+            any_weighted = True
+        aw, af = wsum[domain], flat[domain]
         for key, slug in FIELDS.items():
-            frac = _pct_frac(d.get(slug))
-            if frac is not None:
-                a[key][0] += frac
-                a[key][1] += 1
-    if not agg:
+            frac = impr_share_frac(d.get(slug))
+            if frac is None:
+                continue
+            if w > 0:
+                aw[key][0] += frac * w
+                aw[key][1] += w
+            af[key][0] += frac
+            af[key][1] += 1
+    if not flat:
         return None
-    avg = lambda p: round(p[0] / p[1], 4) if p[1] else None
-    out = [{"domain": dom, **{k: avg(a[k]) for k in FIELDS}} for dom, a in agg.items()]
-    # highest impression share first; "You" (the account itself) is kept in the list.
+
+    def value(domain, key):
+        sw, w = wsum[domain][key]
+        if w > 0:
+            return round(sw / w, 4)
+        s, n = flat[domain][key]                 # no joinable impressions -> equal-weighted
+        return round(s / n, 4) if n else None
+
+    out = [{"domain": dom, **{k: value(dom, k) for k in FIELDS}} for dom in flat]
     out.sort(key=lambda r: (r["impr_share"] is None, -(r["impr_share"] or 0)))
-    return {"rows": out, "count": len(out)}
+    return {"rows": out, "count": len(out), "weighted": any_weighted}
 
 
 def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=None,
