@@ -5,7 +5,7 @@ import datetime, re, os, glob
 from collections import defaultdict
 from sqlalchemy import select, func, insert, update
 from .store import get_engine, init_db, clients, uploads, raw_rows, term_relevance
-from .parser import EXPECTED_REPORTS, parse_csv, account_cols
+from .parser import EXPECTED_REPORTS, parse_csv, account_cols, date_column, infer_date_order
 from .load import load_folder, replace_report
 from ..clientconfig import sanitize, merged
 
@@ -153,6 +153,8 @@ def commit_mcc(folder, mapping, engine=None):
             continue
         rtype = parsed["report_type"]
         cidc, namec = account_cols(parsed["columns"])
+        date_col = date_column(parsed["columns"])
+        order = infer_date_order(r.get(date_col) for r in parsed["rows"]) if date_col else "mdy"
         groups = defaultdict(list)
         if not (cidc or namec):
             groups["__single__:" + name] = parsed["rows"]
@@ -165,7 +167,8 @@ def commit_mcc(folder, mapping, engine=None):
                 if not client_id:
                     skipped.append({"key": key, "report_type": rtype, "rows": len(rows)}); continue
                 replace_report(conn, client_id, rtype, rows, name,
-                               parsed["window_raw"], parsed["window_start"], parsed["window_end"], now)
+                               parsed["window_raw"], parsed["window_start"], parsed["window_end"], now,
+                               date_col=date_col, order=order)
                 results.append({"client_id": client_id, "report_type": rtype, "rows": len(rows), "file": name})
     return {"ingested": results, "skipped": skipped}
 
