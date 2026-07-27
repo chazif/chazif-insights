@@ -191,9 +191,12 @@
   select:focus, input[type="text"]:focus { border-color: var(--ink); }
 
   /* Tables */
-  .tbl-wrap { overflow-x: auto; border: 1px solid var(--hairline); border-radius: 10px; background: var(--paper); }
+  .tbl-wrap { overflow: auto; max-height: 70vh; border: 1px solid var(--hairline); border-radius: 10px; background: var(--paper); }
   table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 640px; }
-  thead { background: var(--panel); border-bottom: 1px solid var(--hairline); position: sticky; top: 0; }
+  thead { background: var(--panel); }
+  /* Frozen column headers: sticky on the cells (survives border-collapse) with a
+     shadow underline that persists while the table body scrolls. */
+  thead th { position: sticky; top: 0; z-index: 2; background: var(--panel); box-shadow: inset 0 -1px 0 var(--hairline); }
   th, td { padding: 10px 12px; text-align: left; vertical-align: top; }
   th { font-size: 11px; color: var(--grey-700); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; border-bottom: 1px solid var(--hairline);}
   th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -215,7 +218,9 @@
   #lcTbl thead th:first-child { background: var(--panel); z-index: 3; }
   #lcTbl tr:hover td.url { background: #FAFBFC; }
   /* Sortable headers */
-  th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 22px; }
+  /* no position:relative here — it would beat the sticky header; sticky already
+     provides the positioning context the sort-arrow ::after needs. */
+  th.sortable { cursor: pointer; user-select: none; padding-right: 22px; }
   th.sortable:hover { color: var(--ink); background: #f3f4f6; }
   th.sortable::after { content: "\2195"; position: absolute; right: 8px; opacity: .35; font-size: 10px; top: 50%; transform: translateY(-50%); }
   th.sortable.asc::after  { content: "\25B2"; opacity: 1; color: var(--ink); }
