@@ -169,7 +169,34 @@ def clean(v):
     if v is None:
         return None
     v = v.strip().strip('"').strip()
-    return None if v in ("--", "", "< 10%", "<0.1") else v
+    # NB: "< 10%" is kept (not nulled) — it's a Google impression-share bucket that
+    # impr_share_frac() maps to 0.05. It only ever appears in share columns.
+    return None if v in ("--", "", "<0.1") else v
+
+
+# Column slugs that carry a Search impression share (entity reports: campaign / ad
+# group / keyword). NOT the auction-insights one (search_impr_share_auction_insights),
+# which is handled separately with a campaign×day join.
+SHARE_SLUGS = ("search_impr_share", "search_impression_share", "impr_share", "impression_share")
+
+
+def impr_share_frac(v):
+    """Impression-share cell -> fraction. Google buckets the extremes and can't give an
+    exact value there, so (per product decision) '< 10%' -> 0.05 and '> 90%' -> 0.95.
+    '34.78%' -> 0.3478; '--'/blank -> None."""
+    if v is None:
+        return None
+    s = str(v).replace("%", "").replace(",", "").strip()
+    if s in ("", "--", "-"):
+        return None
+    if s.startswith("<"):
+        return 0.05
+    if s.startswith(">"):
+        return 0.95
+    try:
+        return float(s) / 100.0
+    except ValueError:
+        return None
 
 
 def to_number(v):

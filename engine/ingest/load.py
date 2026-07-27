@@ -13,7 +13,8 @@ import argparse, datetime, glob, json, os
 from sqlalchemy import delete, select, func
 
 from .parser import (parse_csv, stream_report, to_number, CORE_METRICS, ENTITY_COL,
-                     EXPECTED_REPORTS, date_column, infer_date_order, normalize_date)
+                     EXPECTED_REPORTS, date_column, infer_date_order, normalize_date,
+                     SHARE_SLUGS, impr_share_frac)
 from .store import get_engine, init_db, uploads, raw_rows
 
 CHUNK = 5000
@@ -41,6 +42,11 @@ def _row_record(client_id, upload_id, rtype, idx, row, date_col=None, order="mdy
     )
     for slug, canon in CORE_METRICS.items():
         rec[canon] = to_number(row.get(slug))
+    # Impression share -> fraction, and reverse-engineered eligible impressions so a
+    # rollup can weight IS correctly: weighted IS = Σ impressions / Σ eligible_impr.
+    share = impr_share_frac(next((row[s] for s in SHARE_SLUGS if s in row), None))
+    rec["impr_share"] = share
+    rec["eligible_impr"] = (rec["impressions"] / share) if (share and rec["impressions"] is not None) else None
     return rec
 
 
