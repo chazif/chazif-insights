@@ -96,6 +96,28 @@ def _ym_bound(s):
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 
+def _date_bound(s, end=False):
+    """'2026-03-15' -> that ISO day; '2026-03' -> first (end=False) or last (end=True)
+    day of the month; None if empty/unparseable. ISO strings compare correctly against
+    the DATE column on both SQLite and Postgres."""
+    m = re.match(r"^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$", str(s or "").strip())
+    if not m:
+        return None
+    y, mo = int(m.group(1)), int(m.group(2))
+    d = int(m.group(3)) if m.group(3) else (calendar.monthrange(y, mo)[1] if end else 1)
+    return f"{y:04d}-{mo:02d}-{d:02d}"
+
+
+def _range_sql(d_from, d_to):
+    """SQL fragment + params limiting raw_rows to [d_from, d_to] by date_norm. Undated
+    rows (date_norm NULL) are kept, so snapshot reports not yet re-uploaded at day level
+    still show their whole window. Returns ('', {}) when no range is set."""
+    if not (d_from or d_to):
+        return "", {}
+    return (" AND (date_norm IS NULL OR date_norm BETWEEN :d_from AND :d_to)",
+            {"d_from": d_from or "0001-01-01", "d_to": d_to or "9999-12-31"})
+
+
 def _latest_complete_month(engine, client_id):
     """From the export window_end, return the latest fully-covered month as
     {year, month, ym, full, abbr}, or None. A window ending mid-month means that
@@ -202,15 +224,16 @@ def _campaigns(engine, client_id, cm, keep=None, dateless=False):
                        "conv": round(sum(v["conv"] for v in cur.values()), 1)}}
 
 
-def _geo(engine, client_id, keep=None):
+def _geo(engine, client_id, keep=None, date_from=None, date_to=None):
     """Performance by geographic location (whatever grain the export carries — State
     for most single-market accounts). Cost derived from Cost/conv since the Geographic
     export has no Cost column. Returns None if no geo data."""
     keep = keep or (lambda d: True)
+    rc, rp = _range_sql(date_from, date_to)
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT entity, clicks, impressions, conversions, conv_value, row FROM raw_rows "
-            "WHERE client_id=:c AND report_type='geographic'"), {"c": client_id}).all()
+            "WHERE client_id=:c AND report_type='geographic'" + rc), {"c": client_id, **rp}).all()
     if not rows:
         return None
     agg = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0, 0.0])  # clicks, impr, conv, conv_value, cost
@@ -936,11 +959,12 @@ def _keyword_regions(engine, client_id, config, keep=None):
                        "regions": len(region_tot)}}
 
 
-def _ads_section(engine, client_id, config=None, keep=None):
+def _ads_section(engine, client_id, config=None, keep=None, date_from=None, date_to=None):
     """RSA inventory + CTR-graded ad performance (Ad Copy) and ad → landing-page pairing."""
     from collections import Counter
     config = config or {}
     keep = keep or (lambda d: True)
+    rc, rp = _range_sql(date_from, date_to)
     brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
     brand_label = (config.get("brand_terms") or [None])[0] or _client_name(engine, client_id)
     catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
@@ -956,7 +980,7 @@ def _ads_section(engine, client_id, config=None, keep=None):
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT clicks, impressions, cost, conversions, row FROM raw_rows "
-            "WHERE client_id=:c AND report_type='ads_performance'"), {"c": client_id}).all()
+            "WHERE client_id=:c AND report_type='ads_performance'" + rc), {"c": client_id, **rp}).all()
     if not rows:
         return None
     ads = []
@@ -1224,14 +1248,15 @@ def _lp_score(cvr, clicks):
     return "Below Avg"
 
 
-def _lp_performance(engine, client_id, keep=None):
+def _lp_performance(engine, client_id, keep=None, date_from=None, date_to=None):
     """Per landing-page cost/clicks/conv/CVR/CPA + quality score, from ads grouped by
     final URL (the ads report is the only source that carries LP-level conversions)."""
     keep = keep or (lambda d: True)
+    rc, rp = _range_sql(date_from, date_to)
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT clicks, cost, conversions, row FROM raw_rows "
-            "WHERE client_id=:c AND report_type='ads_performance'"), {"c": client_id}).all()
+            "WHERE client_id=:c AND report_type='ads_performance'" + rc), {"c": client_id, **rp}).all()
     if not rows:
         return None
     agg = defaultdict(lambda: [0.0, 0.0, 0.0])   # cost, clicks, conv
@@ -1254,13 +1279,14 @@ def _lp_performance(engine, client_id, keep=None):
     return out
 
 
-def _lp_category_grid(engine, client_id, config, keep=None):
+def _lp_category_grid(engine, client_id, config, keep=None, date_from=None, date_to=None):
     """LP × category CVR matrix from ads grouped by final URL × ad category (an LP can
     serve several categories, each with its own conversion rate). Brand ads bucket to
     'BR'; the rest to their product category or 'Other'. None if no ad data."""
     from collections import Counter
     config = config or {}
     keep = keep or (lambda d: True)
+    rc, rp = _range_sql(date_from, date_to)
     brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
     catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
              for c in (config.get("product_categories") or [])}
@@ -1275,7 +1301,7 @@ def _lp_category_grid(engine, client_id, config, keep=None):
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT clicks, cost, conversions, row FROM raw_rows "
-            "WHERE client_id=:c AND report_type='ads_performance'"), {"c": client_id}).all()
+            "WHERE client_id=:c AND report_type='ads_performance'" + rc), {"c": client_id, **rp}).all()
     if not rows:
         return None
     cell = defaultdict(lambda: defaultdict(lambda: [0.0, 0.0, 0.0]))  # url -> cat -> clicks,conv,cost
@@ -1329,14 +1355,15 @@ def _lp_category_grid(engine, client_id, config, keep=None):
                       "avg_cats": round(sum(len(cell[u]) for u in cell) / len(cell), 1)}}
 
 
-def _landing_pages(engine, client_id, config, keep=None):
+def _landing_pages(engine, client_id, config, keep=None, date_from=None, date_to=None):
     """Landing-page performance (clicks/cost/CTR + mobile speed) + a URL-derived category
     grid. The LP export has no conversion or device column, so no CVR / device grid."""
     keep = keep or (lambda d: True)
+    rc, rp = _range_sql(date_from, date_to)
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT entity, clicks, impressions, cost, row FROM raw_rows "
-            "WHERE client_id=:c AND report_type='landing_pages'"), {"c": client_id}).all()
+            "WHERE client_id=:c AND report_type='landing_pages'" + rc), {"c": client_id, **rp}).all()
     if not rows:
         return None
     agg = defaultdict(lambda: [0.0, 0.0, 0.0, None])
@@ -1355,15 +1382,16 @@ def _landing_pages(engine, client_id, config, keep=None):
             "category_grid": _lp_categories(full, config.get("product_categories", []))}
 
 
-def _search_terms_section(engine, client_id, config, keep=None):
+def _search_terms_section(engine, client_id, config, keep=None, date_from=None, date_to=None):
     """Full Search Terms section: Intent & Grades, Relevant, Competitor, Flagged."""
     from collections import Counter
     from ..llm.relevance import get_or_classify
     keep = keep or (lambda d: True)
+    rc, rp = _range_sql(date_from, date_to)
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT entity, clicks, cost, conversions, row FROM raw_rows "
-            "WHERE client_id=:c AND report_type='search_terms'"), {"c": client_id}).all()
+            "WHERE client_id=:c AND report_type='search_terms'" + rc), {"c": client_id, **rp}).all()
     if not rows:
         return None
     brand_excl = [b.lower() for b in (config.get("brand_terms") or []) if b]
@@ -1851,8 +1879,13 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
     analyzer_findings = run_analyzers(engine, client_id, cm, config) if cm else []
     findings = _to_overview_findings(analyzer_findings)
     recommendations = _to_recommendations(analyzer_findings)
+    # Day-level bounds for the snapshot builders (Search Terms / Geo / Ad Copy / LPs).
+    # Rows without a date_norm (report not yet re-uploaded at day level) are kept, so
+    # those tabs show their whole window until daily data arrives.
+    d_from, d_to = _date_bound(date_from, end=False), _date_bound(date_to, end=True)
+
     campaigns = _campaigns(engine, client_id, cm, keep, dateless) if cm else None
-    geo = _geo(engine, client_id, keep)
+    geo = _geo(engine, client_id, keep, d_from, d_to)
     budget = _budget(engine, client_id, cm, config, keep, dateless) if cm else None
     budget_sec = _budget_section(config)
     budget_sec["reconciliation"] = _budget_reconciliation(engine, client_id, cm, config, dateless) if cm else None
@@ -1861,20 +1894,20 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
     keyword = _keyword_section(engine, client_id, keep)
     kw_regions = _keyword_regions(engine, client_id, config, keep)
     reg_cat = _region_category(engine, client_id, config, keep)
-    st = _search_terms_section(engine, client_id, config, keep)
+    st = _search_terms_section(engine, client_id, config, keep, d_from, d_to)
     if st is not None:
         # the search-terms export has no campaign/ad_group column, so those filters
         # cannot be resolved for this report — tell the UI rather than silently ignoring
         st["filters_ignored"] = [k for k in ("campaign", "region")
                                  if (filters or {}).get(k) not in (None, "", "all")]
-    ads = _ads_section(engine, client_id, config, keep)
-    lps = _landing_pages(engine, client_id, config, keep)
-    lp_perf = _lp_performance(engine, client_id, keep)
+    ads = _ads_section(engine, client_id, config, keep, d_from, d_to)
+    lps = _landing_pages(engine, client_id, config, keep, d_from, d_to)
+    lp_perf = _lp_performance(engine, client_id, keep, d_from, d_to)
     if lps is None and lp_perf:
         lps = {"count": len(lp_perf), "rows": [], "category_grid": None}
     if lps is not None:
         lps["performance"] = lp_perf
-        lps["category_grid"] = _lp_category_grid(engine, client_id, config, keep)
+        lps["category_grid"] = _lp_category_grid(engine, client_id, config, keep, d_from, d_to)
     nb_cats = _nb_categories(engine, client_id, cm, config, keep, compare) if cm else None
     regions = _regions(engine, client_id, cm, config, keep, compare) if cm else None
 
@@ -1913,6 +1946,24 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
     view_list.append("auction-insights")   # Competition module (scaffold; data feature to come)
     view_list.append("recs")
 
+    # Which tabs actually honour the date range = the always-dated campaign views plus
+    # any snapshot report that has been re-uploaded at day level (has a date_norm). Tabs
+    # not listed here still show their whole window and get the "whole-window" note.
+    with engine.connect() as c:
+        dated_reports = {r for (r,) in c.execute(text(
+            "SELECT DISTINCT report_type FROM raw_rows WHERE client_id=:c AND date_norm IS NOT NULL"),
+            {"c": client_id})}
+    REPORT_VIEWS = {
+        "search_terms": ("st-intent", "st-relevant", "st-competitor", "st-flagged"),
+        "geographic": ("geo-perf",),
+        "ads_performance": ("ad-copy", "ad-lp", "lp-perf", "lp-category"),
+        "landing_pages": ("lp-perf", "lp-category"),
+    }
+    windowed = {"overview", "trends", "campaign-perf", "pacing", "nb-cats", "regions"}
+    for rt, views in REPORT_VIEWS.items():
+        if rt in dated_reports:
+            windowed.update(views)
+
     return {
         "meta": {
             "client_id": client_id,
@@ -1926,8 +1977,9 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
             "date_range": {
                 "from": date_from, "to": date_to,
                 "applied": bool(rng_from or rng_to),
-                # views that honour the range today (month-grained); the rest are whole-window
-                "windowed_views": ["overview", "trends", "campaign-perf", "pacing", "nb-cats", "regions"],
+                # views that honour the range: campaign-based (always) + any snapshot
+                # report re-uploaded at day level; the rest are whole-window (see note)
+                "windowed_views": sorted(windowed),
             },
             "filters": {"seg": (filters or {}).get("seg") or "all", "campaign": (filters or {}).get("campaign") or "all",
                         "region": (filters or {}).get("region") or "all", "category": (filters or {}).get("category") or "all",
