@@ -708,15 +708,16 @@ def _qs_breakdown(engine, client_id, cm, config, keep=None, date_from=None, date
     }
 
 
-def _region_category(engine, client_id, config, keep=None):
+def _region_category(engine, client_id, config, keep=None, date_from=None, date_to=None):
     """Region & Category — for each Brand×Region×Category slice, avg CPC split by the
     keyword's component rating (Below / Average / Above) per QS component, with the
     Below−Above CPC spread. Joins the region-segmented keyword export (region + spend)
     to search_keyword_qs (component ratings). None if the segmented export is absent."""
     keep = keep or (lambda d: True)
+    rc, rp = _range_sql(date_from, date_to)
     with engine.connect() as c:
         geo = c.execute(text("SELECT clicks, cost, row FROM raw_rows WHERE client_id=:c "
-                             "AND report_type='keyword_geo'"), {"c": client_id}).all()
+                             "AND report_type='keyword_geo'" + rc), {"c": client_id, **rp}).all()
     if not geo:
         return None
     with engine.connect() as c:
@@ -950,15 +951,16 @@ def _region_value(d):
     return None
 
 
-def _keyword_regions(engine, client_id, config, keep=None):
+def _keyword_regions(engine, client_id, config, keep=None, date_from=None, date_to=None):
     """Keyword × region pivot for the Keyword Deep Dive heatmap, from a keyword report
     segmented by geography (report_type 'keyword_geo'). None if that segmented export
     hasn't been uploaded — the view then falls back to the flat keyword table."""
     keep = keep or (lambda d: True)
+    rc, rp = _range_sql(date_from, date_to)
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT cost, clicks, conversions, row FROM raw_rows "
-            "WHERE client_id=:c AND report_type='keyword_geo'"), {"c": client_id}).all()
+            "WHERE client_id=:c AND report_type='keyword_geo'" + rc), {"c": client_id, **rp}).all()
     if not rows:
         return None
     brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
@@ -1992,8 +1994,8 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
     qscore = _quality_score(engine, client_id, cm, config, keep, d_from, d_to)
     qs_break = _qs_breakdown(engine, client_id, cm, config, keep, d_from, d_to)
     keyword = _keyword_section(engine, client_id, keep, d_from, d_to)
-    kw_regions = _keyword_regions(engine, client_id, config, keep)
-    reg_cat = _region_category(engine, client_id, config, keep)
+    kw_regions = _keyword_regions(engine, client_id, config, keep, d_from, d_to)
+    reg_cat = _region_category(engine, client_id, config, keep, d_from, d_to)
     st = _search_terms_section(engine, client_id, config, keep, d_from, d_to)
     if st is not None:
         # the search-terms export has no campaign/ad_group column, so those filters
@@ -2059,6 +2061,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         "ads_performance": ("ad-copy", "ad-lp", "lp-perf", "lp-category"),
         "landing_pages": ("lp-perf", "lp-category"),
         "search_keyword_qs": ("kw-deep-dive", "qs-detail", "qs-breakdown"),
+        "keyword_geo": ("region-category", "kw-deep-dive"),
     }
     windowed = {"overview", "trends", "campaign-perf", "pacing", "nb-cats", "regions"}
     for rt, views in REPORT_VIEWS.items():
