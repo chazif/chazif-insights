@@ -211,6 +211,14 @@ def to_number(v):
         return None
 
 
+def is_total_row(first_cell):
+    """Google's trailing totals row. The first cell is 'Total' or 'Total: <report>'
+    (older exports) — matching only the exact word missed the 'Total:' form, letting a
+    totals row leak in and inflate sums."""
+    s = (first_cell or "").strip().lower()
+    return s == "total" or s.startswith("total:")
+
+
 def parse_window(raw: str):
     """'January 1, 2025 - July 13, 2026' -> (date(2025,1,1), date(2026,7,13))."""
     if not raw:
@@ -280,7 +288,7 @@ def stream_report(path):
     def rows_iter():
         try:
             for r in csv.reader(f):
-                if not r or r[0].strip().lower() == "total":
+                if not r or is_total_row(r[0]):
                     continue
                 if all((c or "").strip() == "" for c in r):
                     continue
@@ -308,7 +316,7 @@ def parse_csv(path):
 
     rows = []
     for r in csv.reader(lines[3:]):
-        if not r or r[0].strip().lower() == "total":
+        if not r or is_total_row(r[0]):
             continue
         if all((c or "").strip() == "" for c in r):
             continue
