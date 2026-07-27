@@ -10,7 +10,7 @@ import calendar
 import re
 from collections import defaultdict
 from sqlalchemy import text, select, func
-from ..ingest.store import get_engine, clients, uploads
+from ..ingest.store import get_engine, clients, uploads, qs_history
 from ..ingest.service import get_config
 from ..ingest.parser import GEO_SLUGS, impr_share_frac
 from ..analyze.analyzers import run_analyzers, _asdict, _num
@@ -413,17 +413,60 @@ def _norm_rating(v):
     return None
 
 
-def _quality_score(engine, client_id, cm=None, config=None, keep=None):
+def _kw_qs_rows(engine, client_id, d_from=None, d_to=None):
+    """Per-keyword pseudo-rows for the QS builders, so day-segmented QS exports don't
+    double-count keywords. Performance (cost/clicks/impr/conv) is summed over the date
+    range; QS + the three components come from qs_history as the LATEST snapshot on or
+    before the range end (falling back to the row's own QS when qs_history has none,
+    e.g. data ingested before QS history existed). Returns [(cost, clicks, impr, conv,
+    row_dict), ...] — the same shape the builders already iterate."""
+    rc, rp = _range_sql(d_from, d_to)
+    with engine.connect() as c:
+        raw = c.execute(text(
+            "SELECT cost, clicks, impressions, conversions, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='search_keyword_qs'" + rc), {"c": client_id, **rp}).all()
+        qp = {"c": client_id}
+        qwhere = "client_id=:c"
+        if d_to:
+            qwhere += " AND as_of_date <= :dto"; qp["dto"] = d_to
+        qs_rows = c.execute(text(
+            "SELECT kw_key, as_of_date, quality_score, exp_ctr_label, ad_relevance_label, "
+            "landing_page_exp_label FROM qs_history WHERE " + qwhere), qp).all()
+    latest = {}                                        # kw_key -> latest snapshot in range
+    for kk, ad, qs, el, al, ll in qs_rows:
+        cur = latest.get(kk)
+        if cur is None or (ad and (cur[0] is None or ad > cur[0])):
+            latest[kk] = (ad, qs, el, al, ll)
+    agg = {}
+    for cost, clicks, impr, conv, row in raw:
+        d = _asdict(row)
+        key = "\x1f".join("" if x is None else str(x) for x in
+                          (d.get("search_keyword"), d.get("search_keyword_match_type"),
+                           d.get("campaign"), d.get("ad_group")))
+        e = agg.get(key)
+        if e is None:
+            e = agg[key] = [0.0, 0.0, 0.0, 0.0, dict(d)]
+        e[0] += _num(cost); e[1] += _num(clicks); e[2] += _num(impr); e[3] += _num(conv)
+    out = []
+    for key, e in agg.items():
+        d = e[4]
+        lt = latest.get(key)
+        if lt:                                         # override with the frozen latest-in-range QS
+            _, qs, el, al, ll = lt
+            d["quality_score"] = qs
+            d["exp_ctr"], d["ad_relevance"], d["landing_page_exp"] = el, al, ll
+        out.append((e[0], e[1], e[2], e[3], d))
+    return out
+
+
+def _quality_score(engine, client_id, cm=None, config=None, keep=None, date_from=None, date_to=None):
     """Non-brand Quality Score overview from the Search Keyword + QS report: per-QS
     (1-10) keyword/spend/click/conv rollups with CPC/CTR/CVR/CPA, four QS buckets, a
     weak→strong CPC-differential savings estimate, and portfolio totals."""
     config = config or {}
     keep = keep or (lambda d: True)
     brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
-    with engine.connect() as c:
-        rows = c.execute(text(
-            "SELECT cost, clicks, impressions, conversions, row FROM raw_rows "
-            "WHERE client_id=:c AND report_type='search_keyword_qs'"), {"c": client_id}).all()
+    rows = _kw_qs_rows(engine, client_id, date_from, date_to)   # per-keyword, latest-in-range QS
     if not rows:
         return None
     per = {i: {"keywords": 0, "cost": 0.0, "clicks": 0.0, "impr": 0.0, "conv": 0.0} for i in range(1, 11)}
@@ -493,7 +536,7 @@ def _quality_score(engine, client_id, cm=None, config=None, keep=None):
     }
 
 
-def _qs_breakdown(engine, client_id, cm, config, keep=None):
+def _qs_breakdown(engine, client_id, cm, config, keep=None, date_from=None, date_to=None):
     """QS Breakdown: per-component (eCTR / Ad Relevance / LP Experience) rating rollups,
     the 27-way eCTR×LP×AdRel combination grid (avg CPC / spend / avg QS per cell), a
     weak→QS7 savings estimate by brand, and the top QS≤6 optimization keywords. Non-brand."""
@@ -511,10 +554,7 @@ def _qs_breakdown(engine, client_id, cm, config, keep=None):
                 return cat[:1].upper() + cat[1:]
         return None
 
-    with engine.connect() as c:
-        rows = c.execute(text(
-            "SELECT cost, clicks, impressions, conversions, row FROM raw_rows "
-            "WHERE client_id=:c AND report_type='search_keyword_qs'"), {"c": client_id}).all()
+    rows = _kw_qs_rows(engine, client_id, date_from, date_to)   # per-keyword, latest-in-range QS
     if not rows:
         return None
 
@@ -821,22 +861,19 @@ def _grade_term(t):
     return "F — Poor / No Conversions"
 
 
-def _keyword_section(engine, client_id, keep=None):
+def _keyword_section(engine, client_id, keep=None, date_from=None, date_to=None):
     """Keyword Deep Dive (top keywords) + QS component breakdown (eCTR / Ad relevance /
     LP experience) with a modeled CPC-penalty savings estimate."""
     from collections import Counter
     keep = keep or (lambda d: True)
-    with engine.connect() as c:
-        rows = c.execute(text(
-            "SELECT cost, clicks, conversions, row FROM raw_rows "
-            "WHERE client_id=:c AND report_type='search_keyword_qs'"), {"c": client_id}).all()
+    rows = _kw_qs_rows(engine, client_id, date_from, date_to)   # per-keyword, latest-in-range QS
     if not rows:
         return None
     kws = []
     comp = {"exp_ctr": Counter(), "ad_relevance": Counter(), "landing_page_exp": Counter()}
     comp_sp = {"exp_ctr": Counter(), "ad_relevance": Counter(), "landing_page_exp": Counter()}
     below_ctr = 0.0
-    for cost, clicks, conv, row in rows:
+    for cost, clicks, impr, conv, row in rows:
         d = _asdict(row)
         if not keep(d):
             continue
@@ -1889,9 +1926,9 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
     budget = _budget(engine, client_id, cm, config, keep, dateless) if cm else None
     budget_sec = _budget_section(config)
     budget_sec["reconciliation"] = _budget_reconciliation(engine, client_id, cm, config, dateless) if cm else None
-    qscore = _quality_score(engine, client_id, cm, config, keep)
-    qs_break = _qs_breakdown(engine, client_id, cm, config, keep)
-    keyword = _keyword_section(engine, client_id, keep)
+    qscore = _quality_score(engine, client_id, cm, config, keep, d_from, d_to)
+    qs_break = _qs_breakdown(engine, client_id, cm, config, keep, d_from, d_to)
+    keyword = _keyword_section(engine, client_id, keep, d_from, d_to)
     kw_regions = _keyword_regions(engine, client_id, config, keep)
     reg_cat = _region_category(engine, client_id, config, keep)
     st = _search_terms_section(engine, client_id, config, keep, d_from, d_to)
@@ -1958,6 +1995,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         "geographic": ("geo-perf",),
         "ads_performance": ("ad-copy", "ad-lp", "lp-perf", "lp-category"),
         "landing_pages": ("lp-perf", "lp-category"),
+        "search_keyword_qs": ("kw-deep-dive", "qs-detail", "qs-breakdown"),
     }
     windowed = {"overview", "trends", "campaign-perf", "pacing", "nb-cats", "regions"}
     for rt, views in REPORT_VIEWS.items():
