@@ -12,7 +12,8 @@ Usage:
 import argparse, datetime, glob, json, os
 from sqlalchemy import delete, select, func
 
-from .parser import parse_csv, stream_report, to_number, CORE_METRICS, ENTITY_COL, DATE_COL, EXPECTED_REPORTS
+from .parser import (parse_csv, stream_report, to_number, CORE_METRICS, ENTITY_COL,
+                     EXPECTED_REPORTS, date_column, infer_date_order, normalize_date)
 from .store import get_engine, init_db, uploads, raw_rows
 
 CHUNK = 5000
@@ -27,17 +28,15 @@ def _kw_key(row):
             row.get("campaign"), row.get("ad_group"))
 
 
-def _row_record(client_id, upload_id, rtype, idx, row):
+def _row_record(client_id, upload_id, rtype, idx, row, date_col=None, order="mdy"):
     ent_col = ENTITY_COL.get(rtype)
-    date_cols = DATE_COL.get(rtype) or ()
-    if isinstance(date_cols, str):
-        date_cols = (date_cols,)
-    date = next((row.get(dc) for dc in date_cols if row.get(dc)), None)
+    date_raw = row.get(date_col) if date_col else None
     rec = dict(
         client_id=client_id, upload_id=upload_id, report_type=rtype, row_index=idx,
         campaign=row.get("campaign"), ad_group=row.get("ad_group"),
         entity=(row.get(ent_col) if ent_col else None),
-        date=date,
+        date=date_raw,
+        date_norm=normalize_date(date_raw, order),
         row=row,
     )
     for slug, canon in CORE_METRICS.items():
@@ -45,11 +44,13 @@ def _row_record(client_id, upload_id, rtype, idx, row):
     return rec
 
 
-def replace_report(conn, client_id, rtype, rows, source_file, window_raw, window_start, window_end, now):
+def replace_report(conn, client_id, rtype, rows, source_file, window_raw, window_start, window_end, now,
+                   date_col=None, order="mdy"):
     """Snapshot-replace one client's rows for one report_type within an open transaction.
     Reused by single-account (load_folder) and MCC (per-account) ingestion. `rows` may be
     a list OR a lazy iterator (streaming ingest) — it's consumed once, in CHUNK batches,
-    so peak memory stays flat regardless of file size. Returns the number of rows written."""
+    so peak memory stays flat regardless of file size. `date_col`/`order` drive the
+    normalized date_norm per row. Returns the number of rows written."""
     preserve_fields = PRESERVE_ON_REUPLOAD.get(rtype)
     old = conn.execute(select(uploads.c.upload_id).where(
         (uploads.c.client_id == client_id) & (uploads.c.report_type == rtype))).scalars().all()
@@ -80,7 +81,7 @@ def replace_report(conn, client_id, rtype, rows, source_file, window_raw, window
             ov = preserve.get(_kw_key(row))
             if ov:
                 row = dict(row); row.update(ov)
-        batch.append(_row_record(client_id, upload_id, rtype, n, row))
+        batch.append(_row_record(client_id, upload_id, rtype, n, row, date_col, order))
         n += 1
         if len(batch) >= CHUNK:
             conn.execute(raw_rows.insert(), batch); batch = []
@@ -107,9 +108,18 @@ def load_folder(client_id, folder, engine=None):
             unmapped.append(name)
             continue
         rtype = info["report_type"]
+        date_col = date_column(info["columns"])
+        order = "mdy"
+        if date_col:                              # cheap pre-pass to infer D/M vs M/D (short-circuits)
+            _i2, rows2 = stream_report(path)
+            try:
+                order = infer_date_order(r.get(date_col) for r in rows2)
+            finally:
+                rows2.close()
         with engine.begin() as conn:
             n = replace_report(conn, client_id, rtype, rows, name,
-                               info["window_raw"], info["window_start"], info["window_end"], now)
+                               info["window_raw"], info["window_start"], info["window_end"], now,
+                               date_col=date_col, order=order)
         loaded.append((rtype, name, info["window_raw"], n))
     return dict(loaded=loaded, unmapped=unmapped, engine=engine)
 

@@ -40,10 +40,75 @@ ENTITY_COL = {
     "auction_insights": "display_url_domain",
     "schedule_dow_hod": None,
 }
-# Candidate date columns per report, most-preferred first. Campaign Performance may be
-# exported segmented by Month OR by Day (daily export) — accept either.
-DATE_COL = {"campaign_performance": ("month", "day"), "schedule_dow_hod": ("day",),
-            "auction_insights": ("day",)}
+# Row-level calendar date column, detected generically for ANY report (finest first).
+# 'day'/'week' are literal calendar columns; schedule's "Day of the week" slugs to
+# 'day_of_the_week', so it isn't matched here (correct — that's categorical, not a date).
+DATE_SLUGS = ("day", "date", "week", "month")
+
+
+def date_column(columns):
+    """The report's row-level calendar date column, or None if it isn't date-segmented."""
+    cols = set(columns)
+    return next((s for s in DATE_SLUGS if s in cols), None)
+
+
+_MONTHS_FULL = {m: i for i, m in enumerate(
+    ["january", "february", "march", "april", "may", "june", "july",
+     "august", "september", "october", "november", "december"], 1)}
+_MONTHS_ABBR = {m[:3]: i for m, i in _MONTHS_FULL.items()}
+
+
+def infer_date_order(values):
+    """'dmy' vs 'mdy' for D/M or M/D slash dates: scan for a disambiguating component
+    (>12); default 'mdy' (Google US) if none found. Short-circuits on first hit."""
+    for v in values:
+        m = re.match(r"^\s*(\d{1,2})/(\d{1,2})/\d{2,4}\s*$", str(v or ""))
+        if m:
+            a, b = int(m.group(1)), int(m.group(2))
+            if a > 12:
+                return "dmy"
+            if b > 12:
+                return "mdy"
+    return "mdy"
+
+
+def normalize_date(raw, order="mdy"):
+    """Google date cell -> datetime.date (day precision; month-only -> 1st); None if
+    unparseable. Accepts 'March 2026'/'Mar 2026', '2026-03'/'2026-03-15'/'2026/03/15',
+    'M/YYYY', and day dates '23/10/2025' / '10/23/2025' (order-disambiguated)."""
+    if not raw:
+        return None
+    s = str(raw).strip()
+    y = mo = d = None
+    m = re.match(r"^(\d{4})[-/](\d{1,2})(?:[-/](\d{1,2}))?$", s)          # 2026-03 / 2026-03-15 / 2026/03/15
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3) or 1)
+    elif re.match(r"^(\d{1,2})/(\d{1,2})/(\d{2,4})$", s):                # D/M/Y or M/D/Y
+        a, b, yr = (int(x) for x in re.match(r"^(\d{1,2})/(\d{1,2})/(\d{2,4})$", s).groups())
+        y = yr + (2000 if yr < 100 else 0)
+        d, mo = (a, b) if order == "dmy" else (b, a)
+        if not 1 <= mo <= 12:                                            # impossible month -> swap
+            mo, d = d, mo
+    elif re.match(r"^(\d{1,2})/(\d{2,4})$", s):                          # M/YYYY
+        mm, yr = (int(x) for x in re.match(r"^(\d{1,2})/(\d{2,4})$", s).groups())
+        y, mo, d = yr + (2000 if yr < 100 else 0), mm, 1
+    else:
+        parts = s.split()                                               # March 2026 / Mar 2026
+        if len(parts) == 2:
+            mo = _MONTHS_FULL.get(parts[0].lower()) or _MONTHS_ABBR.get(parts[0][:3].lower())
+            try:
+                y, d = int(parts[1]), 1
+            except ValueError:
+                return None
+    if not (y and mo):
+        return None
+    try:
+        return datetime.date(y, mo, d)
+    except ValueError:
+        try:
+            return datetime.date(y, mo, 1)
+        except ValueError:
+            return None
 
 # Account-identifying columns present only in MCC-level exports (Manager account).
 ACCOUNT_ID_SLUGS = ("customer_id", "account_id")

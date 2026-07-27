@@ -51,7 +51,8 @@ raw_rows = Table(
     Column("campaign", String(512)),
     Column("ad_group", String(512)),
     Column("entity", String(1024)),   # the report's primary entity value
-    Column("date", String(32)),       # Month/Day when the report is segmented, else null
+    Column("date", String(32)),       # raw Month/Day cell as exported, else null
+    Column("date_norm", Date),        # normalized calendar date (day precision; month -> 1st), for range filters
     Column("clicks", Float),
     Column("impressions", Float),
     Column("cost", Float),
@@ -60,6 +61,7 @@ raw_rows = Table(
     Column("row", JSON),              # full slugged record (all columns)
     Index("ix_raw_client_report", "client_id", "report_type"),
     Index("ix_raw_client_report_entity", "client_id", "report_type", "entity"),
+    Index("ix_raw_client_report_date", "client_id", "report_type", "date_norm"),
 )
 
 
@@ -92,9 +94,14 @@ def get_engine(url=None, echo=False):
 
 def init_db(engine):
     metadata.create_all(engine)
-    # add-column-if-missing migration for existing DBs (SQLite + Postgres both take this form)
+    # add-column-if-missing migrations for existing DBs (SQLite + Postgres both take this form)
     have = {c["name"] for c in inspect(engine).get_columns("clients")}
     for col in ("google_customer_id", "mcc_id"):
         if col not in have:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE clients ADD COLUMN {col} VARCHAR(64)"))
+    if "date_norm" not in {c["name"] for c in inspect(engine).get_columns("raw_rows")}:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE raw_rows ADD COLUMN date_norm DATE"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_raw_client_report_date "
+                              "ON raw_rows (client_id, report_type, date_norm)"))
