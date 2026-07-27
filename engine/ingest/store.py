@@ -79,6 +79,30 @@ term_relevance = Table(
 )
 
 
+# Quality Score is point-in-time and non-additive: Google only returns the CURRENT
+# value, so we build our own append-only, frozen-in-time history. One row per
+# (keyword, as-of-date); the composite PK enforces the freeze (never overwrite a
+# measured value). Components are stored as 1/2/3 (Below/Average/Above) + raw label.
+qs_history = Table(
+    "qs_history", metadata,
+    Column("client_id", String(64), primary_key=True),
+    Column("kw_key", String(1024), primary_key=True),     # serialized keyword identity
+    Column("as_of_date", Date, primary_key=True),          # the day this QS was measured
+    Column("search_keyword", String(512)),
+    Column("match_type", String(64)),
+    Column("campaign", String(512)),
+    Column("ad_group", String(512)),
+    Column("quality_score", Float),                        # 1-10
+    Column("exp_ctr", Integer),                            # 1/2/3
+    Column("ad_relevance", Integer),                       # 1/2/3
+    Column("landing_page_exp", Integer),                   # 1/2/3
+    Column("exp_ctr_label", String(32)),                   # raw "Above average" etc.
+    Column("ad_relevance_label", String(32)),
+    Column("landing_page_exp_label", String(32)),
+    Index("ix_qs_client_date", "client_id", "as_of_date"),
+)
+
+
 def get_engine(url=None, echo=False):
     url = url or os.environ.get("DATABASE_URL")
     if url:
