@@ -58,6 +58,8 @@ raw_rows = Table(
     Column("cost", Float),
     Column("conversions", Float),
     Column("conv_value", Float),
+    Column("impr_share", Float),      # Search impression share as a fraction (buckets: <10%->.05, >90%->.95)
+    Column("eligible_impr", Float),   # impressions / impr_share — the weight for correct weighted IS
     Column("row", JSON),              # full slugged record (all columns)
     Index("ix_raw_client_report", "client_id", "report_type"),
     Index("ix_raw_client_report_entity", "client_id", "report_type", "entity"),
@@ -100,8 +102,13 @@ def init_db(engine):
         if col not in have:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE clients ADD COLUMN {col} VARCHAR(64)"))
-    if "date_norm" not in {c["name"] for c in inspect(engine).get_columns("raw_rows")}:
+    raw_have = {c["name"] for c in inspect(engine).get_columns("raw_rows")}
+    if "date_norm" not in raw_have:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE raw_rows ADD COLUMN date_norm DATE"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_raw_client_report_date "
                               "ON raw_rows (client_id, report_type, date_norm)"))
+    for col in ("impr_share", "eligible_impr"):
+        if col not in raw_have:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE raw_rows ADD COLUMN {col} FLOAT"))
