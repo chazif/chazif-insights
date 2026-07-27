@@ -9,24 +9,89 @@ Usage:
   py -m engine.ingest.load --client chiarelli --dir "C:\\path\\to\\csv folder"
   # DATABASE_URL env -> Postgres; unset -> local data/dev.db (SQLite)
 """
-import argparse, datetime, glob, json, os
+import argparse, datetime, glob, os
 from sqlalchemy import delete, select, func
 
 from .parser import (parse_csv, stream_report, to_number, CORE_METRICS, ENTITY_COL,
                      EXPECTED_REPORTS, date_column, infer_date_order, normalize_date,
                      SHARE_SLUGS, impr_share_frac)
-from .store import get_engine, init_db, uploads, raw_rows
+from .store import get_engine, init_db, uploads, raw_rows, qs_history
 
 CHUNK = 5000
-
-# Fields that must NOT be overwritten on re-upload — Quality Score and its components
-# are point-in-time; we keep the earliest measured value so QS history isn't lost.
-PRESERVE_ON_REUPLOAD = {"search_keyword_qs": ["quality_score", "exp_ctr", "ad_relevance", "landing_page_exp"]}
 
 
 def _kw_key(row):
     return (row.get("search_keyword"), row.get("search_keyword_match_type"),
             row.get("campaign"), row.get("ad_group"))
+
+
+# --- Quality Score history (append-only, frozen in time) -------------------
+# Candidate column slugs per QS field; the "hist_*" variants come from Google's
+# day-segmentable Historical Quality Score columns, preferred when present.
+QS_FIELDS = {
+    "quality_score": ("hist_quality_score", "quality_score"),
+    "exp_ctr": ("hist_exp_ctr", "hist_expected_ctr", "exp_ctr", "expected_ctr"),
+    "ad_relevance": ("hist_ad_relevance", "ad_relevance"),
+    "landing_page_exp": ("hist_landing_page_exper", "hist_landing_page_experience",
+                         "landing_page_exp", "landing_page_exper", "landing_page_experience"),
+}
+
+
+def _first(row, slugs):
+    return next((row[s] for s in slugs if row.get(s) is not None), None)
+
+
+def _rating_num(v):
+    """Google component rating -> 1/2/3 (Below/Average/Above; higher is better); None else."""
+    s = ("" if v is None else str(v)).strip().lower()
+    if "above" in s:
+        return 3
+    if "below" in s:
+        return 1
+    if "average" in s:
+        return 2
+    return None
+
+
+def _qs_record(client_id, row, as_of):
+    """A frozen QS datapoint for one keyword as of `as_of`, or None if the row has no QS."""
+    kw = row.get("search_keyword")
+    if not kw or not as_of:
+        return None
+    qs = to_number(_first(row, QS_FIELDS["quality_score"]))
+    ectr, adrel, lpx = (_rating_num(_first(row, QS_FIELDS[f]))
+                        for f in ("exp_ctr", "ad_relevance", "landing_page_exp"))
+    if qs is None and ectr is None and adrel is None and lpx is None:
+        return None
+    key = _kw_key(row)
+    return dict(
+        client_id=client_id, kw_key="\x1f".join("" if x is None else str(x) for x in key),
+        as_of_date=as_of, search_keyword=kw, match_type=row.get("search_keyword_match_type"),
+        campaign=row.get("campaign"), ad_group=row.get("ad_group"),
+        quality_score=qs, exp_ctr=ectr, ad_relevance=adrel, landing_page_exp=lpx,
+        exp_ctr_label=_first(row, QS_FIELDS["exp_ctr"]),
+        ad_relevance_label=_first(row, QS_FIELDS["ad_relevance"]),
+        landing_page_exp_label=_first(row, QS_FIELDS["landing_page_exp"]))
+
+
+def _write_qs_history(conn, client_id, records):
+    """Insert QS datapoints, FROZEN: an existing (keyword, as-of-date) is never
+    overwritten (so a later pull with changed values can't rewrite history)."""
+    dates = {r["as_of_date"] for r in records}
+    existing = set()
+    if dates:
+        for kk, ad in conn.execute(select(qs_history.c.kw_key, qs_history.c.as_of_date).where(
+                (qs_history.c.client_id == client_id) & (qs_history.c.as_of_date.in_(dates)))):
+            existing.add((kk, ad))
+    fresh, seen = [], set()
+    for r in records:
+        k = (r["kw_key"], r["as_of_date"])
+        if k in existing or k in seen:
+            continue
+        seen.add(k); fresh.append(r)
+    for i in range(0, len(fresh), CHUNK):
+        conn.execute(qs_history.insert(), fresh[i:i + CHUNK])
+    return len(fresh)
 
 
 def _row_record(client_id, upload_id, rtype, idx, row, date_col=None, order="mdy"):
@@ -56,20 +121,11 @@ def replace_report(conn, client_id, rtype, rows, source_file, window_raw, window
     Reused by single-account (load_folder) and MCC (per-account) ingestion. `rows` may be
     a list OR a lazy iterator (streaming ingest) — it's consumed once, in CHUNK batches,
     so peak memory stays flat regardless of file size. `date_col`/`order` drive the
-    normalized date_norm per row. Returns the number of rows written."""
-    preserve_fields = PRESERVE_ON_REUPLOAD.get(rtype)
+    normalized date_norm per row. For search_keyword_qs, each row's QS is also appended
+    to the frozen qs_history (stamped with the row's day, else the export window-end).
+    Returns the number of rows written."""
     old = conn.execute(select(uploads.c.upload_id).where(
         (uploads.c.client_id == client_id) & (uploads.c.report_type == rtype))).scalars().all()
-
-    # capture QS-component values from the EXISTING rows before delete (keep earliest measured QS)
-    preserve = {}
-    if preserve_fields and old:
-        for (rj,) in conn.execute(select(raw_rows.c.row).where(raw_rows.c.upload_id.in_(old))):
-            d = rj if isinstance(rj, dict) else (json.loads(rj) if rj else {})
-            kept = {f: d.get(f) for f in preserve_fields if d.get(f) is not None}
-            if kept:
-                preserve[_kw_key(d)] = kept
-
     if old:
         conn.execute(delete(raw_rows).where(raw_rows.c.upload_id.in_(old)))
         conn.execute(delete(uploads).where(uploads.c.upload_id.in_(old)))
@@ -81,18 +137,22 @@ def replace_report(conn, client_id, rtype, rows, source_file, window_raw, window
         row_count=0, uploaded_at=now))
     upload_id = res.inserted_primary_key[0]
 
-    batch, n = [], 0
+    collect_qs = rtype == "search_keyword_qs"
+    batch, qs_records, n = [], [], 0
     for row in rows:
-        if preserve:
-            ov = preserve.get(_kw_key(row))
-            if ov:
-                row = dict(row); row.update(ov)
+        if collect_qs:
+            as_of = (normalize_date(row.get(date_col), order) if date_col else None) or window_end
+            rec = _qs_record(client_id, row, as_of)
+            if rec:
+                qs_records.append(rec)
         batch.append(_row_record(client_id, upload_id, rtype, n, row, date_col, order))
         n += 1
         if len(batch) >= CHUNK:
             conn.execute(raw_rows.insert(), batch); batch = []
     if batch:
         conn.execute(raw_rows.insert(), batch)
+    if qs_records:
+        _write_qs_history(conn, client_id, qs_records)
     conn.execute(uploads.update().where(uploads.c.upload_id == upload_id).values(row_count=n))
     return n
 
