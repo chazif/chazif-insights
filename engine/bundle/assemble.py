@@ -7,6 +7,7 @@ and the full view set land in later increments; this proves the raw -> bundle ->
 dashboard seam for a real client.
 """
 import calendar
+import datetime
 import re
 from collections import defaultdict
 from sqlalchemy import text, select, func
@@ -116,6 +117,40 @@ def _range_sql(d_from, d_to):
         return "", {}
     return (" AND (date_norm IS NULL OR date_norm BETWEEN :d_from AND :d_to)",
             {"d_from": d_from or "0001-01-01", "d_to": d_to or "9999-12-31"})
+
+
+def _has_day(s):
+    """True if the request bound is day-precise ('2026-07-14'), vs month-only ('2026-07')."""
+    return bool(re.match(r"^\d{4}-\d{2}-\d{2}", str(s or "")))
+
+
+def _as_date(v):
+    """Coerce a DATE column value (date object on Postgres, ISO string on SQLite) to date."""
+    if isinstance(v, datetime.datetime):
+        return v.date()
+    if isinstance(v, datetime.date):
+        return v
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(v or ""))
+    return datetime.date(int(m[1]), int(m[2]), int(m[3])) if m else None
+
+
+def _shift_year(d, n):
+    try:
+        return d.replace(year=d.year + n)
+    except ValueError:                     # Feb 29 -> Feb 28 in a non-leap prior year
+        return d.replace(year=d.year + n, day=28)
+
+
+def _cp_range_sums(c, client_id, keep, lo, hi):
+    """Sum campaign_performance cost/clicks/conv over the ISO day range [lo, hi]."""
+    cost = clicks = conv = 0.0
+    for co, cl, cv, row in c.execute(text(
+            "SELECT cost, clicks, conversions, row FROM raw_rows WHERE client_id=:c "
+            "AND report_type='campaign_performance' AND date_norm BETWEEN :lo AND :hi"),
+            {"c": client_id, "lo": lo, "hi": hi}):
+        if keep(_asdict(row)):
+            cost += _num(co); clicks += _num(cl); conv += _num(cv)
+    return cost, clicks, conv
 
 
 def _latest_complete_month(engine, client_id):
@@ -1893,6 +1928,34 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
                 else:
                     pc, pcl, pcv = 0, 0, 0; prior_mk_label = "—"
             meta_periods = {"current": cur_label, "prior": prior_mk_label}
+
+            # Day-range selections: recompute current vs prior from DAILY data so the KPI
+            # scorecard reflects the exact selected window rather than its containing month.
+            # Prior period = same window prior year (yoy) / immediately-preceding equal-length
+            # window (mom) / the custom range. Only fires for a day-precise selection with
+            # daily campaign data; month selections keep the calendar-month comparison above.
+            if _has_day(date_from) or _has_day(date_to):
+                span = c.execute(text(
+                    "SELECT MIN(date_norm), MAX(date_norm) FROM raw_rows WHERE client_id=:c "
+                    "AND report_type='campaign_performance' AND date_norm IS NOT NULL"),
+                    {"c": client_id}).first()
+                span_lo, span_hi = _as_date(span[0]), _as_date(span[1])
+                cur_lo = _as_date(_date_bound(date_from, end=False)) or span_lo
+                cur_hi = _as_date(_date_bound(date_to, end=True)) or span_hi
+                if span_lo and cur_lo and cur_hi and cur_lo <= cur_hi:
+                    if compare == "custom" and (compare_from or compare_to):
+                        pri_lo = _as_date(_date_bound(compare_from, end=False)) or span_lo
+                        pri_hi = _as_date(_date_bound(compare_to, end=True)) or (cur_lo - datetime.timedelta(days=1))
+                    elif compare == "yoy":
+                        pri_lo, pri_hi = _shift_year(cur_lo, -1), _shift_year(cur_hi, -1)
+                    else:                                      # mom -> preceding equal-length window
+                        pri_hi = cur_lo - datetime.timedelta(days=1)
+                        pri_lo = pri_hi - (cur_hi - cur_lo)
+                    cc, ccl, ccv = _cp_range_sums(c, client_id, keep, cur_lo.isoformat(), cur_hi.isoformat())
+                    pc, pcl, pcv = _cp_range_sums(c, client_id, keep, pri_lo.isoformat(), pri_hi.isoformat())
+                    cur_label = f"{cur_lo.isoformat()} – {cur_hi.isoformat()}"
+                    prior_mk_label = f"{pri_lo.isoformat()} – {pri_hi.isoformat()}"
+                    meta_periods = {"current": cur_label, "prior": prior_mk_label}
 
             def chg(cur, prev):
                 return round((cur - prev) / prev, 4) if prev else None
