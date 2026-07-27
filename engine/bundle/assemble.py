@@ -1766,24 +1766,26 @@ def _filters_meta(engine, client_id, config):
             "categories": categories, "brands": [brand_label] if brand_label else []}
 
 
-def _auction_insights_section(engine, client_id):
+def _auction_insights_section(engine, client_id, date_from=None, date_to=None):
     """Competitor share-of-voice from the Auction Insights export (per day × campaign ×
     domain). Each share metric is IMPRESSION-WEIGHTED per domain, not averaged: the
     weight is our own campaign impressions for that (campaign, day) — Google reports a
     competitor's share only over the auctions we were eligible for, so our impression
     count is the shared denominator. Falls back to an equal-weighted average for a
     domain when no (campaign, day) impressions can be joined (e.g. campaign_performance
-    not yet re-uploaded at day level). Returns {rows, count, weighted} or None."""
+    not yet re-uploaded at day level). The date range narrows both the AI rows and the
+    campaign weights so the two stay aligned. Returns {rows, count, weighted} or None."""
+    rc, rp = _range_sql(date_from, date_to)
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT entity, campaign, date_norm, row FROM raw_rows "
-            "WHERE client_id=:c AND report_type='auction_insights'"), {"c": client_id}).all()
+            "WHERE client_id=:c AND report_type='auction_insights'" + rc), {"c": client_id, **rp}).all()
         if not rows:
             return None
         our_impr = defaultdict(float)   # (campaign, day) -> our impressions
         for camp, dn, impr in c.execute(text(
                 "SELECT campaign, date_norm, impressions FROM raw_rows "
-                "WHERE client_id=:c AND report_type='campaign_performance'"), {"c": client_id}):
+                "WHERE client_id=:c AND report_type='campaign_performance'" + rc), {"c": client_id, **rp}):
             if impr:
                 our_impr[(camp, dn)] += float(impr)
 
@@ -2062,6 +2064,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         "landing_pages": ("lp-perf", "lp-category"),
         "search_keyword_qs": ("kw-deep-dive", "qs-detail", "qs-breakdown"),
         "keyword_geo": ("region-category", "kw-deep-dive"),
+        "auction_insights": ("auction-insights",),
     }
     windowed = {"overview", "trends", "campaign-perf", "pacing", "nb-cats", "regions"}
     for rt, views in REPORT_VIEWS.items():
@@ -2111,5 +2114,5 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         "landing_pages_section": lps,
         "nb_categories_section": nb_cats,
         "regions_section": regions,
-        "auction_insights_section": _auction_insights_section(engine, client_id),
+        "auction_insights_section": _auction_insights_section(engine, client_id, d_from, d_to),
     }
