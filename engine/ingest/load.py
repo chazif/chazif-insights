@@ -9,13 +9,14 @@ Usage:
   py -m engine.ingest.load --client chiarelli --dir "C:\\path\\to\\csv folder"
   # DATABASE_URL env -> Postgres; unset -> local data/dev.db (SQLite)
 """
-import argparse, datetime, glob, os
+import argparse, datetime, glob, os, tempfile
 from sqlalchemy import delete, select, func
 
 from .parser import (parse_csv, stream_report, to_number, CORE_METRICS, ENTITY_COL,
                      EXPECTED_REPORTS, date_column, infer_date_order, normalize_date,
                      SHARE_SLUGS, impr_share_frac)
 from .store import get_engine, init_db, uploads, raw_rows, qs_history
+from ..warehouse import bq
 
 CHUNK = 5000
 
@@ -157,6 +158,47 @@ def replace_report(conn, client_id, rtype, rows, source_file, window_raw, window
     return n
 
 
+def replace_report_bq(conn, client_id, rtype, rows, source_file, window_raw, window_start, window_end, now,
+                      date_col=None, order="mdy"):
+    """BigQuery ingestion (post-cutover). The uploads ledger stays in Postgres (on `conn`);
+    raw_rows / qs_history go to BigQuery via free load jobs. Snapshot-replace for raw_rows
+    (delete the report's rows, then append the new load); append-with-freeze MERGE for
+    qs_history. Rows stream to NDJSON temp files so memory stays flat. Returns rows written."""
+    old = conn.execute(select(uploads.c.upload_id).where(
+        (uploads.c.client_id == client_id) & (uploads.c.report_type == rtype))).scalars().all()
+    if old:
+        conn.execute(delete(uploads).where(uploads.c.upload_id.in_(old)))
+    res = conn.execute(uploads.insert().values(
+        client_id=client_id, report_type=rtype, source_file=source_file,
+        window_raw=window_raw, window_start=window_start, window_end=window_end,
+        row_count=0, uploaded_at=now))
+    upload_id = res.inserted_primary_key[0]
+
+    collect_qs = rtype == "search_keyword_qs"
+    rfd, rpath = tempfile.mkstemp(suffix="_raw.ndjson")
+    qfd, qpath = tempfile.mkstemp(suffix="_qs.ndjson")
+    n, qs_n = 0, 0
+    try:
+        with os.fdopen(rfd, "w", encoding="utf-8") as rout, os.fdopen(qfd, "w", encoding="utf-8") as qout:
+            for row in rows:
+                rout.write(bq.ndjson_line(_row_record(client_id, upload_id, rtype, n, row, date_col, order),
+                                          bq.TABLES["raw_rows"][0]) + "\n")
+                if collect_qs:
+                    as_of = (normalize_date(row.get(date_col), order) if date_col else None) or window_end
+                    qrec = _qs_record(client_id, row, as_of)
+                    if qrec:
+                        qout.write(bq.ndjson_line(qrec, bq.TABLES["qs_history"][0]) + "\n"); qs_n += 1
+                n += 1
+        bq.delete_report(client_id, rtype)          # drop the old snapshot
+        bq.load_ndjson("raw_rows", rpath)           # append the new one
+        if qs_n:
+            bq.merge_qs(qpath)                      # append-only freeze
+    finally:
+        os.remove(rpath); os.remove(qpath)
+    conn.execute(uploads.update().where(uploads.c.upload_id == upload_id).values(row_count=n))
+    return n
+
+
 def load_folder(client_id, folder, engine=None):
     engine = engine or get_engine()
     init_db(engine)
@@ -182,10 +224,11 @@ def load_folder(client_id, folder, engine=None):
                 order = infer_date_order(r.get(date_col) for r in rows2)
             finally:
                 rows2.close()
+        writer = replace_report_bq if bq.active() else replace_report
         with engine.begin() as conn:
-            n = replace_report(conn, client_id, rtype, rows, name,
-                               info["window_raw"], info["window_start"], info["window_end"], now,
-                               date_col=date_col, order=order)
+            n = writer(conn, client_id, rtype, rows, name,
+                       info["window_raw"], info["window_start"], info["window_end"], now,
+                       date_col=date_col, order=order)
         loaded.append((rtype, name, info["window_raw"], n))
     return dict(loaded=loaded, unmapped=unmapped, engine=engine)
 

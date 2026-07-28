@@ -6,7 +6,8 @@ from collections import defaultdict
 from sqlalchemy import select, func, insert, update
 from .store import get_engine, init_db, clients, uploads, raw_rows, term_relevance
 from .parser import EXPECTED_REPORTS, parse_csv, account_cols, date_column, infer_date_order
-from .load import load_folder, replace_report
+from .load import load_folder, replace_report, replace_report_bq
+from ..warehouse import bq
 from ..clientconfig import sanitize, merged
 
 
@@ -161,14 +162,15 @@ def commit_mcc(folder, mapping, engine=None):
         else:
             for row in parsed["rows"]:
                 groups[_account_key(row.get(cidc) if cidc else None, row.get(namec) if namec else None)].append(row)
+        writer = replace_report_bq if bq.active() else replace_report
         with engine.begin() as conn:
             for key, rows in groups.items():
                 client_id = key_to_client.get(key)
                 if not client_id:
                     skipped.append({"key": key, "report_type": rtype, "rows": len(rows)}); continue
-                replace_report(conn, client_id, rtype, rows, name,
-                               parsed["window_raw"], parsed["window_start"], parsed["window_end"], now,
-                               date_col=date_col, order=order)
+                writer(conn, client_id, rtype, rows, name,
+                       parsed["window_raw"], parsed["window_start"], parsed["window_end"], now,
+                       date_col=date_col, order=order)
                 results.append({"client_id": client_id, "report_type": rtype, "rows": len(rows), "file": name})
     return {"ingested": results, "skipped": skipped}
 

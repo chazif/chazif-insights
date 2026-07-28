@@ -48,6 +48,25 @@ def _targets_analytics(statement):
     return any(t in low for t in ANALYTICS_TABLES)
 
 
+_AGG_MARKERS = ("count(", "sum(", "min(", "max(", "avg(", "group by", "order by", "distinct")
+
+
+def _with_deterministic_order(statement):
+    """Append `ORDER BY row_index` to a plain raw_rows row-SELECT so BigQuery and
+    Postgres return rows in the SAME order. Without this, the two engines return rows in
+    arbitrary (different) orders, and every downstream stable-sort / first-seen / top-N
+    pick can resolve tied rows differently — the only non-noise parity differences.
+    Skipped for aggregate queries (COUNT/MIN/MAX/… have no row_index to order by) and for
+    qs_history (which has no row_index column)."""
+    sql = statement.text
+    low = sql.lower().lstrip()
+    if (low.startswith("select") and "raw_rows" in low and "qs_history" not in low
+            and not any(m in low for m in _AGG_MARKERS)):
+        from sqlalchemy import text
+        return text(sql + " ORDER BY row_index")
+    return statement
+
+
 class RouterConnection:
     """A connection facade that opens the Postgres and/or BigQuery connection lazily and
     routes each execute() to the right one by the table the statement touches."""
@@ -61,8 +80,11 @@ class RouterConnection:
         return self._conns[key]
 
     def execute(self, statement, parameters=None):
-        key = "an" if _targets_analytics(statement) else "pg"
-        conn = self._conn(key)
+        if _targets_analytics(statement):
+            statement = _with_deterministic_order(statement)
+            conn = self._conn("an")
+        else:
+            conn = self._conn("pg")
         return conn.execute(statement, parameters) if parameters is not None else conn.execute(statement)
 
     def execution_options(self, **kw):
@@ -97,7 +119,10 @@ class RouterEngine:
 
 
 def read_engine(pg_engine):
-    """Wrap a Postgres engine with analytics routing when BigQuery is configured;
-    otherwise return it unchanged (no routing, no behavioural change)."""
-    an = analytics_engine()
-    return RouterEngine(pg_engine, an) if an is not None else pg_engine
+    """Wrap a Postgres engine with analytics routing once BigQuery is ACTIVE (config vars
+    + USE_BIGQUERY); otherwise return it unchanged. Gating on active() (not merely the
+    config vars) means the app only reads from BigQuery at cutover — writes flip on the
+    same switch — while provisioning/migration/parity keep using analytics_engine() directly."""
+    if not bq.active():
+        return pg_engine
+    return RouterEngine(pg_engine, analytics_engine())
