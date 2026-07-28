@@ -1597,7 +1597,10 @@ def _search_terms_section(engine, client_id, config, keep=None, date_from=None, 
                        "cpc": round(t["cost"] / t["clicks"], 2) if t["clicks"] else 0} for t in rel_sorted[:150]]
     rel_categories = sorted({r["category"] for r in relevant_terms if r["category"] != "Uncategorized"})
 
-    flag_sorted = sorted([t for t in terms if t["seg"] == "Needs Review"], key=lambda x: -x["cost"])
+    # secondary sort by term so the top-75 cutoff is deterministic — many "Needs Review"
+    # terms are zero-spend and tie on cost, and input row order isn't guaranteed.
+    flag_sorted = sorted([t for t in terms if t["seg"] == "Needs Review"],
+                         key=lambda x: (-x["cost"], x["term"]))
     flagged_terms = [{"term": t["term"], "intent": t["seg"], "status": t["status"], "spend": round(t["cost"], 2),
                       "clicks": round(t["clicks"]), "conv": round(t["conv"], 1),
                       "cvr": round(t["conv"] / t["clicks"], 4) if t["clicks"] else 0,
