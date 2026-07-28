@@ -138,6 +138,81 @@ def check():
     return True
 
 
+# ---- cutover switch + writes (Phase 4: ingestion -> BigQuery) --------------------
+def active():
+    """True when the LIVE app should use BigQuery for analytics (reads + writes): the
+    config vars present AND an explicit USE_BIGQUERY opt-in. Keeping cutover behind its
+    own switch means setting the vars for provisioning / migration / parity does NOT flip
+    production — turning USE_BIGQUERY on (and off) is the cutover (and the rollback)."""
+    return bool(bq_config()) and os.environ.get("USE_BIGQUERY", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _jsonify(value, bqtype):
+    """Coerce a Python value for json.dumps per its BigQuery column type."""
+    if value is None:
+        return None
+    if bqtype == "DATE":
+        return value.isoformat()[:10] if hasattr(value, "isoformat") else str(value)[:10]
+    if bqtype == "JSON":
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (ValueError, TypeError):
+                return None
+        return value
+    if bqtype == "INT64":
+        return int(value)
+    if bqtype == "FLOAT64":
+        return float(value)
+    return value
+
+
+def ndjson_line(rec, schema):
+    """One NDJSON line for a record dict per a table schema (null fields omitted)."""
+    return json.dumps({n: _jsonify(rec.get(n), t) for n, t in schema if rec.get(n) is not None},
+                      separators=(",", ":"))
+
+
+def load_ndjson(table, path, truncate=False):
+    """Load an NDJSON file into `table` via a free load job (append unless truncate)."""
+    from google.cloud import bigquery
+    jc = bigquery.LoadJobConfig(
+        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+        write_disposition=(bigquery.WriteDisposition.WRITE_TRUNCATE if truncate
+                           else bigquery.WriteDisposition.WRITE_APPEND),
+        schema=_fields(TABLES[table][0]))
+    with open(path, "rb") as f:
+        get_client().load_table_from_file(f, table_ref(table), job_config=jc).result()
+
+
+def delete_report(client_id, report_type):
+    """Snapshot-replace step: remove a client's rows for one report_type from raw_rows."""
+    from google.cloud import bigquery
+    jc = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("c", "STRING", client_id),
+        bigquery.ScalarQueryParameter("r", "STRING", report_type)])
+    get_client().query(
+        f"DELETE FROM `{table_ref('raw_rows')}` WHERE client_id=@c AND report_type=@r",
+        job_config=jc).result()
+
+
+def merge_qs(staging_path):
+    """Load QS records (NDJSON) into a staging table, then MERGE into qs_history inserting
+    only new (client, keyword, as-of-date) rows — the append-only freeze."""
+    from google.cloud import bigquery
+    staging = table_ref("qs_history") + "_staging"
+    jc = bigquery.LoadJobConfig(
+        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+        schema=_fields(TABLES["qs_history"][0]))
+    with open(staging_path, "rb") as f:
+        get_client().load_table_from_file(f, staging, job_config=jc).result()
+    get_client().query(
+        f"MERGE `{table_ref('qs_history')}` T USING `{staging}` S "
+        "ON T.client_id=S.client_id AND T.kw_key=S.kw_key AND T.as_of_date=S.as_of_date "
+        "WHEN NOT MATCHED THEN INSERT ROW").result()
+
+
 # ---- CLI -------------------------------------------------------------------------
 if __name__ == "__main__":
     import argparse

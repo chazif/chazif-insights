@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from engine.ingest import service
 from engine.ingest.store import get_engine
+from engine.warehouse.analytics import read_engine
 from engine.bundle.assemble import build_bundle
 from engine.budget.parse import parse_budget_file
 
@@ -29,7 +30,9 @@ CLIENTS = ROOT / "data" / "clients"
 UPLOADS = ROOT / "data" / "uploads"
 
 app = FastAPI(title="SearchNex AE", version="0.3.0")
-_engine = get_engine()
+# read_engine wraps the Postgres engine with BigQuery analytics routing once BigQuery is
+# ACTIVE (config vars + USE_BIGQUERY); until cutover it returns the plain Postgres engine.
+_engine = read_engine(get_engine())
 
 # Ingestion is heavy (parse + insert of large exports). Doing it inside the request
 # blocks the worker long enough that Railway's edge times the connection out with a
