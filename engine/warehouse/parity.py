@@ -40,11 +40,34 @@ def _key(x):
     return json.dumps(_canon(x), sort_keys=True, default=str)
 
 
-def diff(a, b, path="", tol=1e-6, out=None):
-    """Recursive PG-vs-BQ diff. Numbers compare within tolerance; LISTS compare as
-    multisets of rounded content, so tied-row ordering and float-summation-order
-    differences between the two engines aren't reported as data mismatches. Returns a
-    list of human-readable mismatch paths."""
+def _equal(a, b, atol, rtol):
+    """Deep, order-insensitive, rounding-tolerant equality (no diff paths — used to pair
+    list elements). Numbers match within atol + rtol*|a|; lists match as multisets under
+    the same rule; dicts match key-for-key."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return a == b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return abs(a - b) <= atol + rtol * abs(a)
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_equal(a[k], b[k], atol, rtol) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            return False
+        rem = list(b)
+        for x in a:
+            j = next((i for i, y in enumerate(rem) if _equal(x, y, atol, rtol)), None)
+            if j is None:
+                return False
+            rem.pop(j)
+        return True
+    return a == b
+
+
+def diff(a, b, path="", tol=1e-6, out=None, atol=0.02, rtol=1e-3):
+    """Recursive PG-vs-BQ diff. Numbers compare within atol + rtol*|a| (so a value that
+    lands on the other side of a display-rounding boundary from float-summation-order
+    noise isn't a mismatch). LISTS pair elements order-insensitively via _equal, so tied-
+    row ordering isn't a mismatch either; only genuinely different rows are reported."""
     out = [] if out is None else out
     if isinstance(a, bool) or isinstance(b, bool):
         if a != b:
@@ -56,20 +79,26 @@ def diff(a, b, path="", tol=1e-6, out=None):
             elif k not in b:
                 out.append(f"{path}.{k}: absent in BQ")
             else:
-                diff(a[k], b[k], f"{path}.{k}", tol, out)
+                diff(a[k], b[k], f"{path}.{k}", tol, out, atol, rtol)
     elif isinstance(a, list) and isinstance(b, list):
-        ca, cb = Counter(_key(x) for x in a), Counter(_key(x) for x in b)
-        if ca != cb:
-            pg_only = list((ca - cb).elements())
-            bq_only = list((cb - ca).elements())
+        rem = list(range(len(b)))
+        pg_only = []
+        for x in a:
+            j = next((i for i in rem if _equal(x, b[i], atol, rtol)), None)
+            if j is None:
+                pg_only.append(x)
+            else:
+                rem.remove(j)
+        bq_only = [b[i] for i in rem]
+        if pg_only or bq_only:
             out.append(f"{path}: list content differs — {len(pg_only)} PG-only, "
                        f"{len(bq_only)} BQ-only (of {len(a)}/{len(b)})")
             for e in pg_only[:3]:
-                out.append(f"{path} PG-only: {e[:180]}")
+                out.append(f"{path} PG-only: {_key(e)[:180]}")
             for e in bq_only[:3]:
-                out.append(f"{path} BQ-only: {e[:180]}")
+                out.append(f"{path} BQ-only: {_key(e)[:180]}")
     elif isinstance(a, (int, float)) and isinstance(b, (int, float)):
-        if abs(a - b) > tol * (1 + abs(a)):
+        if abs(a - b) > atol + rtol * abs(a):
             out.append(f"{path}: PG={a} BQ={b}")
     else:
         if a != b:
