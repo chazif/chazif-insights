@@ -10,7 +10,7 @@ Usage:
   # DATABASE_URL env -> Postgres; unset -> local data/dev.db (SQLite)
 """
 import argparse, datetime, glob, os, tempfile
-from sqlalchemy import delete, select, func
+from sqlalchemy import delete, select, func, inspect
 
 from .parser import (parse_csv, stream_report, to_number, CORE_METRICS, ENTITY_COL,
                      EXPECTED_REPORTS, date_column, infer_date_order, normalize_date,
@@ -167,6 +167,12 @@ def replace_report_bq(conn, client_id, rtype, rows, source_file, window_raw, win
     old = conn.execute(select(uploads.c.upload_id).where(
         (uploads.c.client_id == client_id) & (uploads.c.report_type == rtype))).scalars().all()
     if old:
+        # The migrated rows still sit in Postgres raw_rows (data now lives in BigQuery),
+        # and that legacy table keeps its FK to uploads until decommission. Clear the
+        # stale rows for this report so the uploads parent can be replaced. Guarded so
+        # this is a harmless no-op once Postgres raw_rows is dropped post-cutover.
+        if inspect(conn).has_table(raw_rows.name):
+            conn.execute(delete(raw_rows).where(raw_rows.c.upload_id.in_(old)))
         conn.execute(delete(uploads).where(uploads.c.upload_id.in_(old)))
     res = conn.execute(uploads.insert().values(
         client_id=client_id, report_type=rtype, source_file=source_file,
