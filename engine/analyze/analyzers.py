@@ -230,10 +230,10 @@ def _waste(c, client_id, cfg):
             uni[w] += cost
     if not waste:
         return []
-    topuni = ", ".join(f"{w} (${v:,.0f})" for w, v in sorted(uni.items(), key=lambda x: -x[1])[:6])
+    topuni = ", ".join(f"{w} (${v:,.0f})" for w, v in sorted(uni.items(), key=lambda x: (-x[1], x[0]))[:6])
     pct = (waste / total * 100) if total else 0
     waste_data = {"columns": ["Search term (0 conversions)", "Cost"],
-                  "rows": [[t, round(co, 2)] for t, co in sorted(waste_terms, key=lambda x: -x[1])[:30]]}
+                  "rows": [[t, round(co, 2)] for t, co in sorted(waste_terms, key=lambda x: (-x[1], x[0]))[:30]]}
     prot_note = f" (${protected:,.0f} in protected brand/competitor terms excluded)" if protected else ""
     return [F(
         "K", "CRITICAL" if pct >= 40 else "IMPORTANT", "Zero-conversion spend and thin negative shield",
@@ -278,7 +278,7 @@ def _quality(c, client_id, th):
     if be_cost:
         overpay = be_cost * 0.33
         be_data = {"columns": ["Keyword", "QS", "Cost"],
-                   "rows": [[k, q, round(co, 2)] for k, q, co in sorted(be_kws, key=lambda x: -x[2])[:30]]}
+                   "rows": [[k, q, round(co, 2)] for k, q, co in sorted(be_kws, key=lambda x: (-x[2], x[0]))[:30]]}
         findings.append(F(
             "Q", "IMPORTANT", f"Below-average expected CTR on ${be_cost:,.0f} of spend",
             f"{len(be_kws)} keywords carry Below-Avg expected CTR (${be_cost:,.0f} spend). Account avg QS ≈ {avgqs:.1f}.",
@@ -288,7 +288,7 @@ def _quality(c, client_id, th):
             "Rework highest-spend Below-Avg eCTR keywords", "MEDIUM", "M", "Week 1-2", "[ACTION REQUIRED]", be_data))
     if dz_kws:
         dz_data = {"columns": ["Keyword", "QS", "Cost"],
-                   "rows": [[k, q, round(co, 2)] for k, q, co in sorted(dz_kws, key=lambda x: -x[2])[:30]]}
+                   "rows": [[k, q, round(co, 2)] for k, q, co in sorted(dz_kws, key=lambda x: (-x[2], x[0]))[:30]]}
         findings.append(F(
             "Q", "IMPORTANT", f"QS 1-{qs_floor} danger zone holds {len(dz_kws)} keywords (${qsdz_cost:,.0f})",
             f"QS 1-{qs_floor}: {len(dz_kws)} keywords, ${qsdz_cost:,.0f} spend. Account avg QS ≈ {avgqs:.1f}.",
