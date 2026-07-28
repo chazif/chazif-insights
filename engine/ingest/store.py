@@ -119,6 +119,9 @@ def get_engine(url=None, echo=False):
 
 
 def init_db(engine):
+    # Schema creation/migration always targets Postgres — unwrap the analytics read
+    # router (which only routes SELECTs) to its underlying Postgres engine.
+    engine = getattr(engine, "pg_engine", None) or engine
     metadata.create_all(engine)
     # add-column-if-missing migrations for existing DBs (SQLite + Postgres both take this form)
     have = {c["name"] for c in inspect(engine).get_columns("clients")}

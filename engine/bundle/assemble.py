@@ -98,25 +98,30 @@ def _ym_bound(s):
 
 
 def _date_bound(s, end=False):
-    """'2026-03-15' -> that ISO day; '2026-03' -> first (end=False) or last (end=True)
-    day of the month; None if empty/unparseable. ISO strings compare correctly against
-    the DATE column on both SQLite and Postgres."""
+    """'2026-03-15' -> that datetime.date; '2026-03' -> first (end=False) or last
+    (end=True) day of the month; None if empty/unparseable. A real date object (not an
+    ISO string) so the param binds as DATE on BigQuery (its DATE columns won't compare
+    against a STRING) — and it still works on SQLite/Postgres."""
     m = re.match(r"^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$", str(s or "").strip())
     if not m:
         return None
     y, mo = int(m.group(1)), int(m.group(2))
     d = int(m.group(3)) if m.group(3) else (calendar.monthrange(y, mo)[1] if end else 1)
-    return f"{y:04d}-{mo:02d}-{d:02d}"
+    try:
+        return datetime.date(y, mo, d)
+    except ValueError:
+        return None
 
 
 def _range_sql(d_from, d_to):
     """SQL fragment + params limiting raw_rows to [d_from, d_to] by date_norm. Undated
     rows (date_norm NULL) are kept, so snapshot reports not yet re-uploaded at day level
-    still show their whole window. Returns ('', {}) when no range is set."""
+    still show their whole window. Returns ('', {}) when no range is set. Params are
+    datetime.date objects (DATE-typed for BigQuery)."""
     if not (d_from or d_to):
         return "", {}
     return (" AND (date_norm IS NULL OR date_norm BETWEEN :d_from AND :d_to)",
-            {"d_from": d_from or "0001-01-01", "d_to": d_to or "9999-12-31"})
+            {"d_from": d_from or datetime.date(1, 1, 1), "d_to": d_to or datetime.date(9999, 12, 31)})
 
 
 def _has_day(s):
@@ -142,7 +147,7 @@ def _shift_year(d, n):
 
 
 def _cp_range_sums(c, client_id, keep, lo, hi):
-    """Sum campaign_performance cost/clicks/conv over the ISO day range [lo, hi]."""
+    """Sum campaign_performance cost/clicks/conv over the day range [lo, hi] (date objects)."""
     cost = clicks = conv = 0.0
     for co, cl, cv, row in c.execute(text(
             "SELECT cost, clicks, conversions, row FROM raw_rows WHERE client_id=:c "
@@ -1955,8 +1960,8 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
                     else:                                      # mom -> preceding equal-length window
                         pri_hi = cur_lo - datetime.timedelta(days=1)
                         pri_lo = pri_hi - (cur_hi - cur_lo)
-                    cc, ccl, ccv = _cp_range_sums(c, client_id, keep, cur_lo.isoformat(), cur_hi.isoformat())
-                    pc, pcl, pcv = _cp_range_sums(c, client_id, keep, pri_lo.isoformat(), pri_hi.isoformat())
+                    cc, ccl, ccv = _cp_range_sums(c, client_id, keep, cur_lo, cur_hi)
+                    pc, pcl, pcv = _cp_range_sums(c, client_id, keep, pri_lo, pri_hi)
                     cur_label = f"{cur_lo.isoformat()} – {cur_hi.isoformat()}"
                     prior_mk_label = f"{pri_lo.isoformat()} – {pri_hi.isoformat()}"
                     meta_periods = {"current": cur_label, "prior": prior_mk_label}

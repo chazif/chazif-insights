@@ -83,6 +83,7 @@ class RouterEngine:
     def __init__(self, pg_engine, an_engine):
         self._engines = {"pg": pg_engine, "an": an_engine}
         self.dialect = pg_engine.dialect          # some callers read engine.dialect.name
+        self.pg_engine = pg_engine                # DDL/schema ops (init_db) unwrap to this
 
     def connect(self):
         return RouterConnection(self._engines)
