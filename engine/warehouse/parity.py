@@ -12,6 +12,8 @@ Run where both stores are reachable (Cloud Shell / Railway one-off) with DATABAS
   python -m engine.warehouse.parity --clients a,b --tolerance 0.01
 """
 import argparse
+import json
+from collections import Counter
 
 from ..ingest.store import get_engine, init_db
 from ..ingest import service
@@ -19,9 +21,30 @@ from ..bundle.assemble import build_bundle
 from .analytics import analytics_engine, RouterEngine
 
 
+def _canon(x, nd=4):
+    """Canonical, order- and float-noise-insensitive form: numbers rounded to nd
+    decimals, dict keys sorted, and nested lists sorted by content. Two lists that hold
+    the same rows differ only by order/last-decimal summation noise -> equal canon."""
+    if isinstance(x, bool):
+        return x
+    if isinstance(x, (int, float)):
+        return round(float(x), nd)
+    if isinstance(x, dict):
+        return {k: _canon(v, nd) for k, v in sorted(x.items(), key=lambda kv: str(kv[0]))}
+    if isinstance(x, list):
+        return sorted((_canon(v, nd) for v in x), key=lambda z: json.dumps(z, sort_keys=True, default=str))
+    return x
+
+
+def _key(x):
+    return json.dumps(_canon(x), sort_keys=True, default=str)
+
+
 def diff(a, b, path="", tol=1e-6, out=None):
-    """Recursive PG-vs-BQ diff. Numbers compare within a relative tolerance (rounding);
-    everything else must be equal. Returns a list of human-readable mismatch paths."""
+    """Recursive PG-vs-BQ diff. Numbers compare within tolerance; LISTS compare as
+    multisets of rounded content, so tied-row ordering and float-summation-order
+    differences between the two engines aren't reported as data mismatches. Returns a
+    list of human-readable mismatch paths."""
     out = [] if out is None else out
     if isinstance(a, bool) or isinstance(b, bool):
         if a != b:
@@ -35,11 +58,16 @@ def diff(a, b, path="", tol=1e-6, out=None):
             else:
                 diff(a[k], b[k], f"{path}.{k}", tol, out)
     elif isinstance(a, list) and isinstance(b, list):
-        if len(a) != len(b):
-            out.append(f"{path}: list length PG={len(a)} BQ={len(b)}")
-        else:
-            for i, (x, y) in enumerate(zip(a, b)):
-                diff(x, y, f"{path}[{i}]", tol, out)
+        ca, cb = Counter(_key(x) for x in a), Counter(_key(x) for x in b)
+        if ca != cb:
+            pg_only = list((ca - cb).elements())
+            bq_only = list((cb - ca).elements())
+            out.append(f"{path}: list content differs — {len(pg_only)} PG-only, "
+                       f"{len(bq_only)} BQ-only (of {len(a)}/{len(b)})")
+            for e in pg_only[:3]:
+                out.append(f"{path} PG-only: {e[:180]}")
+            for e in bq_only[:3]:
+                out.append(f"{path} BQ-only: {e[:180]}")
     elif isinstance(a, (int, float)) and isinstance(b, (int, float)):
         if abs(a - b) > tol * (1 + abs(a)):
             out.append(f"{path}: PG={a} BQ={b}")
