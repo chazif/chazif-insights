@@ -11,9 +11,6 @@ sqlalchemy-bigquery dialect), so query Results behave identically — no result-
 mimicry. When BigQuery isn't configured, callers get the plain Postgres engine back
 and there is zero routing (RouterEngine is never even constructed).
 """
-import json
-import os
-
 from . import bq
 
 # The two tables that live in BigQuery; every other table stays in Postgres.
@@ -22,16 +19,16 @@ ANALYTICS_TABLES = ("raw_rows", "qs_history")
 
 def analytics_engine():
     """SQLAlchemy engine over the BigQuery dataset, or None if BigQuery isn't configured.
-    Imports (and thus requires) sqlalchemy-bigquery only when actually building it."""
-    cfg = bq.bq_config()
-    if not cfg:
+    Reuses the SAME bigquery.Client the rest of the warehouse builds (SA key or ADC) via
+    connect_args, so auth is identical everywhere — this sidesteps sqlalchemy-bigquery's
+    own default-auth path, which mishandles Cloud Shell / metadata-server credentials
+    ('service account info is missing email field'). Imports the dialect lazily."""
+    if not bq.bq_config():
         return None
     from sqlalchemy import create_engine
+    cfg = bq.bq_config()
     url = f"bigquery://{cfg['project']}/{cfg['dataset']}"
-    key = os.environ.get("GCP_SA_KEY")
-    if key and key.strip().startswith("{"):
-        return create_engine(url, credentials_info=json.loads(key), location=cfg["location"])
-    return create_engine(url, location=cfg["location"])   # Application Default Credentials
+    return create_engine(url, connect_args={"client": bq.get_client()})
 
 
 def _targets_analytics(statement):
