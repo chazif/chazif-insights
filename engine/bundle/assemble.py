@@ -1089,7 +1089,7 @@ def _ads_section(engine, client_id, config=None, keep=None, date_from=None, date
                     "lp_grade": _grade_lp(cv / clicks if clicks else 0, impr, clicks)})
     if not ads:
         return None
-    ads.sort(key=lambda x: -x["cost"])
+    ads.sort(key=lambda x: (-x["cost"], x["ad_group"], x["headline"]))   # stable tie-break for the top-100 cutoff
 
     def group_data(subset):
         gc, gi, gcl, gs, gcv = Counter(), Counter(), Counter(), Counter(), Counter()
@@ -1419,7 +1419,7 @@ def _lp_category_grid(engine, client_id, config, keep=None, date_from=None, date
                    for u in cell if cat in cell[u] and cell[u][cat][0]]
         if not entries:
             continue
-        entries.sort(key=lambda e: e[0])
+        entries.sort(key=lambda e: (e[0], e[1]))   # cvr, then url — deterministic best/worst on ties
         vals = [e[0] for e in entries]
         summary.append({"category": cat, "lps_running": len([u for u in cell if cat in cell[u]]),
                         "spend": round(sum(cell[u][cat][2] for u in cell if cat in cell[u]), 2),
@@ -1452,8 +1452,9 @@ def _landing_pages(engine, client_id, config, keep=None, date_from=None, date_to
             continue
         d = agg[lp or "(unknown)"]
         d[0] += _num(clicks); d[1] += _num(impr); d[2] += _num(cost)
-        if d[3] is None:
-            d[3] = rd.get("mobile_speed_score")
+        spd = rd.get("mobile_speed_score")          # a URL can appear on several days;
+        if spd is not None and (d[3] is None or _num(spd) > _num(d[3])):
+            d[3] = spd                              # keep the max so row order doesn't decide it
     full = [{"url": url, "clicks": round(cl), "impr": round(im), "cost": round(co, 2),
              "ctr": round(cl / im, 4) if im else 0, "speed": sp}
             for url, (cl, im, co, sp) in sorted(agg.items(), key=lambda kv: -kv[1][2])]
@@ -1579,7 +1580,7 @@ def _search_terms_section(engine, client_id, config, keep=None, date_from=None, 
                            "spend_share": round(comp_s[c] / total_comp_spend, 4) if total_comp_spend else 0,
                            "conv": round(comp_cv[c], 0), "cpa": round(comp_s[c] / comp_cv[c], 2) if comp_cv[c] else None}
                           for c in sorted(comp_s, key=lambda k: -comp_s[k]) if comp_s[c] > 0 or comp_c[c] > 0]
-    comp_matched = sorted([t for t in terms if t.get("competitor")], key=lambda x: -x["cost"])
+    comp_matched = sorted([t for t in terms if t.get("competitor")], key=lambda x: (-x["cost"], x["term"]))
     competitor_terms = [{"term": t["term"], "competitor": t["competitor"], "spend": round(t["cost"], 2),
                          "clicks": round(t["clicks"]), "conv": round(t["conv"], 1),
                          "cvr": round(t["conv"] / t["clicks"], 4) if t["clicks"] else 0,

@@ -254,22 +254,26 @@ def _quality(c, client_id, th):
     if not rows:
         return []
     findings = []
-    be_cost = qsdz_cost = 0
     be_kws, dz_kws, qs_vals = [], [], []
     for cost, row in rows:
         row = _asdict(row)
         cost = _num(cost)
         kw = row.get("search_keyword", "")
         if (row.get("exp_ctr") or "").lower() == "below average":
-            be_cost += cost; be_kws.append((kw, row.get("quality_score"), cost))
+            be_kws.append((kw, row.get("quality_score"), cost))
         qs = row.get("quality_score")
         try:
             qsf = float(qs)
             qs_vals.append(qsf)
             if qsf <= qs_floor:
-                qsdz_cost += cost; dz_kws.append((kw, qsf, cost))
+                dz_kws.append((kw, qsf, cost))
         except (TypeError, ValueError):
             pass
+    # Sum in sorted order so the formatted $ amounts in the rationale don't shift by a
+    # dollar between engines from float-summation-order noise. qs_vals are integers, so
+    # their sum (and avgqs) is already order-independent.
+    be_cost = sum(sorted(co for _, _, co in be_kws))
+    qsdz_cost = sum(sorted(co for _, _, co in dz_kws))
     avgqs = sum(qs_vals) / len(qs_vals) if qs_vals else 0
     if be_cost:
         overpay = be_cost * 0.33
