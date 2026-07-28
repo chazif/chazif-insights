@@ -11,6 +11,9 @@ sqlalchemy-bigquery dialect), so query Results behave identically — no result-
 mimicry. When BigQuery isn't configured, callers get the plain Postgres engine back
 and there is zero routing (RouterEngine is never even constructed).
 """
+import json
+import os
+
 from . import bq
 
 # The two tables that live in BigQuery; every other table stays in Postgres.
@@ -19,16 +22,20 @@ ANALYTICS_TABLES = ("raw_rows", "qs_history")
 
 def analytics_engine():
     """SQLAlchemy engine over the BigQuery dataset, or None if BigQuery isn't configured.
-    Reuses the SAME bigquery.Client the rest of the warehouse builds (SA key or ADC) via
-    connect_args, so auth is identical everywhere — this sidesteps sqlalchemy-bigquery's
-    own default-auth path, which mishandles Cloud Shell / metadata-server credentials
-    ('service account info is missing email field'). Imports the dialect lazily."""
-    if not bq.bq_config():
+    Uses EXPLICIT service-account credentials (credentials_info) from GCP_SA_KEY — the
+    documented, reliable path. sqlalchemy-bigquery's default auth can't refresh Cloud
+    Shell / metadata-server (ADC) credentials ('service account info is missing email
+    field') and it ignores a client passed via connect_args, so an inline SA key is
+    required: production has it in Railway; a Cloud-Shell parity run must export it too."""
+    cfg = bq.bq_config()
+    if not cfg:
         return None
     from sqlalchemy import create_engine
-    cfg = bq.bq_config()
     url = f"bigquery://{cfg['project']}/{cfg['dataset']}"
-    return create_engine(url, connect_args={"client": bq.get_client()})
+    key = os.environ.get("GCP_SA_KEY")
+    if key and key.strip().startswith("{"):
+        return create_engine(url, credentials_info=json.loads(key), location=cfg["location"])
+    return create_engine(url, location=cfg["location"])   # ADC fallback (may fail in Cloud Shell)
 
 
 def _targets_analytics(statement):
