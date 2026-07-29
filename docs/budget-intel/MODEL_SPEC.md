@@ -55,6 +55,15 @@ CPL(IS)   = a*IS² + b*IS + c                  a = -0.00192, b = 0.23334, c = 1.
 
 (Ratios!G2, Ratios!G3. Workbook rounds Leads with MROUND(...,1).)
 
+**IMPORTANT — the production run used TABLES, not these formulas.** The ratio
+grids' numerator/denominator source (Ratios!A11:B110 and the cached master rows)
+are pasted literals from an earlier curve version: leads and CPL both hold flat
+from IS≈60 (a monotone cap — both curves freeze once CPL, at 2dp, stops rising).
+The parametric formulas above, evaluated fresh, diverge from the tables beyond
+IS≈59. The authoritative tables ship in `fixtures/curve_params.json →
+master_tables`; the golden test MUST use them. The engine's parametric generator
+(`MasterCurves.from_params`) reproduces the same cap behavior for new fits.
+
 **Per-cell scaling** (the "ratio" method — Projections!E3, DD3 via the
 Ratios!G11-grid `= G$2/$A11` = Leads(target)/Leads(current)):
 
@@ -111,8 +120,20 @@ score_revenue   = (car_count/impr) * (car_count/cost)  * rev_per_car * max(0.55 
 
 Interpretation: efficiency (conversions per dollar) × propensity (conversions per
 impression) × headroom (unclaimed IS, capped) × value weight. The magic constants
-(0.25, 1e8, …) only normalize magnitudes — scores are used *proportionally*, so
-they cancel in allocation. Keep them for golden-test fidelity; expose as config.
+(1e8, 1e3, 1e4) only normalize magnitudes — scores are used *proportionally*, so
+uniform constants cancel in allocation. Expose as config.
+
+**Workbook integrity quirks (reproduce via test overrides, NOT in engine code —
+full detail in `fixtures/curve_params.json → score_quirk`):**
+1. Each region's first row (3/10/17/23) carries a trailing `*0.25` on all four
+   variants; other rows don't. Non-uniform → it DID change the allocation.
+2. Opportunity Scores rows 11–12 compute from the wrong rows' inputs (one-row
+   data shift vs Actuals in the Colorado block).
+3. Budget Allocation `I5`/`I12` are broken references (point at `D6`/`D13`), so
+   the allocator consumed the next row's score for both NB BRAKES T2 cells —
+   and the Recommendation sheet's displayed score disagrees with the allocator's
+   input on those rows. Golden assertions for allocation use BA col I (the
+   vector actually consumed).
 
 Region TOTAL rows use a weighted rollup (not needed for allocation — allocation
 runs on leaf cells only).
