@@ -7,6 +7,7 @@ Serves the static frontend, the per-client DATA bundle, and the admin API
 Run locally:  py -m uvicorn backend.main:app --reload --port 8000
 Railway:      Procfile -> uvicorn backend.main:app --host 0.0.0.0 --port $PORT
 """
+import time
 import uuid
 import zlib
 from pathlib import Path
@@ -41,11 +42,41 @@ _engine = read_engine(get_engine())
 # 502. Instead we run it as a background job and let the UI poll for completion.
 _JOBS = {}   # job_id -> {"status": processing|done|error, "result"/"error": ...}
 
+# A fresh bundle build fans out ~40 warehouse queries (each a BigQuery job in production),
+# so recomputing it on every reload / filter toggle is the main source of UI latency. Cache
+# computed bundles keyed by everything that changes the result; cleared on any ingest or
+# config change, and TTL-bounded as a backstop against a missed invalidation.
+_BUNDLE_CACHE = {}          # key -> (expiry_epoch, computed_dict)
+_BUNDLE_CACHE_TTL = 120     # seconds
+_BUNDLE_CACHE_MAX = 32
+
+
+def _bundle_cache_get(key):
+    ent = _BUNDLE_CACHE.get(key)
+    if ent and ent[0] > time.time():
+        return ent[1]
+    if ent:
+        _BUNDLE_CACHE.pop(key, None)
+    return None
+
+
+def _bundle_cache_put(key, value):
+    if len(_BUNDLE_CACHE) >= _BUNDLE_CACHE_MAX:      # evict the soonest-to-expire half
+        for k in sorted(_BUNDLE_CACHE, key=lambda k: _BUNDLE_CACHE[k][0])[:_BUNDLE_CACHE_MAX // 2 or 1]:
+            _BUNDLE_CACHE.pop(k, None)
+    _BUNDLE_CACHE[key] = (time.time() + _BUNDLE_CACHE_TTL, value)
+
+
+def _bundle_cache_clear():
+    """Drop all cached bundles — called whenever ingest or config changes the underlying data."""
+    _BUNDLE_CACHE.clear()
+
 
 def _run_job(job_id, fn):
     """Run a blocking ingest fn in the threadpool and record its result on the job."""
     try:
         _JOBS[job_id] = {"status": "done", "result": fn()}
+        _bundle_cache_clear()                         # ingested data changed -> stale bundles
     except ValueError as e:
         _JOBS[job_id] = {"status": "error", "error": str(e)}
     except Exception as e:                       # noqa: BLE001 — surface any ingest failure
@@ -103,7 +134,9 @@ def client_config_get(client_id: str):
 @app.put("/api/clients/{client_id}/config")
 def client_config_put(client_id: str, body: dict):
     try:
-        return service.update_config(client_id, body, engine=_engine)
+        result = service.update_config(client_id, body, engine=_engine)
+        _bundle_cache_clear()                         # config (brand terms, budgets…) changes the bundle
+        return result
     except ValueError as e:
         raise HTTPException(404, str(e))
 
@@ -121,6 +154,7 @@ async def client_budget_upload(client_id: str, file: UploadFile = File(...),
     except ValueError as e:
         raise HTTPException(400, str(e))
     service.update_config(client_id, {"budget_lines": parsed["lines"]}, engine=_engine)
+    _bundle_cache_clear()                              # budget lines feed the bundle's pacing/recon
     return parsed
 
 
@@ -244,11 +278,17 @@ def bundle(client: str = Query("mavis"), period: str = Query("2026-03"),
     path = CLIENTS / client / period / "bundle.json"
     if path.is_file() and not (date_from or date_to or has_filter or compare != "yoy"):
         return FileResponse(path, media_type="application/json")
+    # Serve an unexpired cached build for these exact params (instant reload / filter re-toggle).
+    key = (client, period, date_from, date_to, seg, campaign, region, category, brand, compare, cfrom, cto)
+    cached = _bundle_cache_get(key)
+    if cached is not None:
+        return JSONResponse(cached)
     # Otherwise compute it from the warehouse, honoring the date range + global filters.
     computed = build_bundle(client, _engine, date_from=date_from, date_to=date_to, filters=filters,
                             compare=compare, compare_from=cfrom, compare_to=cto)
     if computed is None:
         raise HTTPException(404, f"no data for client '{client}'")
+    _bundle_cache_put(key, computed)
     return JSONResponse(computed)
 
 

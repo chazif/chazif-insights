@@ -15,6 +15,25 @@ from ..ingest.store import get_engine, clients, uploads, qs_history
 from ..ingest.service import get_config
 from ..ingest.parser import GEO_SLUGS, impr_share_frac
 from ..analyze.analyzers import run_analyzers, _asdict, _num
+from ..warehouse import bq
+
+
+def _run_sections(tasks, parallel):
+    """Run each named thunk and return {name: result}. When `parallel`, the thunks run in
+    a thread pool: the section builders are independent and each opens its own connection,
+    so overlapping their queries turns ~N sequential BigQuery jobs into a few concurrent
+    waves (the dominant cost of a bundle build in production). Sequential otherwise — local
+    SQLite can't share connections across threads and is fast enough that it doesn't matter.
+    Exceptions propagate exactly as in the sequential path."""
+    if not parallel:
+        return {name: fn() for name, fn in tasks.items()}
+    from concurrent.futures import ThreadPoolExecutor
+    out = {}
+    with ThreadPoolExecutor(max_workers=min(12, len(tasks) or 1)) as ex:
+        futs = {ex.submit(fn): name for name, fn in tasks.items()}
+        for fut, name in futs.items():
+            out[name] = fut.result()
+    return out
 
 FULL_MONTHS = ["January", "February", "March", "April", "May", "June",
                "July", "August", "September", "October", "November", "December"]
@@ -2038,41 +2057,67 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         has_pmax = bool(c.execute(text(
             "SELECT COUNT(*) FROM raw_rows WHERE client_id=:c AND report_type='pmax_placements'"), {"c": client_id}).scalar())
 
-    # ---- analyzers -> findings + recommendations (analyzers open their own connections) ----
-    analyzer_findings = run_analyzers(engine, client_id, cm, config) if cm else []
-    findings = _to_overview_findings(analyzer_findings)
-    recommendations = _to_recommendations(analyzer_findings)
     # Day-level bounds for the snapshot builders (Search Terms / Geo / Ad Copy / LPs).
     # Rows without a date_norm (report not yet re-uploaded at day level) are kept, so
     # those tabs show their whole window until daily data arrives.
     d_from, d_to = _date_bound(date_from, end=False), _date_bound(date_to, end=True)
 
-    campaigns = _campaigns(engine, client_id, cm, keep, dateless) if cm else None
-    geo = _geo(engine, client_id, keep, d_from, d_to)
-    budget = _budget(engine, client_id, cm, config, keep, dateless) if cm else None
+    # The analyzers + all section builders are independent (each opens its own connection).
+    # Run them concurrently when reads go to BigQuery so their queries overlap instead of
+    # running one-by-one; a plain-Postgres/SQLite engine runs them sequentially.
+    _none = lambda: None
+    _tasks = {
+        "analyzers": (lambda: run_analyzers(engine, client_id, cm, config)) if cm else (lambda: []),
+        "campaigns": (lambda: _campaigns(engine, client_id, cm, keep, dateless)) if cm else _none,
+        "geo": lambda: _geo(engine, client_id, keep, d_from, d_to),
+        "budget": (lambda: _budget(engine, client_id, cm, config, keep, dateless)) if cm else _none,
+        "reconciliation": (lambda: _budget_reconciliation(engine, client_id, cm, config, dateless)) if cm else _none,
+        "qscore": lambda: _quality_score(engine, client_id, cm, config, keep, d_from, d_to),
+        "qs_break": lambda: _qs_breakdown(engine, client_id, cm, config, keep, d_from, d_to),
+        "keyword": lambda: _keyword_section(engine, client_id, keep, d_from, d_to),
+        "kw_regions": lambda: _keyword_regions(engine, client_id, config, keep, d_from, d_to),
+        "reg_cat": lambda: _region_category(engine, client_id, config, keep, d_from, d_to),
+        "st": lambda: _search_terms_section(engine, client_id, config, keep, d_from, d_to),
+        "ads": lambda: _ads_section(engine, client_id, config, keep, d_from, d_to),
+        "lps": lambda: _landing_pages(engine, client_id, config, keep, d_from, d_to),
+        "lp_perf": lambda: _lp_performance(engine, client_id, keep, d_from, d_to),
+        "lp_category_grid": lambda: _lp_category_grid(engine, client_id, config, keep, d_from, d_to),
+        "nb_cats": (lambda: _nb_categories(engine, client_id, cm, config, keep, compare)) if cm else _none,
+        "regions": (lambda: _regions(engine, client_id, cm, config, keep, compare)) if cm else _none,
+    }
+    R = _run_sections(_tasks, parallel=bq.active())
+
+    # ---- analyzers -> findings + recommendations ----
+    analyzer_findings = R["analyzers"]
+    findings = _to_overview_findings(analyzer_findings)
+    recommendations = _to_recommendations(analyzer_findings)
+
+    campaigns = R["campaigns"]
+    geo = R["geo"]
+    budget = R["budget"]
     budget_sec = _budget_section(config)
-    budget_sec["reconciliation"] = _budget_reconciliation(engine, client_id, cm, config, dateless) if cm else None
-    qscore = _quality_score(engine, client_id, cm, config, keep, d_from, d_to)
-    qs_break = _qs_breakdown(engine, client_id, cm, config, keep, d_from, d_to)
-    keyword = _keyword_section(engine, client_id, keep, d_from, d_to)
-    kw_regions = _keyword_regions(engine, client_id, config, keep, d_from, d_to)
-    reg_cat = _region_category(engine, client_id, config, keep, d_from, d_to)
-    st = _search_terms_section(engine, client_id, config, keep, d_from, d_to)
+    budget_sec["reconciliation"] = R["reconciliation"]
+    qscore = R["qscore"]
+    qs_break = R["qs_break"]
+    keyword = R["keyword"]
+    kw_regions = R["kw_regions"]
+    reg_cat = R["reg_cat"]
+    st = R["st"]
     if st is not None:
         # the search-terms export has no campaign/ad_group column, so those filters
         # cannot be resolved for this report — tell the UI rather than silently ignoring
         st["filters_ignored"] = [k for k in ("campaign", "region")
                                  if (filters or {}).get(k) not in (None, "", "all")]
-    ads = _ads_section(engine, client_id, config, keep, d_from, d_to)
-    lps = _landing_pages(engine, client_id, config, keep, d_from, d_to)
-    lp_perf = _lp_performance(engine, client_id, keep, d_from, d_to)
+    ads = R["ads"]
+    lps = R["lps"]
+    lp_perf = R["lp_perf"]
     if lps is None and lp_perf:
         lps = {"count": len(lp_perf), "rows": [], "category_grid": None}
     if lps is not None:
         lps["performance"] = lp_perf
-        lps["category_grid"] = _lp_category_grid(engine, client_id, config, keep, d_from, d_to)
-    nb_cats = _nb_categories(engine, client_id, cm, config, keep, compare) if cm else None
-    regions = _regions(engine, client_id, cm, config, keep, compare) if cm else None
+        lps["category_grid"] = R["lp_category_grid"]
+    nb_cats = R["nb_cats"]
+    regions = R["regions"]
 
     # Performance section — mirrors the reference nav order (Overview, Monthly Trends,
     # NB Categories, Regions, Campaign, Budget). NB Categories and Regions are both
