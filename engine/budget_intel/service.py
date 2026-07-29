@@ -10,7 +10,6 @@ import json
 
 from sqlalchemy import select, insert, delete, text
 
-from engine.ingest.store import raw_rows
 from .model import Cell, mround
 from .tables import (campaign_mappings, business_metrics, simulator_snapshots,
                      allocation_runs, allocation_results, predictions)
@@ -23,12 +22,17 @@ def _now():
 
 
 def _jrow(v):
-    if isinstance(v, str):
+    """raw_rows.row via text() SQL arrives as a dict (BQ JSON / PG jsonb) or a
+    JSON string (SQLite) — and double-encoded when a caller stored a pre-dumped
+    string through the JSON column type. Decode until it's a dict."""
+    for _ in range(2):
+        if not isinstance(v, str):
+            break
         try:
-            return json.loads(v)
+            v = json.loads(v)
         except (ValueError, TypeError):
             return {}
-    return v or {}
+    return v if isinstance(v, dict) else {}
 
 
 # ---- mappings --------------------------------------------------------------
@@ -126,6 +130,8 @@ def add_snapshot(engine, client_id, points, source="manual", campaign=None):
         c.execute(insert(simulator_snapshots).values(
             client_id=client_id, campaign=campaign, taken_at=_now(),
             source=source, points=points))
+    from . import bq_mirror
+    bq_mirror.mirror_snapshot(client_id, points, source, campaign)  # fail-soft
 
 
 # ---- actuals builder (the programmatic Actuals sheet) ------------------------
@@ -138,10 +144,16 @@ def build_cells(engine, client_id):
     IS aggregation: eligible impressions = impr / IS per campaign;
     cell IS = sum(impr) / sum(eligible)."""
     mappings = {m["campaign"]: m for m in get_mappings(engine, client_id)}
+    # text() SQL, not a Core select: the BigQuery RouterEngine (engine/warehouse/
+    # analytics.py) routes raw text touching raw_rows to BigQuery after cutover,
+    # while Core selects always go to Postgres. Column list is the intersection
+    # of the PG and BQ raw_rows schemas.
     with engine.connect() as c:
-        rows = c.execute(select(raw_rows).where(
-            (raw_rows.c.client_id == client_id)
-            & (raw_rows.c.report_type == "campaign_performance"))).mappings().all()
+        rows = c.execute(text(
+            "SELECT campaign, clicks, impressions, cost, conversions, row "
+            "FROM raw_rows WHERE client_id = :cid "
+            "AND report_type = 'campaign_performance'"),
+            {"cid": client_id}).mappings().all()
 
     agg = {}
     for r in rows:
@@ -280,4 +292,6 @@ def finalize_run(engine, client_id, run_id, created_by="api"):
                 predicted={"is": r["expected_is"], "cpa": r["expected_cpa"],
                            "cars": r["expected_cars"], "spend": r["rec_spend"]}))
     run["status"] = "final"
+    from . import bq_mirror
+    bq_mirror.mirror_finalized_run(run)   # fail-soft analytical mirror
     return run

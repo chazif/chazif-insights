@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from engine.ingest.store import get_engine
+from engine.warehouse.analytics import read_engine
 from engine.budget_intel import tables as bi_tables
 from engine.budget_intel import service as bi
 from engine.budget_intel import curves as bi_curves
@@ -21,10 +22,15 @@ _engine = None
 
 
 def engine():
+    """Analytics-routed engine: after the BigQuery cutover (USE_BIGQUERY), raw
+    text() reads of raw_rows go to BigQuery while bi_* Core statements and all
+    writes stay in Postgres — same seam as build_bundle. Before cutover it's
+    the plain Postgres/SQLite engine."""
     global _engine
     if _engine is None:
-        _engine = get_engine()
-        bi_tables.init_db(_engine)
+        pg = get_engine()
+        bi_tables.init_db(pg)             # DDL always against the real PG engine
+        _engine = read_engine(pg)
     return _engine
 
 

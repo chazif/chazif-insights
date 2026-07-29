@@ -170,6 +170,31 @@ simulator-vs-actual separately (Google's optimism is measurable and demo-worthy)
 7. SQLite and Postgres both pass the suite (matching existing dual-dialect CI
    posture).
 
+## BigQuery integration (engine/budget_intel/bq_mirror.py)
+
+The app's warehouse split (engine/warehouse/): raw_rows + qs_history live in
+BigQuery after cutover (USE_BIGQUERY), everything operational stays in
+Postgres, and the RouterEngine routes **raw text() SQL touching those tables**
+to BigQuery while Core statements and writes go to Postgres.
+
+This module plugs into that seam:
+
+- **Reads:** `build_cells` / `unmapped_campaigns` query raw_rows via text()
+  SQL (intersection of the PG and BQ column sets), so campaign data is read
+  from BigQuery automatically post-cutover. The routes construct their engine
+  with `read_engine(get_engine())` — identical posture to `build_bundle`.
+- **Operational state stays in Postgres** (bi_campaign_mappings,
+  bi_business_metrics, bi_curve_fits, bi_allocation_runs): small, UI-edited,
+  transactional.
+- **Analytical history mirrors to BigQuery** (bi_simulator_snapshots,
+  bi_allocation_results, bi_predictions): appended fail-soft at the same
+  moment the PG write commits, gated on `bq.active()`. Day-partitioned,
+  clustered by client_id — same posture as raw_rows. Provision once with
+  `python -m engine.budget_intel.bq_mirror init` (after `bq init`).
+- **Existing BQ campaign-mapping data:** `bq_mirror.sync_mappings_from_bq`
+  imports it into bi_campaign_mappings (one-time; Postgres remains the store
+  the UI edits — adjust `column_map` to the source table's column names).
+
 ## Build order & dependencies
 
 B1 → B2 → B3 → B4, B5 hooks land with B3/B4 (calibration read path can trail).
