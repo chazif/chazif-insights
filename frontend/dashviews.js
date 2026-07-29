@@ -312,6 +312,10 @@
     if (!q || !q.per_qs) { el.innerHTML = `<div class="view-head"><div><h2>Quality Score</h2></div></div><div class="panel">No Quality Score data.</div>`; return; }
     const scope = q.non_brand ? "non-brand" : "";
     const P = q.per_qs, T = q.totals, sv = q.savings;
+    const trend = q.trend || [];
+    const trendPanel = trend.length >= 2 ? `
+      <div class="panel"><h3>Average Quality Score over time <span class="muted" style="font-weight:400">· ${scope ? "non-brand " : ""}portfolio · monthly</span></h3>
+        <div style="position:relative;height:280px"><canvas id="qsTrendChart"></canvas></div></div>` : "";
     const bucketRows = q.buckets.map(b => `<tr>
         <td class="strong" style="border-left:4px solid ${b.color};padding-left:12px">${esc(b.label)}</td>
         <td class="num">${fmt.num(b.keywords)}</td><td class="num">${fmt.pct(b.kw_share, 1)}</td>
@@ -340,6 +344,7 @@
         <div class="stat"><div class="stat-label">Est. Monthly Savings</div><div class="stat-value">${fmt.money(sv.amount)}</div><div class="stat-chg">if QS ≤ 5 → QS 7</div></div>
       </div>
       <div class="panel" style="background:#FCFEF0">If keywords at QS ≤ 5 could be improved to QS 7, the portfolio would save an estimated <strong>${fmt.money(sv.amount)}/mo</strong> based on the CPC differential (${fmt.money(sv.cpc_weak, 2)} → ${fmt.money(sv.cpc_qs7, 2)}).</div>
+      ${trendPanel}
       <div class="two-col">
         <div class="panel"><h3>QS distribution — keywords &amp; spend share</h3><div style="position:relative;height:300px"><canvas id="qsDistChart"></canvas></div></div>
         <div class="panel"><h3>Avg CPC &amp; CTR by QS</h3><div style="position:relative;height:300px"><canvas id="qsCpcChart"></canvas></div></div>
@@ -362,6 +367,14 @@
         </tbody></table></div></div>`;
     // combo: keyword bars (bucket-colored) + % of spend line on a right axis
     if (typeof Chart !== "undefined") {
+      const tc = trend.length >= 2 && document.getElementById("qsTrendChart");
+      if (tc) new Chart(tc, { type: "line", data: { labels: trend.map(p => p.month), datasets: [
+          { label: "Avg Quality Score", data: trend.map(p => p.avg_qs), borderColor: "#2F7D4F",
+            backgroundColor: "rgba(47,125,79,.12)", tension: 0.35, pointRadius: 3, fill: true } ] },
+        options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+          scales: { y: { min: 0, max: 10, title: { display: true, text: "Avg QS" } } },
+          plugins: { legend: { display: false },
+            tooltip: { callbacks: { afterLabel: ctx => trend[ctx.dataIndex].keywords + " keywords" } } } } });
       const dc = document.getElementById("qsDistChart");
       if (dc) new Chart(dc, { data: { labels: P.map(r => "QS " + r.qs), datasets: [
           { type: "bar", label: "Keywords", data: P.map(r => r.keywords), backgroundColor: P.map(r => qsBarColor(r.qs)), yAxisID: "y", order: 2 },
@@ -652,7 +665,7 @@
 
   // ---------- Keyword section ----------
   // Heatmap state (used when a region-segmented keyword export is present)
-  let KWD_TYPE = "nonbranded", KWD_CRIT = "spend", KWD_GRID = "spend";
+  let KWD_TYPE = "nonbranded", KWD_CRIT = "spend", KWD_GRID = "spend", KWD_FILTER = "";
   (function injectKwdStyle() {
     const s = document.createElement("style");
     s.textContent = `
@@ -699,28 +712,39 @@
     const tot = branded ? kr.totals.branded : kr.totals.nonbranded;
     const regions = kr.regions || [];
     const fmtV = v => metric === "conv" ? fmt.num(v, 0) : fmt.money(v);
-    let rows = kr.keywords.filter(kw => !!kw.branded === branded)
-      .sort((a, b) => (b.overall[crit] || 0) - (a.overall[crit] || 0)).slice(0, 50);
-    let maxCell = 0, maxOverall = 0;
-    rows.forEach(kw => {
-      maxOverall = Math.max(maxOverall, kw.overall[metric] || 0);
-      regions.forEach(rg => { const c = kw.cells[rg.name]; if (c) maxCell = Math.max(maxCell, c[metric] || 0); });
-    });
     const seg = (val, cur, attr, l) => `<button class="seg-pill ${cur === val ? "active" : ""}" data-${attr}="${val}">${l}</button>`;
     const regionHead = regions.map(rg => `<th>${esc(rg.name)}</th>`).join("");
-    const body = rows.map((kw, i) => {
-      const cells = regions.map(rg => {
-        const c = kw.cells[rg.name];
-        if (!c || !(c[metric] > 0)) return `<td class="kwd-empty">·</td>`;
-        return `<td style="${kwHeat(c[metric], maxCell)}">${fmtV(c[metric])}</td>`;
+    const colspan = 3 + regions.length;
+    // Build the grid body for the current keyword filter — recomputed in place on input so
+    // the filter box keeps focus (and heat scaling reflects only the matching keywords).
+    function computeBody() {
+      const f = KWD_FILTER.trim().toLowerCase();
+      let rows = kr.keywords.filter(kw => !!kw.branded === branded);
+      if (f) rows = rows.filter(kw => (kw.keyword || "").toLowerCase().indexOf(f) >= 0
+                                   || (kw.category || "").toLowerCase().indexOf(f) >= 0);
+      rows = rows.sort((a, b) => (b.overall[crit] || 0) - (a.overall[crit] || 0)).slice(0, 50);
+      let maxCell = 0, maxOverall = 0;
+      rows.forEach(kw => {
+        maxOverall = Math.max(maxOverall, kw.overall[metric] || 0);
+        regions.forEach(rg => { const c = kw.cells[rg.name]; if (c) maxCell = Math.max(maxCell, c[metric] || 0); });
+      });
+      const body = rows.map((kw, i) => {
+        const cells = regions.map(rg => {
+          const c = kw.cells[rg.name];
+          if (!c || !(c[metric] > 0)) return `<td class="kwd-empty">·</td>`;
+          return `<td style="${kwHeat(c[metric], maxCell)}">${fmtV(c[metric])}</td>`;
+        }).join("");
+        return `<tr>
+          <td>${i + 1}</td>
+          <td class="kwd-kwcell"><div class="kwd-kw">${esc(kw.keyword)}</div>
+            <div class="kwd-tags"><span class="tag">${esc(kw.brand)}</span>${kw.category ? `<span class="tag info">${esc(kw.category)}</span>` : ""}</div></td>
+          <td style="${kwHeat(kw.overall[metric], maxOverall)}"><strong>${fmtV(kw.overall[metric])}</strong></td>
+          ${cells}</tr>`;
       }).join("");
-      return `<tr>
-        <td>${i + 1}</td>
-        <td class="kwd-kwcell"><div class="kwd-kw">${esc(kw.keyword)}</div>
-          <div class="kwd-tags"><span class="tag">${esc(kw.brand)}</span>${kw.category ? `<span class="tag info">${esc(kw.category)}</span>` : ""}</div></td>
-        <td style="${kwHeat(kw.overall[metric], maxOverall)}"><strong>${fmtV(kw.overall[metric])}</strong></td>
-        ${cells}</tr>`;
-    }).join("");
+      const head = `<tr class="kwd-brandhead"><td colspan="${colspan}">${esc(kr.brand)} · Top ${rows.length} ${branded ? "branded" : "non-branded"} keywords by ${crit === "conv" ? "conversions" : "spend"}${f ? ` · filter “${esc(KWD_FILTER.trim())}”` : ""}</td></tr>`;
+      const empty = body ? "" : `<tr><td colspan="${colspan}" class="muted" style="padding:16px">No ${branded ? "branded" : "non-branded"} keywords${f ? " match the filter" : ""}.</td></tr>`;
+      return head + body + empty;
+    }
     const gridLabel = metric === "conv" ? "Conversions" : "Spend";
     el.innerHTML = `
       <div class="view-head">
@@ -739,20 +763,21 @@
           <div class="kwd-ctl"><label class="lbl">Top-keyword criteria</label><div class="seg-group">${seg("spend", KWD_CRIT, "kwcrit", "Spend")}${seg("conv", KWD_CRIT, "kwcrit", "Main Conversions")}</div></div>
           <div class="kwd-ctl"><label class="lbl">Metric in grid</label>
             <select id="kwGrid"><option value="spend"${metric === "spend" ? " selected" : ""}>Spend</option><option value="conv"${metric === "conv" ? " selected" : ""}>Conversions</option></select></div>
+          <div class="kwd-ctl"><label class="lbl">Filter keyword</label>
+            <input type="text" id="kwFilter" placeholder="Search keyword…" value="${esc(KWD_FILTER)}" style="padding:6px 10px;min-width:200px"></div>
         </div>
         <div class="tbl-wrap" style="max-height:640px;overflow:auto">
-          <table class="kwd-grid">
+          <table class="kwd-grid no-total">
             <thead><tr><th>Rank</th><th>Keyword</th><th>Overall</th>${regionHead}</tr></thead>
-            <tbody>
-              <tr class="kwd-brandhead"><td colspan="${3 + regions.length}">${esc(kr.brand)} · Top ${rows.length} ${branded ? "branded" : "non-branded"} keywords by ${crit === "conv" ? "conversions" : "spend"}</td></tr>
-              ${body || `<tr><td colspan="${3 + regions.length}" class="muted" style="padding:16px">No ${branded ? "branded" : "non-branded"} keywords.</td></tr>`}
-            </tbody></table>
+            <tbody id="kwGridBody">${computeBody()}</tbody></table>
         </div>
       </div>`;
     el.querySelectorAll("[data-kwtype]").forEach(b => b.addEventListener("click", () => { KWD_TYPE = b.dataset.kwtype; setView("kw-deep-dive", { preserveScroll: true }); }));
     el.querySelectorAll("[data-kwcrit]").forEach(b => b.addEventListener("click", () => { KWD_CRIT = b.dataset.kwcrit; setView("kw-deep-dive", { preserveScroll: true }); }));
     const gsel = el.querySelector("#kwGrid");
     if (gsel) gsel.addEventListener("change", () => { KWD_GRID = gsel.value; setView("kw-deep-dive", { preserveScroll: true }); });
+    const kf = el.querySelector("#kwFilter");
+    if (kf) kf.addEventListener("input", () => { KWD_FILTER = kf.value; const b = el.querySelector("#kwGridBody"); if (b) b.innerHTML = computeBody(); });
   }
   function renderKwDeepDive(el) {
     el.className = "view";
@@ -761,18 +786,28 @@
     // fallback: flat keyword table (no region-segmented export uploaded)
     const k = (typeof DATA !== "undefined" && DATA.keyword_section) || null;
     if (!k) { el.innerHTML = stHead("Keyword Deep Dive", "") + `<div class="panel">No keyword data.</div>`; return; }
-    const rows = k.deep_dive.map(d => `<tr>
+    const rowFn = d => `<tr>
         <td class="strong">${esc(d.keyword)}</td><td>${esc(d.match)}</td>
         <td class="num" data-sort="${d.qs || 0}">${d.qs || "—"}</td>
         <td class="num" data-sort="${d.clicks}">${fmt.num(d.clicks)}</td>
         <td class="num" data-sort="${d.cost}">${fmt.money(d.cost)}</td>
         <td class="num" data-sort="${d.conv}">${fmt.num(d.conv, 1)}</td>
-        <td class="num" data-sort="${d.cpa}">${fmt.money(d.cpa, 2)}</td></tr>`).join("");
+        <td class="num" data-sort="${d.cpa}">${fmt.money(d.cpa, 2)}</td></tr>`;
+    const kwdBody = () => {
+      const f = KWD_FILTER.trim().toLowerCase();
+      let rws = k.deep_dive;
+      if (f) rws = rws.filter(d => (d.keyword || "").toLowerCase().indexOf(f) >= 0 || (d.match || "").toLowerCase().indexOf(f) >= 0);
+      return rws.map(rowFn).join("");
+    };
     el.innerHTML = stHead("Keyword Deep Dive", "Top keywords by spend · upload a region-segmented keyword export to unlock the keyword × region heatmap") +
-      `<div class="panel"><div class="tbl-wrap"><table class="sortable">
+      `<div class="panel">
+        <div class="toolbar"><input type="text" id="kwdFilter" placeholder="Filter keyword…" value="${esc(KWD_FILTER)}" style="min-width:240px"></div>
+        <div class="tbl-wrap"><table class="sortable">
         <thead><tr><th>Keyword</th><th>Match</th><th class="num">QS</th><th class="num">Clicks</th>
           <th class="num">Cost</th><th class="num">Conv</th><th class="num">CPA</th></tr></thead>
-        <tbody>${rows}</tbody></table></div></div>`;
+        <tbody id="kwdBody">${kwdBody()}</tbody></table></div></div>`;
+    const kf = el.querySelector("#kwdFilter");
+    if (kf) kf.addEventListener("input", () => { KWD_FILTER = kf.value; const b = el.querySelector("#kwdBody"); if (b) b.innerHTML = kwdBody(); });
     if (typeof enableSortable === "function") enableSortable(el);
   }
   let QSB_METRIC = "cpc", QSB_CAT = "all", QSB_REG = "all", QSB_FILTER = "";

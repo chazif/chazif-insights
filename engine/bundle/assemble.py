@@ -499,10 +499,39 @@ def _kw_qs_rows(engine, client_id, d_from=None, d_to=None):
     return out
 
 
+def _qs_trend(engine, client_id, brand_terms):
+    """Average Quality Score over time from the frozen qs_history, one point per calendar
+    month: for each (keyword, month) take that month's latest QS, then average across the
+    non-brand keyword portfolio. Full history (not date-range bound) so the trajectory is
+    stable. Returns [{month, avg_qs, keywords}, ...] oldest-first (empty if no history)."""
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT as_of_date, kw_key, quality_score, search_keyword, campaign "
+            "FROM qs_history WHERE client_id=:c AND quality_score IS NOT NULL"), {"c": client_id}).all()
+    best = {}                                   # (year, month, kw_key) -> (as_of_date, qs)
+    for ad, kk, qs, kw, camp in rows:
+        d = _as_date(ad)
+        if not d or qs is None:
+            continue
+        kwl, cl = (kw or "").lower(), (camp or "").lower()
+        if brand_terms and (any(b in kwl for b in brand_terms) or any(b in cl for b in brand_terms)):
+            continue                            # non-brand portfolio only
+        k = (d.year, d.month, kk)
+        cur = best.get(k)
+        if cur is None or d > cur[0]:
+            best[k] = (d, float(qs))
+    agg = {}                                    # (year, month) -> [sum_qs, n]
+    for (y, m, _kk), (_d, qs) in best.items():
+        a = agg.setdefault((y, m), [0.0, 0]); a[0] += qs; a[1] += 1
+    return [{"month": f"{MABBR[m-1]} {y}", "avg_qs": round(s / n, 2), "keywords": n}
+            for (y, m), (s, n) in sorted(agg.items())]
+
+
 def _quality_score(engine, client_id, cm=None, config=None, keep=None, date_from=None, date_to=None):
     """Non-brand Quality Score overview from the Search Keyword + QS report: per-QS
     (1-10) keyword/spend/click/conv rollups with CPC/CTR/CVR/CPA, four QS buckets, a
-    weak→strong CPC-differential savings estimate, and portfolio totals."""
+    weak→strong CPC-differential savings estimate, portfolio totals, and a monthly
+    avg-QS trend from the frozen qs_history."""
     config = config or {}
     keep = keep or (lambda d: True)
     brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
@@ -571,6 +600,7 @@ def _quality_score(engine, client_id, cm=None, config=None, keep=None, date_from
         "pct_weak": round(weak_kw / total_kw, 4), "pct_strong": round(strong_kw / total_kw, 4),
         "savings": {"amount": savings, "cpc_weak": round(cpc_weak, 2), "cpc_qs7": round(cpc_q7, 2)},
         "per_qs": per_qs, "buckets": buckets,
+        "trend": _qs_trend(engine, client_id, brand_terms),
         "totals": {"keywords": total_kw, "cost": round(total_cost, 2), "clicks": round(total_clicks),
                    "conv": round(total_conv, 1), **rates(total_cost, total_clicks, total_impr, total_conv)},
     }
