@@ -14,6 +14,8 @@ from pathlib import Path
 from sqlalchemy import (create_engine, MetaData, Table, Column, Integer, BigInteger,
                         String, Float, Date, DateTime, JSON, ForeignKey, Index, inspect, text)
 
+from ..warehouse import bq
+
 REPO = Path(__file__).resolve().parents[2]
 metadata = MetaData()
 
@@ -122,13 +124,22 @@ def init_db(engine):
     # Schema creation/migration always targets Postgres — unwrap the analytics read
     # router (which only routes SELECTs) to its underlying Postgres engine.
     engine = getattr(engine, "pg_engine", None) or engine
-    metadata.create_all(engine)
+    # Once BigQuery is live, raw_rows / qs_history are owned by BigQuery — don't (re)create
+    # them in Postgres, so a decommission (engine.warehouse.teardown) stays torn down across
+    # restarts. clients / uploads / term_relevance always live in Postgres.
+    if bq.active():
+        metadata.create_all(engine, tables=[clients, uploads, term_relevance])
+    else:
+        metadata.create_all(engine)
     # add-column-if-missing migrations for existing DBs (SQLite + Postgres both take this form)
     have = {c["name"] for c in inspect(engine).get_columns("clients")}
     for col in ("google_customer_id", "mcc_id"):
         if col not in have:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE clients ADD COLUMN {col} VARCHAR(64)"))
+    # raw_rows column migrations only when the table is present (skipped post-decommission)
+    if not inspect(engine).has_table("raw_rows"):
+        return
     raw_have = {c["name"] for c in inspect(engine).get_columns("raw_rows")}
     if "date_norm" not in raw_have:
         with engine.begin() as conn:
