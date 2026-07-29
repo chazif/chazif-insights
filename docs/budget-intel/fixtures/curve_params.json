@@ -1,0 +1,32 @@
+{
+  "source": "DRM - All Accounts - Revenue & AdROI - V5.2.xlsx, Ratios sheet, fitted from Google Budget Tool sheet (budget simulator points), account-level, week of 2026-02-22",
+  "leads_curve": {
+    "form": "logistic",
+    "formula": "Leads(IS) = L / (1 + exp(-k * (IS - x0)))",
+    "L": 5964.43,
+    "k": 0.1225,
+    "x0": 21.94,
+    "excel": "=MROUND(5964.43/(1+EXP(-0.1225*(IS-21.94))),1)  [Ratios!G2, IS=Ratios!G1]"
+  },
+  "cpl_curve": {
+    "form": "quadratic",
+    "formula": "CPL(IS) = a*IS^2 + b*IS + c",
+    "a": -0.00192,
+    "b": 0.23334,
+    "c": 1.43473,
+    "excel": "=-0.00192*IS^2 + 0.23334*IS + 1.43473  [Ratios!G3]"
+  },
+  "scaling": "Per category: Leads_cat(IS_t) = MainConv_actual * Leads(IS_t)/Leads(IS_current); CPL_cat(IS_t) = CPA_actual * CPL(IS_t)/CPL(IS_current). IS_current = Actuals!Y (rounded integer percent).",
+  "run_context": {
+    "week": "February 22, 2026",
+    "budget": 48000,
+    "goal": "Car Count",
+    "waterfall_pass_budgets": [
+      48000,
+      9080.192892316103,
+      1047.4358056709507,
+      0,
+      0
+    ]
+  }
+}
