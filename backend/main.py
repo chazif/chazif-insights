@@ -29,7 +29,7 @@ FRONTEND = ROOT / "frontend"
 CLIENTS = ROOT / "data" / "clients"
 UPLOADS = ROOT / "data" / "uploads"
 
-app = FastAPI(title="SearchNex AE", version="0.3.0")
+app = FastAPI(title="SearchNex Ads", version="0.3.0")
 # read_engine wraps the Postgres engine with BigQuery analytics routing once BigQuery is
 # ACTIVE (config vars + USE_BIGQUERY); until cutover it returns the plain Postgres engine.
 _engine = read_engine(get_engine())
