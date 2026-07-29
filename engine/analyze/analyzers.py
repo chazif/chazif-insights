@@ -7,6 +7,8 @@ The math is deterministic; thresholds mirror the audit operating instructions.
 """
 import re
 import json
+import calendar
+import datetime
 from collections import defaultdict
 from sqlalchemy import text
 
@@ -27,17 +29,18 @@ def _asdict(row):
     return row or {}
 
 
-def _parse_ym(label):
-    """'June 2026' -> (2026, 6); None if unparseable."""
-    parts = str(label or "").split()
-    if len(parts) != 2:
+def _ym_of(dn):
+    """(year, month) from a normalized date_norm value — a date object (Postgres/BigQuery)
+    or a 'YYYY-MM-DD' string (SQLite). None if unparseable."""
+    if dn is None:
         return None
-    mo = _MONTH_NUM.get(parts[0].lower())
+    if hasattr(dn, "year"):
+        return (dn.year, dn.month)
+    s = str(dn)
     try:
-        yr = int(parts[1])
+        return (int(s[:4]), int(s[5:7]))
     except ValueError:
         return None
-    return (yr, mo) if mo else None
 
 SMART_BIDDING_FLOOR = 30      # conv/mo for standalone tCPA/tROAS
 LOW_VOL_CONV = 15
@@ -66,10 +69,15 @@ def _density(c, client_id, cm, th):
     lv_conv = th.get("low_vol_conv") or LOW_VOL_CONV
     lv_spend = th.get("low_vol_spend") or LOW_VOL_SPEND
     findings = []
+    # Filter by the normalized calendar date over the month's day range, so this works on
+    # day-segmented data (raw `date` holds individual days, not a "June 2026" month label).
+    lo = datetime.date(cm["year"], cm["month"], 1)
+    hi = datetime.date(cm["year"], cm["month"], calendar.monthrange(cm["year"], cm["month"])[1])
     rows = c.execute(text(
         "SELECT campaign, SUM(conversions) conv, SUM(cost) cost "
-        "FROM raw_rows WHERE client_id=:c AND report_type='campaign_performance' AND date=:d "
-        "GROUP BY campaign"), {"c": client_id, "d": cm["full"]}).all()
+        "FROM raw_rows WHERE client_id=:c AND report_type='campaign_performance' "
+        "AND date_norm BETWEEN :lo AND :hi "
+        "GROUP BY campaign"), {"c": client_id, "lo": lo, "hi": hi}).all()
     if not rows:
         return findings
     camps = [(r[0], _num(r[1]), _num(r[2])) for r in rows]
@@ -322,16 +330,18 @@ def _pmax(c, client_id):
 
 # ---------- D: month-over-month conversion trend (seasonality-aware) ----------
 def _trend(c, client_id, cm, seasonality):
-    rows = c.execute(text(
-        "SELECT date, SUM(conversions) conv FROM raw_rows WHERE client_id=:c "
-        "AND report_type='campaign_performance' AND date IS NOT NULL GROUP BY date"),
-        {"c": client_id}).all()
-    series = []
-    for date, conv in rows:
-        ym = _parse_ym(date)
+    # Aggregate conversions into a month-over-month series from the normalized date, so this
+    # works on day-segmented data (raw `date` holds individual days, not month labels). One
+    # row per day from SQL, then bucketed into calendar months here (dialect-portable).
+    monthly = defaultdict(float)
+    for dn, conv in c.execute(text(
+            "SELECT date_norm, SUM(conversions) conv FROM raw_rows WHERE client_id=:c "
+            "AND report_type='campaign_performance' AND date_norm IS NOT NULL "
+            "GROUP BY date_norm"), {"c": client_id}):
+        ym = _ym_of(dn)
         if ym:
-            series.append((ym, _num(conv)))
-    series.sort()
+            monthly[ym] += _num(conv)
+    series = sorted(monthly.items())
     series = [s for s in series if s[0] <= (cm["year"], cm["month"])]
     if len(series) < 2:
         return []
