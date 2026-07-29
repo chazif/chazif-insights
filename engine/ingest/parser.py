@@ -39,6 +39,7 @@ ENTITY_COL = {
     "distance_from_location": "distance_from_location_assets",
     "auction_insights": "display_url_domain",
     "schedule_dow_hod": None,
+    "bid_strategies": "bid_strategy",
 }
 # Row-level calendar date column, detected generically for ANY report (finest first).
 # 'day'/'week' are literal calendar columns; schedule's "Day of the week" slugs to
@@ -137,6 +138,8 @@ _DETECT = [
     ("state_matched", "geographic"),
     ("headline_1", "ads_performance"),
     ("keywords_active", "ad_group_performance"),
+    # Budget Intelligence (docs/budget-intel): bid-strategy exports carry tCPA
+    ("bid_strategy_type", "bid_strategies"),
 ]
 
 # canonical report set we expect per account (for the present/missing inventory)
@@ -248,6 +251,10 @@ def detect_report(header_slugs):
             return rtype
     # campaign performance: campaign + type, but not an ad-group/keyword report
     if "campaign" in cols and "campaign_type" in cols and "ad_group" not in cols:
+        return "campaign_performance"
+    # campaign report without a type column but carrying impression share (the
+    # Budget Intelligence "Campaign - Raw" export shape) — same report type
+    if "campaign" in cols and "ad_group" not in cols and (cols & set(SHARE_SLUGS)):
         return "campaign_performance"
     return None
 

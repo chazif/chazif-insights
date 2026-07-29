@@ -51,12 +51,17 @@ class MasterCurves:
         for t in IS_RANGE:
             leads.append(mround(L / (1.0 + math.exp(-k * (t - x0)))))
             cpl.append(round(a * t * t + b * t + c, cpl_round))
-        for i in range(1, 100):
-            if cpl[i] <= cpl[i - 1]:
-                for j in range(i, 100):
-                    cpl[j] = cpl[i - 1]
-                    leads[j] = leads[i - 1]
-                break
+        # Monotone cap (production behavior): once CPL peaks and would decline,
+        # freeze BOTH curves at the peak — upward extrapolation past the CPL
+        # peak isn't trusted (a concave quadratic would otherwise project
+        # cheaper leads at higher IS). CPL still rising at IS=100 (convex fits,
+        # e.g. scale efficiencies at low IS) never triggers this; a global peak
+        # at t=1 is left unfrozen rather than freezing the whole curve.
+        peak = max(range(100), key=lambda i: cpl[i])   # first index of the max
+        if 0 < peak < 99:
+            for j in range(peak + 1, 100):
+                cpl[j] = cpl[peak]
+                leads[j] = leads[peak]
         return cls(leads=tuple(leads), cpl=tuple(cpl))
 
 

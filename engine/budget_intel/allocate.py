@@ -44,37 +44,58 @@ def legacy_waterfall(cells_scores, caps, floors, budget, passes=5):
     return {k: min(max(alloc[k], floors[k]), caps[k]) for k in alloc}
 
 
-def greedy_marginal(surfaces_by_key, goal, caps, floors, budget, step=100.0):
-    """Allocate `budget` in `step` increments to the best marginal goal-metric.
-    goal metric per mode: car_count -> cars, gp/max_roi -> adroi,
-    revenue -> revenue, main_conv -> leads."""
-    metric = {"car_count": "cars", "gp": "adroi", "max_roi": "adroi",
-              "revenue": "revenue", "main_conv": "leads"}[goal]
+def greedy_marginal(surfaces_by_key, goal, caps, floors, budget, step=None):
+    """Allocate `budget` by repeatedly buying the best-rate step ALONG EACH
+    CELL'S OWN CURVE GRID (the spend points at IS 1..100) — fixed-dollar steps
+    don't work here because consecutive grid points can be far apart in spend.
+
+    Each candidate step moves a cell from its committed grid point to a higher
+    one; rate = Δmetric / Δspend. Best rate wins, repeat until the budget or
+    the positive-rate candidates run out. Caps/floors respected throughout.
+    goal metric: car_count -> cars, gp/max_roi -> adroi, revenue -> revenue,
+    main_conv -> leads."""
+    metric_name = {"car_count": "cars", "gp": "adroi", "max_roi": "adroi",
+                   "revenue": "revenue", "main_conv": "leads"}[goal]
     alloc = {k: floors[k] for k in surfaces_by_key}
+    committed_t = {k: 0 for k in surfaces_by_key}      # 0 = below the curve grid
     remaining = budget - sum(alloc.values())
 
-    def marginal(key):
+    def metric_at(s, t):
+        return getattr(s, metric_name)[t - 1] if t >= 1 else 0.0
+
+    def best_step(key):
+        """Best (rate, extra_spend, t) move for this cell, or None."""
         s = surfaces_by_key[key]
-        cur_spend = alloc[key]
-        if cur_spend >= caps[key] - EPS:
-            return None
-        t_now = expected_is_for_spend(s, cur_spend)
-        nxt_spend = min(cur_spend + step, caps[key])
-        t_nxt = expected_is_for_spend(s, nxt_spend)
-        gain = getattr(s, metric)[t_nxt - 1] - getattr(s, metric)[t_now - 1]
-        spent = nxt_spend - cur_spend
-        return (gain / spent if spent > EPS else 0.0, nxt_spend - cur_spend)
+        now_t, cur = committed_t[key], alloc[key]
+        base = metric_at(s, now_t)
+        best = None
+        for t in range(now_t + 1, 101):
+            spend_t = s.spend[t - 1]
+            if spend_t > caps[key] + EPS:
+                break
+            extra = spend_t - cur
+            if extra <= EPS or extra > remaining + EPS:
+                continue
+            gain = metric_at(s, t) - base
+            if gain <= 0:
+                continue
+            rate = gain / extra
+            if best is None or rate > best[0]:
+                best = (rate, extra, t)
+        return best
 
     while remaining > EPS:
-        best_key, best_rate, best_amt = None, -1e18, 0.0
+        best_key, best = None, None
         for key in surfaces_by_key:
-            m = marginal(key)
-            if m and m[0] > best_rate and m[1] <= remaining + EPS:
-                best_key, (best_rate, best_amt) = key, m
-        if best_key is None or best_rate <= 0:
+            cand = best_step(key)
+            if cand and (best is None or cand[0] > best[0]):
+                best_key, best = key, cand
+        if best_key is None:
             break
-        alloc[best_key] += best_amt
-        remaining -= best_amt
+        _, extra, t = best
+        alloc[best_key] += extra
+        committed_t[best_key] = t
+        remaining -= extra
     return alloc
 
 
@@ -115,7 +136,10 @@ def run_allocation(cells, curves: MasterCurves, goal, budget, mode="greedy_margi
                                 step=rp.get("step", 100.0))
 
     # playbook guard: cap week-over-week change per cell (None disables — the
-    # golden fixture run predates this guard)
+    # golden fixture run predates this guard). Note the floor side means "never
+    # cut a cell more than X% in one week", so the guarded total can deviate
+    # from the requested budget (up or down) — that is intended: safety caps
+    # outrank exact budget attainment. The UI surfaces the guarded total.
     max_change = rp.get("max_change_pct")
     if max_change is not None:
         for key, cell in cell_by_key.items():

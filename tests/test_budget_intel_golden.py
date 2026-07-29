@@ -185,6 +185,20 @@ def test_recommendation_table(cells, params):
     assert rows_checked == 22
 
 
+def test_parametric_generator_matches_production_tables(params):
+    """MasterCurves.from_params (logistic + 2dp quadratic + peak-freeze) must
+    regenerate the production literal tables. Known artifact: the table's t=1
+    CPL cell was pasted unrounded (1.66615 vs 1.67) — tolerance covers it."""
+    p = json.loads((FIX / "curve_params.json").read_text())
+    gen = MasterCurves.from_params(
+        L=p["leads_curve"]["L"], k=p["leads_curve"]["k"], x0=p["leads_curve"]["x0"],
+        a=p["cpl_curve"]["a"], b=p["cpl_curve"]["b"], c=p["cpl_curve"]["c"])
+    for t in range(1, 101):
+        assert gen.leads_at(t) == params.leads_at(t), f"leads t={t}"
+        tol = 5e-3 if t == 1 else 1e-9
+        assert gen.cpl_at(t) == pytest.approx(params.cpl_at(t), abs=tol), f"cpl t={t}"
+
+
 def test_greedy_invariants(cells, params):
     """greedy_marginal: budget respected, caps/floors respected, monotone in budget."""
     surfaces = {c.key: project(c, params) for c in cells.values()}
