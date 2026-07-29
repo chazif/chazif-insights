@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Budget Intelligence — SearchNex Ads</title>
+<style>
+  :root {
+    --grey-900:#111827; --grey-800:#1F2937; --grey-700:#374151; --grey-600:#4B5563;
+    --grey-500:#6B7280; --grey-400:#9CA3AF; --grey-300:#D1D5DB; --lime:#CFFF04;
+    --paper:#F9FAFB; --good:#34D399; --bad:#F87171;
+  }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--grey-900); color:var(--paper); font:14px/1.5 -apple-system,'Segoe UI',Inter,sans-serif; padding:24px; }
+  h1 { font-size:20px; margin-bottom:2px; }
+  h2 { font-size:15px; margin:22px 0 8px; color:var(--grey-300); }
+  .sub { color:var(--grey-400); font-size:12px; margin-bottom:18px; }
+  .panel { background:var(--grey-800); border:1px solid var(--grey-700); border-radius:10px; padding:14px 16px; margin-bottom:14px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
+  label { display:block; font-size:11px; color:var(--grey-400); margin-bottom:3px; }
+  select, input, textarea, button { background:var(--grey-900); color:var(--paper); border:1px solid var(--grey-600); border-radius:6px; padding:7px 10px; font:inherit; }
+  textarea { width:100%; min-height:90px; font-family:ui-monospace,monospace; font-size:12px; }
+  button { cursor:pointer; border-color:var(--grey-500); }
+  button.primary { background:var(--lime); color:var(--grey-900); font-weight:600; border:none; }
+  button:disabled { opacity:.45; cursor:default; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th { text-align:right; color:var(--grey-400); font-weight:500; padding:6px 8px; border-bottom:1px solid var(--grey-700); white-space:nowrap; }
+  td { text-align:right; padding:5px 8px; border-bottom:1px solid var(--grey-800); white-space:nowrap; }
+  th:first-child, td:first-child { text-align:left; }
+  .up { color:var(--good); } .down { color:var(--bad); }
+  .pill { display:inline-block; background:var(--grey-700); border-radius:999px; padding:1px 9px; font-size:11px; color:var(--grey-300); }
+  .warn { color:#FBBF24; font-size:12.5px; }
+  .muted { color:var(--grey-400); }
+  #msg { min-height:20px; font-size:12.5px; margin:6px 0; }
+  .flex { display:flex; gap:14px; flex-wrap:wrap; }
+  .flex > .panel { flex:1 1 380px; }
+</style>
+</head>
+<body>
+  <h1>Budget Intelligence <span class="pill">Module 2</span></h1>
+  <div class="sub">Goal-driven weekly budget allocation from impression-share response curves · <a style="color:var(--grey-400)" href="/">back to console</a></div>
+
+  <div class="panel">
+    <div class="row">
+      <div><label>Client</label><select id="client"></select></div>
+      <div><label>Goal</label>
+        <select id="goal">
+          <option value="car_count">Business conversions (Car Count)</option>
+          <option value="gp">Gross profit (Ad ROI)</option>
+          <option value="revenue">Revenue</option>
+          <option value="main_conv">Lead volume</option>
+          <option value="max_roi">Profit-max (ignore budget)</option>
+        </select></div>
+      <div><label>Weekly budget $</label><input id="budget" type="number" value="48000" style="width:110px"></div>
+      <div><label>Mode</label>
+        <select id="mode">
+          <option value="greedy_marginal">Greedy marginal (default)</option>
+          <option value="legacy_waterfall">Legacy waterfall</option>
+        </select></div>
+      <div><label>Max weekly change</label>
+        <select id="maxchange">
+          <option value="0.3">±30%</option><option value="0.5">±50%</option>
+          <option value="">No cap</option>
+        </select></div>
+      <button class="primary" id="run">Run allocation</button>
+    </div>
+    <div id="msg"></div>
+  </div>
+
+  <div id="results"></div>
+
+  <div class="flex">
+    <div class="panel">
+      <h2 style="margin-top:0">Campaign mappings</h2>
+      <div id="unmapped"></div>
+      <div id="mappings" class="muted" style="font-size:12px"></div>
+    </div>
+    <div class="panel">
+      <h2 style="margin-top:0">Simulator points → curves</h2>
+      <div class="muted" style="font-size:12px;margin-bottom:6px">
+        Paste rows from the Google Ads budget simulator popup, one per line:<br>
+        <code>impression share %, spend/week, conversions/week</code>
+      </div>
+      <textarea id="simpoints" placeholder="15, 20912, 1754&#10;20, 23242, 2664&#10;25, 25582, 3563&#10;30, 28292, 4351"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="savepoints">Save + fit curves</button>
+        <span id="curvestatus" class="muted" style="font-size:12px"></span>
+      </div>
+    </div>
+  </div>
+
+<script src="budgetintel.js"></script>
+</body>
+</html>
