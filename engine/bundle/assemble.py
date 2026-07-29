@@ -2086,6 +2086,21 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         dated_reports = {r for (r,) in c.execute(text(
             "SELECT DISTINCT report_type FROM raw_rows WHERE client_id=:c AND date_norm IS NOT NULL"),
             {"c": client_id})}
+        dvals = [_as_date(r[0]) for r in c.execute(text(
+            "SELECT DISTINCT date_norm FROM raw_rows WHERE client_id=:c AND date_norm IS NOT NULL"),
+            {"c": client_id})]
+    # Finest granularity of the client's dated data — drives which date presets the UI
+    # offers (a monthly client can't answer "yesterday"). Monthly = every date is a month
+    # 1st; weekly = every date shares one weekday; otherwise daily.
+    dvals = [d for d in dvals if d]
+    if not dvals:
+        granularity = "none"
+    elif all(d.day == 1 for d in dvals):
+        granularity = "monthly"
+    elif len(dvals) >= 2 and len({d.weekday() for d in dvals}) == 1:
+        granularity = "weekly"
+    else:
+        granularity = "daily"
     REPORT_VIEWS = {
         "search_terms": ("st-intent", "st-relevant", "st-competitor", "st-flagged"),
         "geographic": ("geo-perf",),
@@ -2113,6 +2128,8 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
             "date_range": {
                 "from": date_from, "to": date_to,
                 "applied": bool(rng_from or rng_to),
+                # finest resolution of the client's dated data: daily | weekly | monthly | none
+                "granularity": granularity,
                 # views that honour the range: campaign-based (always) + any snapshot
                 # report re-uploaded at day level; the rest are whole-window (see note)
                 "windowed_views": sorted(windowed),

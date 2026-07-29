@@ -156,18 +156,31 @@
     };
     var curKey = (!curFrom && !curTo) ? "all" : "custom";
     for (var k in presets) { if (presets[k].from === curFrom && presets[k].to === curTo) { curKey = k; break; } }
-    var opts = Object.keys(presets).map(function (k) {
-      return '<option value="' + k + '"' + (k === curKey ? " selected" : "") + ">" + presets[k].label + "</option>";
-    }).join("") +
-      '<option value="days"' + (curKey === "custom" ? "" : "") + ">Last N days…</option>" +
+    // Granularity-aware presets: a monthly (or weekly) client can't answer sub-period
+    // ranges, so hide the presets (and "Last N days") that would always come back empty.
+    var gran = (META.date_range || {}).granularity || "daily";
+    var HIDE = { monthly: ["today", "yesterday", "thisweek", "last7", "lastweek", "last14", "last30"],
+                 weekly: ["today", "yesterday"] };
+    var hide = HIDE[gran] || [];
+    var showDays = gran !== "monthly";
+    var opts = Object.keys(presets).filter(function (k) { return hide.indexOf(k) < 0 || k === curKey; })
+      .map(function (k) {
+        return '<option value="' + k + '"' + (k === curKey ? " selected" : "") + ">" + presets[k].label + "</option>";
+      }).join("") +
+      (showDays ? '<option value="days">Last N days…</option>' : "") +
       '<option value="custom"' + (curKey === "custom" ? " selected" : "") + ">Custom range…</option>";
+    var granLabel = (gran === "monthly" || gran === "weekly")
+      ? '<span class="dr-gran" title="This client\'s data is ' + gran + ', so sub-' + (gran === "monthly" ? "month" : "week") +
+        ' date presets are hidden." style="margin-left:8px;font-size:11px;color:var(--grey,#6B7280);background:#f3f4f6;padding:2px 8px;border-radius:999px;white-space:nowrap">' +
+        (gran === "monthly" ? "Monthly data" : "Weekly data") + "</span>"
+      : "";
     host.innerHTML =
-      "<label>Dates</label><select id=\"drSel\">" + opts + "</select>" +
+      "<label>Dates</label><select id=\"drSel\">" + opts + "</select>" + granLabel +
       '<span id="drCustom" style="display:' + (curKey === "custom" ? "flex" : "none") + ';gap:6px;align-items:center">' +
         '<input type="date" id="drFrom" value="' + curFrom + '"><input type="date" id="drTo" value="' + curTo + '">' +
         '<button class="dr-apply" id="drApply">Apply</button></span>' +
       '<span id="drDays" style="display:none;gap:6px;align-items:center">Last <input type="number" id="drNdays" value="30" min="1" style="width:58px"> days up to <select id="drUpto"><option value="today">today</option><option value="yesterday" selected>yesterday</option></select><button class="dr-apply" id="drDaysApply">Apply</button></span>' +
-      '<span class="dr-info" title="The date range applies to the campaign-time-series views — Overview, Monthly Trends, Campaign Performance, Pacing, NB Categories and Regions. The other reports (Keyword, QS, Search Terms, Ad Copy, Landing Pages, Geo) arrive as a single whole-window export with no per-row date, so they always show the full window until date-segmented (daily) exports are uploaded.">&#9432; time-series only</span>' +
+      '<span class="dr-info" title="The date range applies to the campaign-time-series views — Overview, Monthly Trends, Campaign Performance, Pacing, NB Categories and Regions. The other reports (Keyword, QS, Search Terms, Ad Copy, Landing Pages, Geo) arrive as a single whole-window export with no per-row date, so they always show the full window until date-segmented (daily / weekly / monthly) exports are uploaded.">&#9432; time-series only</span>' +
       // ---- VS comparison (YoY / MoM / Custom) ----
       '<span class="dr-vs" style="display:inline-flex;align-items:center;gap:6px;margin-left:16px">' +
         '<label>VS</label><span class="gf-seg-group">' +
