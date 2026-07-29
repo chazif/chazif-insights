@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>SearchNex AE</title>
+<title>SearchNex Ads</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
@@ -200,6 +200,20 @@
   th, td { padding: 10px 12px; text-align: left; vertical-align: top; }
   th { font-size: 11px; color: var(--grey-700); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; border-bottom: 1px solid var(--hairline);}
   th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  /* Auto-generated Total row: styled everywhere, and "fixed" (sticky to the bottom)
+     inside scrollable .tbl-wrap tables so it stays visible while the body scrolls. */
+  tfoot.total-row td { background: var(--panel); border-top: 2px solid var(--grey-300);
+    font-weight: 700; color: var(--ink); white-space: nowrap; }
+  .tbl-wrap tfoot.total-row td { position: sticky; bottom: 0; z-index: 3;
+    box-shadow: inset 0 1px 0 var(--hairline); }
+  /* No-data toast (filters/date range returned nothing) */
+  #chzToast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px);
+    background: var(--grey-900); color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 13px;
+    box-shadow: 0 10px 34px rgba(0,0,0,.28); z-index: 1000; opacity: 0; pointer-events: none;
+    transition: opacity .2s ease, transform .2s ease; max-width: 92vw; display: flex; align-items: center; }
+  #chzToast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+  #chzToast .x { margin-left: 16px; cursor: pointer; opacity: .7; font-weight: 700; font-size: 16px; line-height: 1; }
+  #chzToast .x:hover { opacity: 1; }
   tbody tr { border-bottom: 1px solid var(--hairline); }
   tbody tr:last-child { border-bottom: none; }
   tbody tr:hover { background: #fbfbfb; }
@@ -355,7 +369,7 @@
     <div class="gate-brand">
       <div class="gate-mark">C</div>
       <div>
-        <h1>SearchNex AE</h1>
+        <h1>SearchNex Ads</h1>
         <div class="gate-sub">Paid search analytics · by Chazif LLC</div>
       </div>
     </div>
@@ -381,7 +395,7 @@
   <aside id="sidebar">
     <div class="brand">
       <div>
-        <div class="brand-text">SearchNex <span class="brand-badge">AE</span></div>
+        <div class="brand-text">SearchNex <span class="brand-badge">Ads</span></div>
       </div>
     </div>
     <div class="client-pick">
@@ -478,6 +492,31 @@
   var qsFrom = p.get("from"), qsTo = p.get("to");
   var FILTER_KEYS = ["seg", "campaign", "region", "category", "brand"];
 
+  // ---- No-data toast (shared with profile.js's filter refresh) ----
+  window.chzToast = function (msg, ms) {
+    var t = document.getElementById("chzToast");
+    if (!t) { t = document.createElement("div"); t.id = "chzToast"; document.body.appendChild(t); }
+    t.innerHTML = '<span class="msg"></span><span class="x">×</span>';
+    t.querySelector(".msg").textContent = msg;
+    t.querySelector(".x").onclick = function () { t.classList.remove("show"); };
+    t.classList.add("show");
+    clearTimeout(t._h); t._h = setTimeout(function () { t.classList.remove("show"); }, ms || 6000);
+  };
+  // A filtered bundle is "empty" when its spend/conversions time-series has no activity.
+  window.chzBundleHasData = function (B) {
+    var t = (B && B.total_trend) || [];
+    var spend = 0, conv = 0;
+    for (var i = 0; i < t.length; i++) { spend += (+t[i].Spend || 0); conv += (+t[i]["Main Conv"] || 0); }
+    return t.length > 0 && (spend > 0 || conv > 0);
+  };
+  window.chzFiltersActive = function () {
+    var q = new URLSearchParams(location.search);
+    return ["seg", "campaign", "region", "category", "brand", "from", "to"].some(function (k) {
+      var v = q.get(k); return v && v !== "all";
+    });
+  };
+  var NO_DATA_MSG = "No data for the selected filters — try widening or clearing them.";
+
   function boot(client) {
     var extra = FILTER_KEYS.map(function (k) {
       var v = p.get(k);
@@ -495,7 +534,13 @@
           a.onload = function () {
             var dv = document.createElement("script"); dv.src = "dashviews.js";
             dv.onload = function () {
-              var pr = document.createElement("script"); pr.src = "profile.js"; document.body.appendChild(pr);
+              var pr = document.createElement("script"); pr.src = "profile.js";
+              pr.onload = function () {
+                var tj = document.createElement("script"); tj.src = "totals.js"; document.body.appendChild(tj);
+                // Deep-linked filters that resolve to nothing: tell the user instead of a blank view.
+                if (window.chzFiltersActive() && !window.chzBundleHasData(d)) window.chzToast(NO_DATA_MSG);
+              };
+              document.body.appendChild(pr);
             };
             document.body.appendChild(dv);
           };

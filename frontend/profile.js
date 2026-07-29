@@ -34,7 +34,7 @@
     setText("footPeriod", cur);
     setText("brandSub", [name, cur].filter(Boolean).join(" · "));
     setText("gateSub", "Client portal" + (name ? " · " + name : "") + (cur ? " · " + cur + " report" : ""));
-    if (name) document.title = "SearchNex AE · " + name;
+    if (name) document.title = "SearchNex Ads · " + name;
   }
   applyChrome();
 
@@ -89,6 +89,10 @@
         applyChrome(); renderFilters(); renderDateRange();
         var v = (typeof CURRENT_VIEW !== "undefined" && CURRENT_VIEW) ? CURRENT_VIEW : "overview";
         if (typeof setView === "function") setView(v, { preserveScroll: true });
+        // A filter/date/compare change that resolves to nothing: surface it, don't just blank out.
+        if (window.chzBundleHasData && !window.chzBundleHasData(B) && window.chzToast) {
+          window.chzToast("No data for the selected filters — try widening or clearing them.");
+        }
       })
       .catch(function (e) { console.error("filter refresh failed:", e); })
       .then(function () { setBusy(false); });
