@@ -1475,7 +1475,8 @@ def _search_terms_section(engine, client_id, config, keep=None, date_from=None, 
     if not rows:
         return None
     brand_excl = [b.lower() for b in (config.get("brand_terms") or []) if b]
-    terms = []
+    _blank_added = (None, "", "None", "none")
+    agg = {}
     for term, clicks, cost, conv, row in rows:
         tl = (term or "").lower()
         if brand_excl and any(b in tl for b in brand_excl):
@@ -1483,13 +1484,26 @@ def _search_terms_section(engine, client_id, config, keep=None, date_from=None, 
         d = _asdict(row)
         if not keep(d):
             continue
-        t = {"term": term or "", "match": d.get("search_terms_match_type", ""),
-             "added": d.get("added_excluded"),
-             "clicks": _num(clicks), "cost": _num(cost), "conv": _num(conv)}
-        t["grade"] = _grade_term(t)
-        terms.append(t)
+        # Day-segmented exports repeat a term across days (and across campaign / ad group /
+        # keyword). Roll up per (term, campaign, ad group, keyword) so each combination shows
+        # once with summed metrics instead of one row per day.
+        camp, ag, kw = d.get("campaign"), d.get("ad_group"), d.get("search_keyword")
+        key = (term or "", camp, ag, kw)
+        t = agg.get(key)
+        if t is None:
+            t = {"term": term or "", "campaign": camp, "ad_group": ag, "search_keyword": kw,
+                 "match": d.get("search_terms_match_type", ""), "added": d.get("added_excluded"),
+                 "clicks": 0.0, "cost": 0.0, "conv": 0.0}
+            agg[key] = t
+        t["clicks"] += _num(clicks); t["cost"] += _num(cost); t["conv"] += _num(conv)
+        ae = d.get("added_excluded")                # keep a real Added/Excluded over a blank "None"
+        if ae not in _blank_added and t["added"] in _blank_added:
+            t["added"] = ae
+    terms = list(agg.values())
     if not terms:
         return None
+    for t in terms:
+        t["grade"] = _grade_term(t)
 
     top = sorted(terms, key=lambda x: -x["cost"])[:60]
     context = {"product_categories": config.get("product_categories", []),
@@ -1581,7 +1595,9 @@ def _search_terms_section(engine, client_id, config, keep=None, date_from=None, 
                            "conv": round(comp_cv[c], 0), "cpa": round(comp_s[c] / comp_cv[c], 2) if comp_cv[c] else None}
                           for c in sorted(comp_s, key=lambda k: -comp_s[k]) if comp_s[c] > 0 or comp_c[c] > 0]
     comp_matched = sorted([t for t in terms if t.get("competitor")], key=lambda x: (-x["cost"], x["term"]))
-    competitor_terms = [{"term": t["term"], "competitor": t["competitor"], "spend": round(t["cost"], 2),
+    competitor_terms = [{"term": t["term"], "competitor": t["competitor"],
+                         "campaign": t.get("campaign"), "ad_group": t.get("ad_group"),
+                         "search_keyword": t.get("search_keyword"), "spend": round(t["cost"], 2),
                          "clicks": round(t["clicks"]), "conv": round(t["conv"], 1),
                          "cvr": round(t["conv"] / t["clicks"], 4) if t["clicks"] else 0,
                          "cpa": round(t["cost"] / t["conv"], 2) if t["conv"] else None} for t in comp_matched[:75]]
@@ -1593,6 +1609,8 @@ def _search_terms_section(engine, client_id, config, keep=None, date_from=None, 
 
     rel_sorted = sorted([t for t in terms if t["seg"] == "Relevant"], key=lambda x: -x["cost"])
     relevant_terms = [{"term": t["term"], "category": t["cat"] or "Uncategorized", "grade": t["grade"],
+                       "campaign": t.get("campaign"), "ad_group": t.get("ad_group"),
+                       "search_keyword": t.get("search_keyword"),
                        "status": t["status"], "spend": round(t["cost"], 2), "clicks": round(t["clicks"]),
                        "conv": round(t["conv"], 1), "cvr": round(t["conv"] / t["clicks"], 4) if t["clicks"] else 0,
                        "cpc": round(t["cost"] / t["clicks"], 2) if t["clicks"] else 0} for t in rel_sorted[:150]]
@@ -1602,7 +1620,9 @@ def _search_terms_section(engine, client_id, config, keep=None, date_from=None, 
     # terms are zero-spend and tie on cost, and input row order isn't guaranteed.
     flag_sorted = sorted([t for t in terms if t["seg"] == "Needs Review"],
                          key=lambda x: (-x["cost"], x["term"]))
-    flagged_terms = [{"term": t["term"], "intent": t["seg"], "status": t["status"], "spend": round(t["cost"], 2),
+    flagged_terms = [{"term": t["term"], "intent": t["seg"], "status": t["status"],
+                      "campaign": t.get("campaign"), "ad_group": t.get("ad_group"),
+                      "search_keyword": t.get("search_keyword"), "spend": round(t["cost"], 2),
                       "clicks": round(t["clicks"]), "conv": round(t["conv"], 1),
                       "cvr": round(t["conv"] / t["clicks"], 4) if t["clicks"] else 0,
                       "cpa": round(t["cost"] / t["conv"], 2) if t["conv"] else None} for t in flag_sorted[:75]]

@@ -521,6 +521,7 @@
     const rows = s.relevant_terms || [];
     const rowFn = r => `<tr>
         <td class="strong">${esc(r.term)}</td>
+        <td>${esc(r.campaign || "—")}</td><td>${esc(r.ad_group || "—")}</td><td>${esc(r.search_keyword || "—")}</td>
         <td>${r.category === "Uncategorized" ? '<span class="muted">Uncategorized</span>' : esc(r.category)}</td>
         <td>${stGradePill(r.grade)}</td><td>${stStatusBadge(r.status)}</td>
         <td class="num">${fmt.money(r.spend)}</td><td class="num">${fmt.num(r.clicks)}</td>
@@ -528,7 +529,7 @@
     const filterRows = () => {
       let rws = rows;
       if (STR_CAT !== "all") rws = rws.filter(r => r.category === STR_CAT);
-      if (STR_FILTER) { const f = STR_FILTER.toLowerCase(); rws = rws.filter(r => (r.term + " " + r.category).toLowerCase().indexOf(f) >= 0); }
+      if (STR_FILTER) { const f = STR_FILTER.toLowerCase(); rws = rws.filter(r => (r.term + " " + r.category + " " + (r.campaign || "") + " " + (r.ad_group || "") + " " + (r.search_keyword || "")).toLowerCase().indexOf(f) >= 0); }
       return rws;
     };
     const shown = filterRows();
@@ -547,7 +548,7 @@
            <span class="muted" id="strCount" style="margin-left:auto">Showing ${fmt.num(shown.length)} of ${fmt.num(s.relevant_total)}</span>
          </div>
          <div class="tbl-wrap"><table class="sortable">
-           <thead><tr><th>Search Term</th><th>Category</th><th>Grade</th><th>Status</th><th class="num">Spend</th>
+           <thead><tr><th>Search Term</th><th>Campaign</th><th>Ad Group</th><th>Search Keyword</th><th>Category</th><th>Grade</th><th>Status</th><th class="num">Spend</th>
              <th class="num">Clicks</th><th class="num">Conv</th><th class="num">CVR</th><th class="num">CPC</th></tr></thead>
            <tbody id="strBody">${shown.map(rowFn).join("")}</tbody></table></div>
        </div>`;
@@ -578,10 +579,11 @@
         <td class="num">${r.cpa ? fmt.money(r.cpa, 2) : "—"}</td></tr>`).join("");
     const rowFn = r => `<tr>
         <td class="strong">${esc(r.term)}</td><td>${compPill(r.competitor)}</td>
+        <td>${esc(r.campaign || "—")}</td><td>${esc(r.ad_group || "—")}</td><td>${esc(r.search_keyword || "—")}</td>
         <td class="num">${fmt.money(r.spend)}</td><td class="num">${fmt.num(r.clicks)}</td>
         <td class="num">${fmt.num(r.conv, 1)}</td><td class="num">${fmt.pct(r.cvr, 2)}</td>
         <td class="num">${r.cpa ? fmt.money(r.cpa, 2) : "—"}</td></tr>`;
-    const filterRows = () => STC_FILTER ? rows.filter(r => (r.term + " " + r.competitor).toLowerCase().indexOf(STC_FILTER.toLowerCase()) >= 0) : rows;
+    const filterRows = () => STC_FILTER ? rows.filter(r => (r.term + " " + r.competitor + " " + (r.campaign || "") + " " + (r.ad_group || "") + " " + (r.search_keyword || "")).toLowerCase().indexOf(STC_FILTER.toLowerCase()) >= 0) : rows;
     const shown = filterRows();
     el.innerHTML = stHead("Competitor Terms", `Top ${fmt.num(rows.length)} search terms targeting competitor brands`) +
       stFilterNote(s) +
@@ -597,7 +599,7 @@
          <div class="toolbar"><input type="text" id="stcFilter" placeholder="Filter term…" value="${esc(STC_FILTER)}" style="min-width:240px"/>
            <span class="muted" id="stcCount" style="margin-left:auto">Showing ${fmt.num(shown.length)} of ${fmt.num(s.competitor_total)}</span></div>
          <div class="tbl-wrap"><table class="sortable">
-           <thead><tr><th>Search Term</th><th>Competitor</th><th class="num">Spend</th><th class="num">Clicks</th>
+           <thead><tr><th>Search Term</th><th>Competitor</th><th>Campaign</th><th>Ad Group</th><th>Search Keyword</th><th class="num">Spend</th><th class="num">Clicks</th>
              <th class="num">Conv</th><th class="num">CVR</th><th class="num">CPA</th></tr></thead>
            <tbody id="stcBody">${shown.map(rowFn).join("")}</tbody></table></div>
        </div>`;
@@ -623,10 +625,11 @@
     const intentPill = i => `<span class="tag" style="background:#E0EAFB;color:#1E40AF;font-size:10.5px">${esc(i)}</span>`;
     const rowFn = r => `<tr>
         <td class="strong">${esc(r.term)}</td><td>${intentPill(r.intent)}</td><td>${stStatusBadge(r.status)}</td>
+        <td>${esc(r.campaign || "—")}</td><td>${esc(r.ad_group || "—")}</td><td>${esc(r.search_keyword || "—")}</td>
         <td class="num">${fmt.money(r.spend)}</td><td class="num">${fmt.num(r.clicks)}</td>
         <td class="num">${fmt.num(r.conv, 1)}</td><td class="num">${fmt.pct(r.cvr, 2)}</td>
         <td class="num">${r.cpa ? fmt.money(r.cpa, 2) : "—"}</td></tr>`;
-    const filterRows = () => STF_FILTER ? rows.filter(r => r.term.toLowerCase().indexOf(STF_FILTER.toLowerCase()) >= 0) : rows;
+    const filterRows = () => STF_FILTER ? rows.filter(r => (r.term + " " + (r.campaign || "") + " " + (r.ad_group || "") + " " + (r.search_keyword || "")).toLowerCase().indexOf(STF_FILTER.toLowerCase()) >= 0) : rows;
     const shown = filterRows();
     el.innerHTML = stHead("Flagged / Needs Review", `Top ${fmt.num(rows.length)} terms flagged for review based on intent/relevance`) +
       stFilterNote(s) +
@@ -634,7 +637,7 @@
          <div class="toolbar"><input type="text" id="stfFilter" placeholder="Filter term…" value="${esc(STF_FILTER)}" style="min-width:240px"/>
            <span class="muted" id="stfCount" style="margin-left:auto">Showing ${fmt.num(shown.length)} of ${fmt.num(s.flagged_total)}</span></div>
          <div class="tbl-wrap"><table class="sortable">
-           <thead><tr><th>Search Term</th><th>Intent</th><th>Status</th><th class="num">Spend</th><th class="num">Clicks</th>
+           <thead><tr><th>Search Term</th><th>Intent</th><th>Status</th><th>Campaign</th><th>Ad Group</th><th>Search Keyword</th><th class="num">Spend</th><th class="num">Clicks</th>
              <th class="num">Conv</th><th class="num">CVR</th><th class="num">CPA</th></tr></thead>
            <tbody id="stfBody">${shown.map(rowFn).join("")}</tbody></table></div>
        </div>`;
