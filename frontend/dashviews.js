@@ -1592,6 +1592,17 @@
       });
       makeGroup(title, nodes);
     });
+    // Budget Intelligence (Module 2) lives on its own standalone page — link out to it,
+    // carrying the current client so the page opens on the same account.
+    (function () {
+      const item = document.createElement("div");
+      item.className = "nav-item";
+      item.innerHTML = `<span class="nav-dot"></span>Budget Intelligence`;
+      item.addEventListener("click", () => {
+        location.href = "/budgetintel.html" + (meta.client_id ? "?client=" + encodeURIComponent(meta.client_id) : "");
+      });
+      makeGroup("Budget Intelligence", [item]);
+    })();
     // admin modules last: Data (ingestion) then Settings (configuration)
     makeGroup("Data", pickWs(["ws-upload", "ws-inventory"]));
     makeGroup("Settings", pickWs(["ws-context", "ws-clients"]));
