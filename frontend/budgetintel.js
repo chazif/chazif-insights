@@ -28,11 +28,13 @@
   async function loadClients() {
     const r = await fetch("/api/clients").then((x) => x.json());
     const list = r.clients || r || [];
+    const want = new URLSearchParams(location.search).get("client");
     $("client").innerHTML = list.map((c) => {
       const id = c.client_id || c.id || c;
       const name = c.name || id;
-      return `<option value="${id}">${name}</option>`;
+      return `<option value="${id}"${id === want ? " selected" : ""}>${name}</option>`;
     }).join("");
+    if (want) $("client").value = want;   // preselect the client passed from the console nav
   }
 
   async function refreshSetup() {
