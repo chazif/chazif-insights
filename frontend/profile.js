@@ -180,7 +180,7 @@
         '<input type="date" id="drFrom" value="' + curFrom + '"><input type="date" id="drTo" value="' + curTo + '">' +
         '<button class="dr-apply" id="drApply">Apply</button></span>' +
       '<span id="drDays" style="display:none;gap:6px;align-items:center">Last <input type="number" id="drNdays" value="30" min="1" style="width:58px"> days up to <select id="drUpto"><option value="today">today</option><option value="yesterday" selected>yesterday</option></select><button class="dr-apply" id="drDaysApply">Apply</button></span>' +
-      '<span class="dr-info" title="The date range applies to the campaign-time-series views — Overview, Monthly Trends, Campaign Performance, Pacing, NB Categories and Regions. The other reports (Keyword, QS, Search Terms, Ad Copy, Landing Pages, Geo) arrive as a single whole-window export with no per-row date, so they always show the full window until date-segmented (daily / weekly / monthly) exports are uploaded.">&#9432; time-series only</span>' +
+      '<span class="dr-info" title="The date range applies to the campaign-time-series views — Overview, Monthly Trends, Campaign Performance, Pacing, NB Categories and Regions. The other reports (Keyword, QS, Search Terms, Ad Copy, Landing Pages, Geo) arrive as a single whole-window export with no per-row date, so they always show the full window until date-segmented (daily / weekly / monthly) exports are uploaded." hidden></span>' +
       // ---- VS comparison (YoY / MoM / Custom) ----
       '<span class="dr-vs" style="display:inline-flex;align-items:center;gap:6px;margin-left:16px">' +
         '<label>VS</label><span class="gf-seg-group">' +
