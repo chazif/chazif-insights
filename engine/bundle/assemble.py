@@ -2128,7 +2128,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         view_list.append("nb-cats")
     if regions:
         view_list.append("regions")
-    view_list += ["campaign-perf", "budget", "pacing", "budget-input"]
+    view_list += ["campaign-perf", "budget-intel", "budget", "pacing", "budget-input"]
     if keyword or kw_regions:
         view_list.append("kw-deep-dive")
     if qscore:
