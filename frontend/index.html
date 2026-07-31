@@ -375,7 +375,7 @@
     </div>
     <h2>Sign in</h2>
     <p class="muted" id="gateSub">Client portal · Mavis Tire · March 2026 report</p>
-    <form id="gateForm" onsubmit="event.preventDefault(); try{sessionStorage.setItem('chz_authed','1')}catch(e){}; unlock();">
+    <form id="gateForm" onsubmit="return __enterDashboard(event)">
       <div class="gate-field">
         <label for="gEmail">Email</label>
         <input id="gEmail" type="email" value="ci@chazif.com" autocomplete="email" />
@@ -487,6 +487,23 @@
       var g = document.getElementById("gate"); if (g) g.classList.add("hidden");
     }
   } catch (e) {}
+
+  // The gate's submit needs unlock(), which is defined in app.js — and app.js only loads
+  // AFTER the /api/bundle fetch resolves (a few seconds on a cold build). Clicking before
+  // then used to throw "unlock is not defined" and leave the gate stuck. Instead: record
+  // the sign-in, show a loading state, and wait for unlock() to become available, then enter.
+  window.__enterDashboard = function (ev) {
+    if (ev) ev.preventDefault();
+    try { sessionStorage.setItem("chz_authed", "1"); } catch (e) {}
+    var btn = document.querySelector("#gateForm .gate-btn");
+    if (btn && !btn.dataset.loading) { btn.dataset.loading = "1"; btn.textContent = "Loading…"; btn.style.opacity = "0.7"; }
+    (function waitForApp() {
+      if (typeof unlock === "function") unlock();      // app.js ready -> enter now
+      else setTimeout(waitForApp, 60);                 // still loading -> retry shortly
+    })();
+    return false;
+  };
+
   var p = new URLSearchParams(location.search);
   var period = p.get("period") || "2026-03";
   var qsFrom = p.get("from"), qsTo = p.get("to");
