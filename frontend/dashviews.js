@@ -304,6 +304,160 @@
     });
   }
 
+  // ---------- Budget Intelligence (Module 2) — native console tab ----------
+  function renderBudgetIntel(el) {
+    el.className = "view";
+    const meta = (window.__BUNDLE__ && window.__BUNDLE__.meta) || {};
+    const cid = meta.client_id;
+    if (!cid) { el.innerHTML = stHead("Budget Intelligence", "") + `<div class="panel">No client selected.</div>`; return; }
+    const api = (path, opts) => fetch(`/api/clients/${encodeURIComponent(cid)}/budget-intel${path}`, opts)
+      .then(async r => { const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.detail || r.statusText); return b; });
+    const money = v => v == null ? "—" : fmt.money(v);
+    const n2 = v => v == null || !isFinite(v) ? "—" : Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
+    const n0 = v => v == null || !isFinite(v) ? "—" : Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 });
+    const delta = (v, invert) => {
+      if (v == null || !isFinite(v)) return "";
+      const good = (v >= 0) !== !!invert;
+      return `<span style="color:${good ? "#166534" : "#991b1b"};font-weight:600">${v >= 0 ? "+" : ""}${n2(v)}</span>`;
+    };
+    const setMsg = (t, isErr) => { const m = el.querySelector("#biMsg"); if (m) { m.textContent = t || ""; m.style.color = isErr ? "#991b1b" : "var(--grey)"; } };
+
+    el.innerHTML = stHead("Budget Intelligence", "Goal-driven weekly budget allocation across Brand × Region × Category — with tCPA moves — from impression-share response curves (DRM model).") +
+      `<div class="panel"><h3>Run allocation</h3>
+         <div class="toolbar" style="flex-wrap:wrap;gap:16px;align-items:flex-end">
+           <span><label class="gf-lbl">Goal</label><br><select id="biGoal" class="gf-sel">
+             <option value="car_count">Car Count</option>
+             <option value="max_roi">Max ROI · profit-max (ignores budget)</option>
+             <option value="revenue">Revenue</option>
+             <option value="gp">Gross Profit</option>
+             <option value="main_conv">Main Conversions</option></select></span>
+           <span><label class="gf-lbl">Weekly budget</label><br><input type="number" id="biBudget" class="ws-input" style="max-width:140px" value="48000"></span>
+           <span><label class="gf-lbl">Mode</label><br><select id="biMode" class="gf-sel">
+             <option value="greedy_marginal">Greedy marginal</option>
+             <option value="legacy_waterfall">Legacy waterfall</option></select></span>
+           <span><label class="gf-lbl">Max weekly change</label><br><select id="biMaxChange" class="gf-sel">
+             <option value="0.30">±30%</option><option value="0.50">±50%</option><option value="">No cap</option></select></span>
+           <button class="ws-btn primary" id="biRun">Run allocation</button>
+           <span class="muted" id="biMsg" style="margin-left:4px"></span>
+         </div></div>
+       <div id="biResults"></div>
+       <div class="two-col">
+         <div class="panel"><h3>Campaign mapping</h3>
+           <div class="muted" style="margin-bottom:8px">Campaigns must be mapped to Brand / Region / Category before a run.</div>
+           <div id="biUnmapped" class="muted">Loading…</div>
+           <div id="biMappings" class="muted" style="font-size:12px;margin-top:8px"></div>
+         </div>
+         <div class="panel"><h3>Response curves</h3>
+           <div class="muted" id="biCurveStatus" style="margin-bottom:8px">Loading…</div>
+           <div class="muted" style="margin-bottom:6px">Paste Google budget-simulator points, one per line: <code>IS%, spend/week, conv/week</code> (min 4 rows).</div>
+           <textarea id="biSimPoints" class="ws-input" style="width:100%;height:120px;font-family:ui-monospace,monospace;font-size:12px" placeholder="10, 1200, 40&#10;20, 2400, 75&#10;30, 3600, 100&#10;40, 4800, 120"></textarea>
+           <div style="margin-top:8px"><button class="ws-btn" id="biSavePoints">Save + fit curves</button></div>
+         </div>
+       </div>`;
+
+    function renderResults(r) {
+      const rows = r.results.slice().sort((a, b) => (b.rec_spend - b.lw_spend) - (a.rec_spend - a.lw_spend));
+      const tot = f => rows.reduce((s, x) => s + (x[f] || 0), 0);
+      el.querySelector("#biResults").innerHTML = `
+        <div class="panel">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <h3 style="margin:0">Run #${r.run_id} — recommended weekly allocation <span class="muted" style="font-weight:400">· draft</span></h3>
+            <button class="ws-btn" id="biFinalize">Finalize run</button></div>
+          <div class="tbl-wrap" style="margin-top:10px"><table class="sortable no-total">
+            <thead><tr><th>Cell</th><th class="num">Score</th><th class="num">LW spend</th><th class="num">Rec spend</th><th class="num">Δ spend</th>
+              <th class="num">LW IS%</th><th class="num">Exp IS%</th><th class="num">LW CPA</th><th class="num">Exp CPA</th>
+              <th class="num">tCPA now</th><th class="num">tCPA Δ</th><th class="num">LW cars</th><th class="num">Exp cars</th><th class="num">Exp GP−spend</th></tr></thead>
+            <tbody>
+            ${rows.map(x => `<tr>
+              <td class="strong">${esc(x.brand)} / ${esc(x.region)} / ${esc(x.category)}</td>
+              <td class="num">${n2(x.opp_score)}</td>
+              <td class="num">${money(x.lw_spend)}</td><td class="num"><strong>${money(x.rec_spend)}</strong></td>
+              <td class="num">${delta(x.rec_spend - x.lw_spend)}</td>
+              <td class="num">${n0(x.lw_is)}</td><td class="num">${n0(x.expected_is)}</td>
+              <td class="num">${n2(x.lw_cpa)}</td><td class="num">${n2(x.expected_cpa)}</td>
+              <td class="num">${n2(x.tcpa_current)}</td><td class="num">${delta(x.tcpa_recommended - x.tcpa_current, true)}</td>
+              <td class="num">${n0(x.lw_cars)}</td><td class="num">${n0(x.expected_cars)}</td>
+              <td class="num">${money(x.expected_adroi)}</td></tr>`).join("")}
+            <tr class="strong"><td>TOTAL</td><td></td>
+              <td class="num">${money(tot("lw_spend"))}</td><td class="num">${money(tot("rec_spend"))}</td>
+              <td class="num">${delta(tot("rec_spend") - tot("lw_spend"))}</td><td colspan="6"></td>
+              <td class="num">${n0(tot("lw_cars"))}</td><td class="num">${n0(tot("expected_cars"))}</td>
+              <td class="num">${money(tot("expected_adroi"))}</td></tr>
+            </tbody></table></div>
+          <div class="muted" style="font-size:11.5px;margin-top:8px">Expected values are curve estimates (constant cost-per-conversion assumption — treat large increases as optimistic). tCPA Δ = expected CPA − current tCPA: the bid-strategy change to apply with the budget move.</div>
+        </div>`;
+      const fin = el.querySelector("#biFinalize");
+      if (fin) fin.onclick = async () => {
+        try { await api(`/runs/${r.run_id}/finalize`, { method: "POST" }); setMsg(`Run #${r.run_id} finalized — predictions stamped.`); fin.disabled = true; }
+        catch (e) { setMsg(e.message, true); }
+      };
+      if (typeof enableSortable === "function") enableSortable(el);
+    }
+
+    async function refreshSetup() {
+      try {
+        const m = await api("/mappings");
+        const un = el.querySelector("#biUnmapped");
+        if (m.unmapped.length) {
+          un.innerHTML = `<div style="color:#9a5b1e;font-weight:600;margin-bottom:6px">⚠ ${m.unmapped.length} unmapped campaign(s) — runs are blocked until mapped.</div>` +
+            m.suggestions.map((s, i) => `<div class="toolbar" data-i="${i}" style="gap:6px;margin-bottom:4px">
+               <span style="min-width:190px;font-size:12px">${esc(s.campaign)}</span>
+               <input class="ws-input" style="width:90px" placeholder="brand" value="${esc(s.brand || "")}" data-f="brand">
+               <input class="ws-input" style="width:100px" placeholder="region" value="${esc(s.region || "")}" data-f="region">
+               <input class="ws-input" style="width:110px" placeholder="category" value="${esc(s.category || "")}" data-f="category"></div>`).join("") +
+            `<button class="ws-btn primary" id="biSaveMaps" style="margin-top:6px">Save mappings</button>`;
+          const btn = el.querySelector("#biSaveMaps");
+          if (btn) btn.onclick = async () => {
+            const rows = [...el.querySelectorAll("#biUnmapped [data-i]")].map(div => {
+              const s = m.suggestions[Number(div.dataset.i)];
+              const val = f => div.querySelector(`[data-f="${f}"]`).value.trim() || null;
+              return { campaign: s.campaign, brand: val("brand"), region: val("region"), category: val("category"), engine: s.engine, camp_type: s.camp_type };
+            });
+            try { await api("/mappings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rows) }); setMsg("Mappings saved."); refreshSetup(); }
+            catch (e) { setMsg(e.message, true); }
+          };
+        } else {
+          un.innerHTML = `<div class="muted" style="font-size:12px">All campaigns mapped ✓</div>`;
+        }
+        el.querySelector("#biMappings").textContent = m.mappings.length
+          ? `${m.mappings.length} mapping(s): ` + m.mappings.slice(0, 8).map(x => `${x.campaign} → ${x.brand}/${x.region}/${x.category}`).join(" · ") + (m.mappings.length > 8 ? " · …" : "")
+          : "No mappings yet.";
+      } catch (e) { const un = el.querySelector("#biUnmapped"); if (un) un.textContent = "Could not load mappings: " + e.message; }
+      try {
+        const cv = await api("/curves");
+        el.querySelector("#biCurveStatus").textContent = cv.active ? "Active curves ✓ (account-level fit)" : "No curves yet — paste simulator points and fit.";
+      } catch (e) { el.querySelector("#biCurveStatus").textContent = "Curve status unavailable."; }
+    }
+
+    el.querySelector("#biRun").onclick = async () => {
+      const run = el.querySelector("#biRun");
+      setMsg("Running…"); run.disabled = true;
+      try {
+        const body = { goal: el.querySelector("#biGoal").value, budget: parseFloat(el.querySelector("#biBudget").value) || 0,
+          mode: el.querySelector("#biMode").value,
+          max_change_pct: el.querySelector("#biMaxChange").value === "" ? null : parseFloat(el.querySelector("#biMaxChange").value) };
+        const r = await api("/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        renderResults(r); setMsg(`Run #${r.run_id} complete (draft).`);
+      } catch (e) { setMsg(e.message, true); }
+      run.disabled = false;
+    };
+    el.querySelector("#biSavePoints").onclick = async () => {
+      const points = el.querySelector("#biSimPoints").value.split("\n").map(line => {
+        const [is_share, spend_week, leads_week] = line.split(/[,\t]+/).map(x => parseFloat(x));
+        return { is_share, spend_week, leads_week };
+      }).filter(p => isFinite(p.is_share) && isFinite(p.spend_week) && isFinite(p.leads_week));
+      if (points.length < 4) return setMsg("Need at least 4 rows (IS%, spend/week, conv/week).", true);
+      try {
+        const r = await api("/simulator-snapshots", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ points }) });
+        const d = r.fit && r.fit.diagnostics;
+        setMsg(`Saved ${r.saved} points; curves fitted (R² leads ${d ? n2(d.r2_leads) : "—"}, CPL ${d ? n2(d.r2_cpl) : "—"}).`);
+        refreshSetup();
+      } catch (e) { setMsg(e.message, true); }
+    };
+
+    refreshSetup();
+  }
+
   // ---------- Quality Score Overview ----------
   const qsBarColor = qs => qs <= 3 ? "#dc2626" : qs <= 5 ? "#f59e0b" : qs <= 7 ? "#9CA3AF" : "#2F7D4F";
   function renderQsDetail(el) {
@@ -1517,6 +1671,7 @@
     "nb-cats": ["Non-Brand Categories", renderNbCats],
     "regions": ["Regions", renderRegions],
     "campaign-perf": ["Campaign Performance", renderCampaignPerf],
+    "budget-intel": ["Budget Intelligence", renderBudgetIntel],
     "budget": ["Budget", renderBudget],
     "pacing": ["Pacing", renderPacing],
     "budget-input": ["Budget Input", renderBudgetInput],
@@ -1543,7 +1698,7 @@
     const SECTIONS = [
       ["Recommendations", ["recs"]],
       ["Business", ["overview", "trends", "nb-cats", "regions"]],
-      ["Budget", ["budget", "pacing", "budget-input"]],
+      ["Budget", ["budget-intel", "budget", "pacing", "budget-input"]],
       ["Campaign", ["campaign-perf"]],
       ["Keyword", ["kw-deep-dive", "qs-detail", "qs-breakdown", "region-category"]],
       ["Search Terms", ["st-intent", "st-relevant", "st-competitor", "st-flagged"]],
@@ -1592,17 +1747,6 @@
       });
       makeGroup(title, nodes);
     });
-    // Budget Intelligence (Module 2) lives on its own standalone page — link out to it,
-    // carrying the current client so the page opens on the same account.
-    (function () {
-      const item = document.createElement("div");
-      item.className = "nav-item";
-      item.innerHTML = `<span class="nav-dot"></span>Budget Intelligence`;
-      item.addEventListener("click", () => {
-        location.href = "/budgetintel.html" + (meta.client_id ? "?client=" + encodeURIComponent(meta.client_id) : "");
-      });
-      makeGroup("Budget Intelligence", [item]);
-    })();
     // admin modules last: Data (ingestion) then Settings (configuration)
     makeGroup("Data", pickWs(["ws-upload", "ws-inventory"]));
     makeGroup("Settings", pickWs(["ws-context", "ws-clients"]));
