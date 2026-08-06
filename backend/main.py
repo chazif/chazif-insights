@@ -292,5 +292,24 @@ def bundle(client: str = Query("mavis"), period: str = Query("2026-03"),
     return JSONResponse(computed)
 
 
-# Static frontend mounted last so /api/* routes win.
+# ---- Redesign (React) build, served at /next -----------------------------
+# Present only when frontend-next has been built (frontend-next/dist). One catch-all
+# route serves the hashed static assets and falls back to index.html for client-side
+# (SPA) routes so deep links / refreshes work. Registered before the "/" mount so it wins.
+NEXT_DIST = ROOT / "frontend-next" / "dist"
+
+
+@app.get("/next")
+@app.get("/next/{path:path}")
+def next_app(path: str = ""):
+    if not NEXT_DIST.is_dir():
+        raise HTTPException(404, "redesign build not present (run `npm run build` in frontend-next)")
+    root = NEXT_DIST.resolve()
+    target = (NEXT_DIST / path).resolve()
+    if target.is_file() and root in target.parents:      # real asset (traversal-guarded)
+        return FileResponse(target)
+    return FileResponse(NEXT_DIST / "index.html")         # SPA fallback
+
+
+# Static frontend (current app) mounted last so /api/* and /next win.
 app.mount("/", StaticFiles(directory=str(FRONTEND), html=True), name="frontend")
