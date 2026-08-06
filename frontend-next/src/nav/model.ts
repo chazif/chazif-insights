@@ -1,0 +1,125 @@
+// The three-layer navigation model (job → category → view) from the design handoff.
+// Plan and Prove intentionally skip the category tier (a tier with one child buys nothing);
+// Diagnose and Setup keep it. Every view declares the filters that actually apply to it —
+// a view with none renders "no filters apply on this screen" in its context bar.
+
+export type FilterName = "Segment" | "Dates" | "vs" | "Sort" | "Owner" | "Campaign" | "Goal" | "Budget";
+export type JobKey = "today" | "diagnose" | "plan" | "prove" | "setup";
+
+export interface ViewDef {
+  slug: string;
+  title: string;
+  filters: FilterName[];
+  admin?: boolean;
+  built?: boolean; // false → routes to the placeholder screen (all false during the migration)
+}
+export interface CategoryDef {
+  title: string;
+  views: ViewDef[];
+}
+export interface JobDef {
+  key: JobKey;
+  title: string;
+  categories?: CategoryDef[]; // nested (Diagnose, Setup)
+  views?: ViewDef[]; // flat (Today, Plan, Prove)
+}
+
+const v = (slug: string, title: string, filters: FilterName[] = [], extra: Partial<ViewDef> = {}): ViewDef => ({
+  slug,
+  title,
+  filters,
+  built: false,
+  ...extra,
+});
+
+export const NAV: JobDef[] = [
+  {
+    key: "today",
+    title: "Today",
+    views: [v("brief", "Brief"), v("actions", "Actions", ["Sort", "Owner"])],
+  },
+  {
+    key: "diagnose",
+    title: "Diagnose",
+    categories: [
+      {
+        title: "Performance",
+        views: [
+          v("overview", "Overview", ["Segment", "Dates", "vs"]),
+          v("monthly-trends", "Monthly Trends", ["Dates"]),
+          v("nb-categories", "Non-Brand Categories", ["Dates", "vs"]),
+          v("regions", "Regions", ["Dates", "vs"]),
+        ],
+      },
+      { title: "Campaign", views: [v("campaign-performance", "Campaign Performance", ["Segment", "Dates", "vs"])] },
+      {
+        title: "Keyword",
+        views: [
+          v("keyword-deep-dive", "Keyword Deep Dive", ["Campaign", "Dates"]),
+          v("quality-score", "Quality Score", ["Dates"]),
+          v("quality-score-components", "Quality Score by Component", ["Dates"]),
+          v("kw-region-category", "KW by Region & Category", ["Dates"]),
+        ],
+      },
+      {
+        title: "Search terms",
+        views: [
+          v("intent-grades", "Intent & Grades", ["Segment", "Dates"]),
+          v("relevant-terms", "Relevant Terms", ["Segment", "Dates"]),
+          v("competitor-terms", "Competitor Terms", ["Segment", "Dates"]),
+          v("triage", "Triage", ["Segment", "Dates"]),
+        ],
+      },
+      { title: "Ad copy", views: [v("ad-copy", "Ad Copy", ["Segment", "Dates"]), v("ad-lp-pairing", "Ad ↔ LP Pairing", ["Segment"])] },
+      { title: "Landing pages", views: [v("lp-performance", "LP Performance", ["Dates"]), v("lp-category-grid", "LP Category Grid", ["Dates"])] },
+      { title: "Geo", views: [v("geo-performance", "Geo Performance", ["Dates"])] },
+      { title: "Competition", views: [v("auction-insights", "Auction Insights", ["Dates"])] },
+    ],
+  },
+  {
+    key: "plan",
+    title: "Plan",
+    views: [
+      v("budget-input", "Budget Input"),
+      v("budget-allocation", "Budget Allocation", ["Goal", "Budget"]),
+      v("budget", "Budget"),
+      v("pacing", "Pacing", ["Dates"]),
+    ],
+  },
+  {
+    key: "prove",
+    title: "Prove",
+    views: [v("ledger", "Ledger", ["Dates"]), v("client-view", "Client View")],
+  },
+  {
+    key: "setup",
+    title: "Setup",
+    categories: [
+      {
+        title: "Data",
+        views: [v("upload-data", "Upload Data"), v("data-inventory", "Data Inventory"), v("campaign-mapping", "Campaign Mapping")],
+      },
+      { title: "Settings", views: [v("business-context", "Business Context"), v("clients", "Clients", [], { admin: true })] },
+    ],
+  },
+];
+
+export interface ResolvedView extends ViewDef {
+  job: JobDef;
+  category?: CategoryDef;
+}
+
+// Flat slug → resolved view (with its job/category), for routing + breadcrumbs + the palette.
+export const VIEW_INDEX: Record<string, ResolvedView> = {};
+for (const job of NAV) {
+  for (const view of job.views ?? []) VIEW_INDEX[view.slug] = { ...view, job };
+  for (const cat of job.categories ?? []) for (const view of cat.views) VIEW_INDEX[view.slug] = { ...view, job, category: cat };
+}
+
+export const DEFAULT_VIEW = "brief";
+
+export function breadcrumb(slug: string): string {
+  const rv = VIEW_INDEX[slug];
+  if (!rv) return "";
+  return [rv.job.title, rv.category?.title].filter(Boolean).join(" › ");
+}
