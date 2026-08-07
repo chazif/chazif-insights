@@ -90,9 +90,12 @@ export async function uploadFiles(clientId: string, period: string, files: File[
 export const getUploadStatus = (jobId: string) => get<JobStatus>(`/api/upload/status/${jobId}`);
 
 // ---- budget intelligence: allocation ----
-import type { CurvesStatus, AllocRun, AllocResult, RunInput } from "./types";
+import type { CurvesStatus, AllocRun, AllocResult, RunInput, SnapshotPoint, FitResult } from "./types";
 
 const bi = (c: string) => `${cid(c)}/budget-intel`;
+
+export const addSnapshots = (clientId: string, points: SnapshotPoint[], fit = true) =>
+  send<FitResult>(`${bi(clientId)}/simulator-snapshots`, "POST", { points, source: "manual", fit });
 
 export const getCurves = (clientId: string) => get<CurvesStatus>(`${bi(clientId)}/curves`);
 export const getRuns = (clientId: string) => get<{ runs: AllocRun[] }>(`${bi(clientId)}/runs`).then((r) => r.runs);

@@ -7,6 +7,7 @@ import { money, num, signedPct } from "../lib/format";
 import { Panel } from "../components/ui/Panel";
 import { Pill } from "../components/ui/Pill";
 import { DataTable, type Column } from "../components/ui/DataTable";
+import { CurveFitter } from "../components/CurveFitter";
 import { Loading, ErrorState } from "../components/ui/States";
 
 const GOALS = [
@@ -88,25 +89,18 @@ export function BudgetAllocation() {
     <div className="mx-auto max-w-[1240px] px-6 py-6">
       <h1 className="mb-4 text-[19px] font-semibold tracking-[-0.01em]">Budget Allocation</h1>
 
-      {/* readiness */}
-      {!ready && (
+      {/* readiness: mappings + response curves */}
+      {unmapped > 0 && (
         <Panel title="Before you can run" className="mb-5">
-          <ul className="flex flex-col gap-2 text-[12.5px]">
-            <li className="flex items-center gap-2">
-              <Pill tone={unmapped === 0 ? "pos" : "warn"}>{unmapped === 0 ? "✓" : unmapped}</Pill>
-              {unmapped === 0 ? (
-                <span>All campaigns mapped.</span>
-              ) : (
-                <span>{unmapped} unmapped campaign{unmapped > 1 ? "s" : ""} block the run — <Link to={`/c/${clientId}/campaign-mapping`} className="font-medium underline hover:opacity-70">map them</Link>.</span>
-              )}
-            </li>
-            <li className="flex items-center gap-2">
-              <Pill tone={curvesActive ? "pos" : "warn"}>{curvesActive ? "✓" : "!"}</Pill>
-              {curvesActive ? <span>Response curves are fitted.</span> : <span>{curves.data?.detail ?? "Response curves are not fitted yet."}</span>}
-            </li>
-          </ul>
+          <div className="flex items-center gap-2 text-[12.5px]">
+            <Pill tone="warn">{unmapped}</Pill>
+            <span>{unmapped} unmapped campaign{unmapped > 1 ? "s" : ""} block the run — <Link to={`/c/${clientId}/campaign-mapping`} className="font-medium underline hover:opacity-70">map them</Link>.</span>
+          </div>
         </Panel>
       )}
+      <div className="mb-5">
+        <CurveFitter clientId={clientId} active={curvesActive} detail={curves.data?.detail} />
+      </div>
 
       {/* run form */}
       <Panel title="Configure a run" sub="Allocates the budget across Brand × Region × Category cells to the chosen goal">

@@ -662,6 +662,21 @@ export interface RunInput {
   notes?: string;
   created_by?: string;
 }
+export interface SnapshotPoint {
+  is_share: number; // impression share (percent or fraction — backend normalizes)
+  spend_week: number;
+  leads_week: number;
+  cpl?: number;
+}
+export interface FitDiagnostics {
+  n_points: number;
+  r2_leads: number | null;
+  r2_cpl: number | null;
+}
+export interface FitResult {
+  saved: number;
+  fit?: { params: unknown; diagnostics: FitDiagnostics };
+}
 
 export interface Bundle {
   meta: BundleMeta;
