@@ -64,7 +64,7 @@ export const NAV: JobDef[] = [
       {
         title: "Search terms",
         views: [
-          v("intent-grades", "Intent & Grades", ["Segment", "Dates"]),
+          v("intent-grades", "Intent & Grades", ["Segment", "Dates"], { built: true }),
           v("relevant-terms", "Relevant Terms", ["Segment", "Dates"]),
           v("competitor-terms", "Competitor Terms", ["Segment", "Dates"]),
           v("triage", "Triage", ["Segment", "Dates"]),
@@ -72,7 +72,7 @@ export const NAV: JobDef[] = [
       },
       { title: "Ad copy", views: [v("ad-copy", "Ad Copy", ["Segment", "Dates"]), v("ad-lp-pairing", "Ad ↔ LP Pairing", ["Segment"])] },
       { title: "Landing pages", views: [v("lp-performance", "LP Performance", ["Dates"]), v("lp-category-grid", "LP Category Grid", ["Dates"])] },
-      { title: "Geo", views: [v("geo-performance", "Geo Performance", ["Dates"])] },
+      { title: "Geo", views: [v("geo-performance", "Geo Performance", ["Dates"], { built: true })] },
       { title: "Competition", views: [v("auction-insights", "Auction Insights", ["Dates"])] },
     ],
   },
