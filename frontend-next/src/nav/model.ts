@@ -51,7 +51,7 @@ export const NAV: JobDef[] = [
           v("regions", "Regions", ["Dates", "vs"]),
         ],
       },
-      { title: "Campaign", views: [v("campaign-performance", "Campaign Performance", ["Segment", "Dates", "vs"])] },
+      { title: "Campaign", views: [v("campaign-performance", "Campaign Performance", ["Segment", "Dates", "vs"], { built: true })] },
       {
         title: "Keyword",
         views: [

@@ -26,3 +26,5 @@ async function get<T>(path: string): Promise<T> {
 
 export const getHealth = () => get<Health>("/api/health");
 export const getClients = () => get<Client[]>("/api/clients");
+export const getBundle = (clientId: string) =>
+  get<import("./types").Bundle>(`/api/bundle?client=${encodeURIComponent(clientId)}`);
