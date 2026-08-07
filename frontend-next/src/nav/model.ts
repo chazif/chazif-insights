@@ -89,7 +89,7 @@ export const NAV: JobDef[] = [
   {
     key: "prove",
     title: "Prove",
-    views: [v("ledger", "Ledger", ["Dates"], { built: true }), v("client-view", "Client View")],
+    views: [v("ledger", "Ledger", ["Dates"], { built: true }), v("client-view", "Client View", [], { built: true })],
   },
   {
     key: "setup",

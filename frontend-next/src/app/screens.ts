@@ -21,6 +21,7 @@ import { Actions } from "../screens/Actions";
 import { Budget } from "../screens/Budget";
 import { Pacing } from "../screens/Pacing";
 import { Ledger } from "../screens/Ledger";
+import { ClientView } from "../screens/ClientView";
 import { BudgetInput } from "../screens/BudgetInput";
 import { BudgetAllocation } from "../screens/BudgetAllocation";
 import { BusinessContext } from "../screens/BusinessContext";
@@ -58,6 +59,7 @@ export const SCREENS: Record<string, ComponentType> = {
   pacing: Pacing,
   "budget-input": BudgetInput,
   ledger: Ledger,
+  "client-view": ClientView,
   "business-context": BusinessContext,
   "campaign-mapping": CampaignMapping,
   "data-inventory": DataInventory,
