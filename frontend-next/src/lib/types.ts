@@ -48,13 +48,64 @@ export interface GradeRow {
   conv: number;
   cpa: number | null;
 }
+interface TermBase {
+  term: string;
+  campaign: string | null;
+  ad_group: string | null;
+  search_keyword: string | null;
+  spend: number;
+  clicks: number;
+  conv: number;
+  cvr: number;
+}
+export interface RelevantTerm extends TermBase {
+  category: string;
+  grade: string;
+  status: string;
+  cpc: number;
+}
+export interface CompetitorTerm extends TermBase {
+  competitor: string;
+  cpa: number | null;
+}
+export interface FlaggedTerm extends TermBase {
+  intent: string;
+  status: string;
+  cpa: number | null;
+}
+
 export interface SearchTermsSection {
   total_spend: number;
   total_terms: number;
   source: string;
   intent_segments: IntentSegment[];
   grades: GradeRow[];
+  relevant_terms: RelevantTerm[];
+  competitor_terms: CompetitorTerm[];
+  flagged_terms: FlaggedTerm[];
+  relevant_total?: number;
+  competitor_total?: number;
+  flagged_total?: number;
   [k: string]: unknown;
+}
+
+export interface TrendPoint {
+  Month: string;
+  Spend: number;
+  Clicks: number;
+  "Main Conv": number;
+  CPA: number;
+  CVR: number;
+}
+
+export interface LpRow {
+  url: string;
+  cost: number;
+  clicks: number;
+  conv: number;
+  cvr: number;
+  cpa: number | null;
+  score: string;
 }
 
 export interface GeoRow {
@@ -78,7 +129,9 @@ export interface Bundle {
   meta: BundleMeta;
   campaigns?: CampaignsSection | null;
   kpis?: KpiRow[];
+  total_trend?: TrendPoint[];
   search_terms_section?: SearchTermsSection | null;
   geo_performance?: GeoSection | null;
+  landing_pages_section?: { performance?: LpRow[] } | null;
   [k: string]: unknown;
 }
