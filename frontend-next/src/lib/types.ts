@@ -612,6 +612,57 @@ export interface JobStatus {
   error?: string;
 }
 
+// ---- Budget Intelligence: allocation ----
+export interface CurvesStatus {
+  active: boolean;
+  leads?: number[];
+  cpl?: number[];
+  detail?: string;
+}
+export interface AllocResult {
+  brand: string;
+  region: string;
+  category: string;
+  opp_score: number | null;
+  lw_spend: number;
+  rec_spend: number;
+  spend_cap: number | null;
+  spend_floor: number | null;
+  expected_is: number | null;
+  lw_is: number | null;
+  expected_cpa: number | null;
+  lw_cpa: number | null;
+  tcpa_current: number | null;
+  tcpa_recommended: number | null;
+  expected_conv: number | null;
+  lw_conv: number | null;
+  expected_cars: number | null;
+  lw_cars: number | null;
+  expected_revenue: number | null;
+  expected_adroi: number | null;
+}
+export interface AllocRun {
+  id: number;
+  client_id: string;
+  run_at: string | null;
+  created_by: string | null;
+  goal: string;
+  budget: number;
+  mode: string;
+  params: Record<string, unknown>;
+  status: string; // draft | final
+  notes: string | null;
+  results?: AllocResult[];
+}
+export interface RunInput {
+  goal: string;
+  budget: number;
+  mode?: string;
+  max_change_pct?: number;
+  notes?: string;
+  created_by?: string;
+}
+
 export interface Bundle {
   meta: BundleMeta;
   campaigns?: CampaignsSection | null;

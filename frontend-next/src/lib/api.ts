@@ -89,6 +89,19 @@ export async function uploadFiles(clientId: string, period: string, files: File[
 
 export const getUploadStatus = (jobId: string) => get<JobStatus>(`/api/upload/status/${jobId}`);
 
+// ---- budget intelligence: allocation ----
+import type { CurvesStatus, AllocRun, AllocResult, RunInput } from "./types";
+
+const bi = (c: string) => `${cid(c)}/budget-intel`;
+
+export const getCurves = (clientId: string) => get<CurvesStatus>(`${bi(clientId)}/curves`);
+export const getRuns = (clientId: string) => get<{ runs: AllocRun[] }>(`${bi(clientId)}/runs`).then((r) => r.runs);
+export const getRun = (clientId: string, runId: number) => get<AllocRun>(`${bi(clientId)}/runs/${runId}`);
+export const createRun = (clientId: string, body: RunInput) =>
+  send<{ run_id: number; results: AllocResult[] }>(`${bi(clientId)}/runs`, "POST", body);
+export const finalizeRun = (clientId: string, runId: number) =>
+  send<AllocRun>(`${bi(clientId)}/runs/${runId}/finalize`, "POST", {});
+
 export const createClient = (name: string) => send<Client>("/api/clients", "POST", { name });
 export const getConfig = (clientId: string) => get<ClientConfig>(`${cid(clientId)}/config`);
 export const updateConfig = (clientId: string, patch: Partial<ClientConfig>) =>

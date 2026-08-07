@@ -22,6 +22,7 @@ import { Budget } from "../screens/Budget";
 import { Pacing } from "../screens/Pacing";
 import { Ledger } from "../screens/Ledger";
 import { BudgetInput } from "../screens/BudgetInput";
+import { BudgetAllocation } from "../screens/BudgetAllocation";
 import { BusinessContext } from "../screens/BusinessContext";
 import { CampaignMapping } from "../screens/CampaignMapping";
 import { Clients } from "../screens/Clients";
@@ -52,6 +53,7 @@ export const SCREENS: Record<string, ComponentType> = {
   "lp-category-grid": LpCategoryGrid,
   "geo-performance": GeoPerformance,
   "auction-insights": AuctionInsights,
+  "budget-allocation": BudgetAllocation,
   budget: Budget,
   pacing: Pacing,
   "budget-input": BudgetInput,

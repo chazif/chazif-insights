@@ -81,7 +81,7 @@ export const NAV: JobDef[] = [
     title: "Plan",
     views: [
       v("budget-input", "Budget Input", [], { built: true }),
-      v("budget-allocation", "Budget Allocation", ["Goal", "Budget"]),
+      v("budget-allocation", "Budget Allocation", ["Goal", "Budget"], { built: true }),
       v("budget", "Budget", [], { built: true }),
       v("pacing", "Pacing", ["Dates"], { built: true }),
     ],
