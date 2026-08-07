@@ -36,7 +36,7 @@ export const NAV: JobDef[] = [
   {
     key: "today",
     title: "Today",
-    views: [v("brief", "Brief"), v("actions", "Actions", ["Sort", "Owner"])],
+    views: [v("brief", "Brief", [], { built: true }), v("actions", "Actions", ["Sort", "Owner"])],
   },
   {
     key: "diagnose",
@@ -82,8 +82,8 @@ export const NAV: JobDef[] = [
     views: [
       v("budget-input", "Budget Input"),
       v("budget-allocation", "Budget Allocation", ["Goal", "Budget"]),
-      v("budget", "Budget"),
-      v("pacing", "Pacing", ["Dates"]),
+      v("budget", "Budget", [], { built: true }),
+      v("pacing", "Pacing", ["Dates"], { built: true }),
     ],
   },
   {

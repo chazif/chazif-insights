@@ -412,6 +412,79 @@ export interface AuctionSection {
   weighted: boolean;
 }
 
+// ---- Budget (Plan) ----
+export interface BudgetCatRecon {
+  category: string;
+  budget: number;
+  actual: number;
+  variance: number;
+  pct: number | null;
+  status: string;
+}
+export interface BudgetReconciliation {
+  month: string;
+  total_budget: number;
+  total_actual: number;
+  variance: number;
+  pct: number | null;
+  status: string;
+  by_category: BudgetCatRecon[] | null;
+}
+export interface BudgetLine {
+  brand: string | null;
+  region: string | null;
+  category: string | null;
+  monthly: number;
+}
+export interface BudgetSection {
+  total_monthly: number | null;
+  source: string; // file | manual | none
+  manual: number | null;
+  line_count: number;
+  lines: BudgetLine[];
+  rollups: Record<string, { key: string; monthly: number }[]>;
+  reconciliation: BudgetReconciliation | null;
+}
+
+// ---- Pacing (Plan) ----
+export interface PacingMonth {
+  month: string;
+  spend: number;
+  budget: number | null;
+  variance: number | null;
+  pct: number | null;
+}
+export interface BudgetPacing {
+  monthly_budget: number | null;
+  months: PacingMonth[];
+  latest: PacingMonth | null;
+  status: string | null;
+}
+
+// ---- Findings + Recommendations (Today / Brief) ----
+export interface Finding {
+  topic: string;
+  detail: string;
+}
+export interface RecEvidence {
+  severity: string;
+  module: string;
+  observation: string;
+  magnitude: string;
+  impact: string;
+  timing: string;
+  data: { columns: string[]; rows: (string | number)[][] } | null;
+}
+export interface Recommendation {
+  Priority: string;
+  Category: string;
+  Recommendation: string;
+  Rationale: string;
+  "Expected Impact": string;
+  Effort: string;
+  evidence: RecEvidence;
+}
+
 export interface Bundle {
   meta: BundleMeta;
   campaigns?: CampaignsSection | null;
@@ -428,5 +501,9 @@ export interface Bundle {
   region_category_section?: RegionCategorySection | null;
   ads_section?: AdsSection | null;
   auction_insights_section?: AuctionSection | null;
+  budget_section?: BudgetSection | null;
+  budget_pacing?: BudgetPacing | null;
+  recommendations?: Recommendation[];
+  findings?: Finding[];
   [k: string]: unknown;
 }
