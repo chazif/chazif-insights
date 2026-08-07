@@ -547,6 +547,39 @@ export interface LedgerResponse {
   actions: LedgerActionSummary[];
 }
 
+// ---- Setup: client config + campaign mappings ----
+export interface ConfigThresholds {
+  smart_bidding_floor: number | null;
+  low_vol_conv: number | null;
+  low_vol_spend: number | null;
+  qs_floor: number | null;
+  monthly_budget: number | null;
+}
+export interface ClientConfig {
+  brand_terms: string[];
+  product_categories: string[];
+  competitors_friendly: string[];
+  competitors_conquest: string[];
+  waste_exclusions: string[];
+  thresholds: ConfigThresholds;
+  seasonality: { label: string; months: string[] }[];
+  notes: string;
+  budget_lines: BudgetLine[];
+}
+export interface CampaignMapping {
+  campaign: string;
+  brand: string | null;
+  region: string | null;
+  category: string | null;
+  engine: string | null;
+  camp_type: string | null;
+}
+export interface MappingsResponse {
+  mappings: CampaignMapping[];
+  unmapped: string[];
+  suggestions: CampaignMapping[];
+}
+
 export interface Bundle {
   meta: BundleMeta;
   campaigns?: CampaignsSection | null;

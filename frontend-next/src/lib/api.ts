@@ -62,3 +62,30 @@ export const assignAction = (clientId: string, key: string, body: { owner?: stri
   send<ActionItem>(`${cid(clientId)}/actions/${key}`, "PATCH", body);
 
 export const getLedger = (clientId: string) => get<LedgerResponse>(`${cid(clientId)}/ledger`);
+
+// ---- setup / admin ----
+import type { ClientConfig, MappingsResponse, CampaignMapping } from "./types";
+
+export const createClient = (name: string) => send<Client>("/api/clients", "POST", { name });
+export const getConfig = (clientId: string) => get<ClientConfig>(`${cid(clientId)}/config`);
+export const updateConfig = (clientId: string, patch: Partial<ClientConfig>) =>
+  send<ClientConfig>(`${cid(clientId)}/config`, "PUT", patch);
+export const getMappings = (clientId: string) => get<MappingsResponse>(`${cid(clientId)}/budget-intel/mappings`);
+export const putMappings = (clientId: string, rows: CampaignMapping[]) =>
+  send<{ saved: number; unmapped: string[] }>(`${cid(clientId)}/budget-intel/mappings`, "PUT", rows);
+
+export async function uploadBudget(clientId: string, file: File): Promise<{ lines: unknown[]; [k: string]: unknown }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const r = await fetch(`${cid(clientId)}/budget`, { method: "POST", body: fd });
+  if (!r.ok) {
+    let detail = `HTTP ${r.status}`;
+    try {
+      detail = (await r.json())?.detail ?? detail;
+    } catch {
+      /* non-JSON */
+    }
+    throw new Error(detail);
+  }
+  return r.json();
+}

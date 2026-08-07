@@ -80,7 +80,7 @@ export const NAV: JobDef[] = [
     key: "plan",
     title: "Plan",
     views: [
-      v("budget-input", "Budget Input"),
+      v("budget-input", "Budget Input", [], { built: true }),
       v("budget-allocation", "Budget Allocation", ["Goal", "Budget"]),
       v("budget", "Budget", [], { built: true }),
       v("pacing", "Pacing", ["Dates"], { built: true }),
@@ -97,9 +97,9 @@ export const NAV: JobDef[] = [
     categories: [
       {
         title: "Data",
-        views: [v("upload-data", "Upload Data"), v("data-inventory", "Data Inventory"), v("campaign-mapping", "Campaign Mapping")],
+        views: [v("upload-data", "Upload Data"), v("data-inventory", "Data Inventory"), v("campaign-mapping", "Campaign Mapping", [], { built: true })],
       },
-      { title: "Settings", views: [v("business-context", "Business Context"), v("clients", "Clients", [], { admin: true })] },
+      { title: "Settings", views: [v("business-context", "Business Context", [], { built: true }), v("clients", "Clients", [], { admin: true, built: true })] },
     ],
   },
 ];

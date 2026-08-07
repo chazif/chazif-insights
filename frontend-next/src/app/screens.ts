@@ -21,6 +21,10 @@ import { Actions } from "../screens/Actions";
 import { Budget } from "../screens/Budget";
 import { Pacing } from "../screens/Pacing";
 import { Ledger } from "../screens/Ledger";
+import { BudgetInput } from "../screens/BudgetInput";
+import { BusinessContext } from "../screens/BusinessContext";
+import { CampaignMapping } from "../screens/CampaignMapping";
+import { Clients } from "../screens/Clients";
 
 // slug → screen component. Real screens register here as they're built; every slug not
 // present falls back to the Placeholder.
@@ -48,5 +52,9 @@ export const SCREENS: Record<string, ComponentType> = {
   "auction-insights": AuctionInsights,
   budget: Budget,
   pacing: Pacing,
+  "budget-input": BudgetInput,
   ledger: Ledger,
+  "business-context": BusinessContext,
+  "campaign-mapping": CampaignMapping,
+  clients: Clients,
 };
