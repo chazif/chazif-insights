@@ -125,6 +125,293 @@ export interface GeoSection {
   totals: { clicks: number; impr: number; conv: number; conv_value: number; cost: number };
 }
 
+// ---- Non-Brand Categories ----
+export interface NbCatRow {
+  category: string;
+  spend_prior: number;
+  spend_cur: number;
+  spend_chg: number | null;
+  conv_prior: number;
+  conv_cur: number;
+  conv_chg: number | null;
+  cpa_prior: number;
+  cpa_cur: number;
+  cpa_chg: number | null;
+}
+export interface NbCategoriesSection {
+  prior_label: string;
+  cur_label: string;
+  rows: NbCatRow[];
+  totals: NbCatRow;
+}
+
+// ---- Regions ----
+export interface RegionCell {
+  region: string;
+  category: string;
+  spend_prior: number;
+  spend_cur: number;
+  conv_prior: number;
+  conv_cur: number;
+}
+export interface RegionsSection {
+  prior_label: string;
+  cur_label: string;
+  categories: string[];
+  cells: RegionCell[];
+}
+
+// ---- Keyword Deep Dive ----
+export interface KeywordRow {
+  keyword: string;
+  match: string;
+  qs: number | null;
+  clicks: number;
+  cost: number;
+  conv: number;
+  cpa: number;
+}
+export interface KwComponentRow {
+  rating: string;
+  keywords: number;
+  cost: number;
+}
+export interface KeywordSection {
+  deep_dive: KeywordRow[];
+  components: Record<string, KwComponentRow[]>;
+  below_ctr_spend: number;
+  savings_estimate: number;
+}
+
+// ---- Quality Score ----
+export interface QsPerRow {
+  qs: number;
+  keywords: number;
+  kw_share: number;
+  cost: number;
+  spend_share: number;
+  clicks: number;
+  conv: number;
+  cpc: number;
+  ctr: number;
+  conv_rate: number;
+  cpa: number;
+}
+export interface QsBucket extends QsPerRow {
+  label: string;
+  lo: number;
+  hi: number;
+  color: string;
+}
+export interface QsTrendPoint {
+  month: string;
+  avg_qs: number;
+  keywords: number;
+}
+export interface QualityScoreSection {
+  month: string;
+  non_brand: boolean;
+  avg_qs: number;
+  total_keywords: number;
+  pct_weak: number;
+  pct_strong: number;
+  savings: { amount: number; cpc_weak: number; cpc_qs7: number };
+  per_qs: QsPerRow[];
+  buckets: QsBucket[];
+  trend: QsTrendPoint[];
+  totals: { keywords: number; cost: number; clicks: number; conv: number; cpc: number; ctr: number; conv_rate: number; cpa: number };
+}
+
+// ---- Quality Score by Component ----
+export interface QsComponentRating {
+  rating: string;
+  keywords: number;
+  kw_share: number;
+  spend: number;
+  cpc: number;
+  ctr: number;
+  conv_rate: number;
+  cpa: number;
+  conv: number;
+  cpc_vs_avg: number | null;
+}
+export interface QsComponent {
+  key: string;
+  label: string;
+  num: number;
+  ratings: QsComponentRating[];
+}
+export interface QsOptKeyword {
+  keyword: string;
+  brand: string;
+  region: string;
+  category: string;
+  qs: number;
+  spend: number;
+  clicks: number;
+  cpc: number;
+  ectr: string;
+  ad_rel: string;
+  lp_exp: string;
+  conv: number;
+}
+export interface QsSavingsRow {
+  brand: string;
+  kws_weak: number;
+  spend_weak: number;
+  cpc_current: number;
+  cpc_target: number;
+  savings: number;
+  pct_brand_spend: number;
+  primary_gap: string;
+}
+export interface QsBreakdownSection {
+  month: string;
+  non_brand: boolean;
+  avg_cpc: number;
+  components: QsComponent[];
+  savings_by_brand: QsSavingsRow[];
+  opt_keywords: { total: number; shown: number; categories: string[]; regions: string[]; has_region: boolean; rows: QsOptKeyword[] };
+}
+
+// ---- KW by Region & Category ----
+export interface RegCatRow {
+  brand: string;
+  region: string;
+  category: string;
+  total_spend: number;
+  below_cpc: number | null;
+  below_clicks: number;
+  avg_cpc: number | null;
+  avg_clicks: number;
+  above_cpc: number | null;
+  above_clicks: number;
+  spread: number | null;
+}
+export interface RegCatComponent {
+  key: string;
+  label: string;
+  total: number;
+  rows: RegCatRow[];
+}
+export interface RegionCategorySection {
+  components: RegCatComponent[];
+  categories: string[];
+  regions: string[];
+}
+
+// ---- Ad Copy ----
+export interface AdGradeRow {
+  grade: string;
+  ads: number;
+  impr: number;
+  clicks: number;
+  ctr: number;
+  spend: number;
+  spend_share: number;
+  conv: number;
+  cvr: number;
+}
+export interface AdRow {
+  brand: string;
+  category: string;
+  region: string;
+  ad_group: string;
+  headline: string;
+  grade: string;
+  ctr_grade: string;
+  lp_grade: string;
+  ctr: number;
+  impr: number;
+  clicks: number;
+  cpc: number;
+  spend: number;
+  conv: number;
+  cvr: number;
+}
+export interface PairingCell {
+  cvr_grade: string;
+  ads: number;
+  spend: number;
+  pct: number;
+}
+export interface PairingRow {
+  ctr_grade: string;
+  cols: PairingCell[];
+  total_ads: number;
+  total_spend: number;
+}
+export interface AdPairing {
+  grades: string[];
+  rows: PairingRow[];
+  col_totals: { cvr_grade: string; ads: number; spend: number }[];
+  grand_ads: number;
+  grand_spend: number;
+}
+export interface AdScale {
+  count: number;
+  grades: AdGradeRow[];
+  rows: AdRow[];
+  categories: string[];
+  regions: string[];
+  grade_labels: string[];
+  has_region: boolean;
+  pairing: AdPairing;
+  stats: { total: number; aligned: number; fix_lp: number; fix_ad: number; low_vol: number; aligned_pct: number };
+}
+export interface AdsSection {
+  count: number;
+  ad_copy: { thresholds: { nonbranded: string; branded: string }; nonbranded: AdScale | null; branded: AdScale | null };
+}
+
+// ---- Landing pages ----
+export interface LpCatGridRow {
+  url: string;
+  cost: number;
+  clicks: number;
+  conv: number;
+  overall_cvr: number;
+  n_cats: number;
+  cvr_by_cat: Record<string, number | null>;
+}
+export interface LpCatSummary {
+  category: string;
+  lps_running: number;
+  spend: number;
+  min_cvr: number;
+  median_cvr: number;
+  max_cvr: number;
+  best_lp: string;
+  worst_lp: string;
+}
+export interface LpCategoryGrid {
+  categories: string[];
+  rows: LpCatGridRow[];
+  summary: LpCatSummary[];
+  total: number;
+  stats: { landing_pages: number; spend: number; clicks: number; conversions: number; weighted_cvr: number; avg_cats: number };
+}
+export interface LandingPagesSection {
+  count: number;
+  performance?: LpRow[];
+  category_grid?: LpCategoryGrid | null;
+}
+
+// ---- Auction Insights ----
+export interface AuctionRow {
+  domain: string;
+  impr_share: number;
+  overlap_rate: number;
+  position_above: number;
+  top_of_page: number;
+  outranking: number;
+}
+export interface AuctionSection {
+  rows: AuctionRow[];
+  count: number;
+  weighted: boolean;
+}
+
 export interface Bundle {
   meta: BundleMeta;
   campaigns?: CampaignsSection | null;
@@ -132,6 +419,14 @@ export interface Bundle {
   total_trend?: TrendPoint[];
   search_terms_section?: SearchTermsSection | null;
   geo_performance?: GeoSection | null;
-  landing_pages_section?: { performance?: LpRow[] } | null;
+  landing_pages_section?: LandingPagesSection | null;
+  nb_categories_section?: NbCategoriesSection | null;
+  regions_section?: RegionsSection | null;
+  keyword_section?: KeywordSection | null;
+  quality_score?: QualityScoreSection | null;
+  qs_breakdown_section?: QsBreakdownSection | null;
+  region_category_section?: RegionCategorySection | null;
+  ads_section?: AdsSection | null;
+  auction_insights_section?: AuctionSection | null;
   [k: string]: unknown;
 }

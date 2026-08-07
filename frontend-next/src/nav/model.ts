@@ -47,18 +47,18 @@ export const NAV: JobDef[] = [
         views: [
           v("overview", "Overview", ["Segment", "Dates", "vs"], { built: true }),
           v("monthly-trends", "Monthly Trends", ["Dates"], { built: true }),
-          v("nb-categories", "Non-Brand Categories", ["Dates", "vs"]),
-          v("regions", "Regions", ["Dates", "vs"]),
+          v("nb-categories", "Non-Brand Categories", ["Dates", "vs"], { built: true }),
+          v("regions", "Regions", ["Dates", "vs"], { built: true }),
         ],
       },
       { title: "Campaign", views: [v("campaign-performance", "Campaign Performance", ["Segment", "Dates", "vs"], { built: true })] },
       {
         title: "Keyword",
         views: [
-          v("keyword-deep-dive", "Keyword Deep Dive", ["Campaign", "Dates"]),
-          v("quality-score", "Quality Score", ["Dates"]),
-          v("quality-score-components", "Quality Score by Component", ["Dates"]),
-          v("kw-region-category", "KW by Region & Category", ["Dates"]),
+          v("keyword-deep-dive", "Keyword Deep Dive", ["Campaign", "Dates"], { built: true }),
+          v("quality-score", "Quality Score", ["Dates"], { built: true }),
+          v("quality-score-components", "Quality Score by Component", ["Dates"], { built: true }),
+          v("kw-region-category", "KW by Region & Category", ["Dates"], { built: true }),
         ],
       },
       {
@@ -70,10 +70,10 @@ export const NAV: JobDef[] = [
           v("triage", "Triage", ["Segment", "Dates"], { built: true }),
         ],
       },
-      { title: "Ad copy", views: [v("ad-copy", "Ad Copy", ["Segment", "Dates"]), v("ad-lp-pairing", "Ad ↔ LP Pairing", ["Segment"])] },
-      { title: "Landing pages", views: [v("lp-performance", "LP Performance", ["Dates"], { built: true }), v("lp-category-grid", "LP Category Grid", ["Dates"])] },
+      { title: "Ad copy", views: [v("ad-copy", "Ad Copy", ["Segment", "Dates"], { built: true }), v("ad-lp-pairing", "Ad ↔ LP Pairing", ["Segment"], { built: true })] },
+      { title: "Landing pages", views: [v("lp-performance", "LP Performance", ["Dates"], { built: true }), v("lp-category-grid", "LP Category Grid", ["Dates"], { built: true })] },
       { title: "Geo", views: [v("geo-performance", "Geo Performance", ["Dates"], { built: true })] },
-      { title: "Competition", views: [v("auction-insights", "Auction Insights", ["Dates"])] },
+      { title: "Competition", views: [v("auction-insights", "Auction Insights", ["Dates"], { built: true })] },
     ],
   },
   {

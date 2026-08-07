@@ -9,25 +9,7 @@ import { DataTable, type Column } from "../components/ui/DataTable";
 import { Pill } from "../components/ui/Pill";
 import { FilterInput } from "../components/ui/FilterInput";
 import { Loading, ErrorState, Empty } from "../components/ui/States";
-
-const scoreTone = (s: string): "pos" | "warn" | "neg" | "neutral" => {
-  const c = (s[0] || "").toUpperCase();
-  if (c === "A" || c === "B") return "pos";
-  if (c === "C" || c === "D") return "warn";
-  if (c === "F") return "neg";
-  return "neutral";
-};
-
-// Show the path (and query) but drop scheme + host — the client already knows their domain,
-// and full URLs blow out the column.
-const shortUrl = (url: string) => {
-  try {
-    const u = new URL(url);
-    return (u.pathname + u.search) || "/";
-  } catch {
-    return url;
-  }
-};
+import { scoreTone, shortUrl } from "../lib/grades";
 
 export function LpPerformance() {
   const { clientId = "" } = useParams();
