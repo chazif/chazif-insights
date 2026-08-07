@@ -580,6 +580,22 @@ export interface MappingsResponse {
   suggestions: CampaignMapping[];
 }
 
+// ---- Setup: data inventory ----
+export interface InventoryReport {
+  report_type: string;
+  source_file: string | null;
+  window: string | null;
+  rows: number | null;
+  uploaded_at: string | null;
+}
+export interface Inventory {
+  client_id: string;
+  reports: InventoryReport[];
+  present: string[];
+  missing: string[];
+  coverage: string; // "13/12"
+}
+
 export interface Bundle {
   meta: BundleMeta;
   campaigns?: CampaignsSection | null;

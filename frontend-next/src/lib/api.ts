@@ -64,7 +64,10 @@ export const assignAction = (clientId: string, key: string, body: { owner?: stri
 export const getLedger = (clientId: string) => get<LedgerResponse>(`${cid(clientId)}/ledger`);
 
 // ---- setup / admin ----
-import type { ClientConfig, MappingsResponse, CampaignMapping } from "./types";
+import type { ClientConfig, MappingsResponse, CampaignMapping, Inventory } from "./types";
+
+export const getInventory = (clientId: string) =>
+  get<Inventory>(`/api/inventory?client=${encodeURIComponent(clientId)}`);
 
 export const createClient = (name: string) => send<Client>("/api/clients", "POST", { name });
 export const getConfig = (clientId: string) => get<ClientConfig>(`${cid(clientId)}/config`);
