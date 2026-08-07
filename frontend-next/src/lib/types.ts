@@ -483,6 +483,68 @@ export interface Recommendation {
   "Expected Impact": string;
   Effort: string;
   evidence: RecEvidence;
+  action_key?: string | null;
+  status?: ActionStatus;
+  owner?: string | null;
+  snooze_until?: string | null;
+}
+
+// ---- Decision system (Actions + Ledger) ----
+export type ActionStatus = "proposed" | "accepted" | "snoozed" | "dismissed" | "done" | "resolved";
+
+export interface ActionItem {
+  action_key: string;
+  title: string | null;
+  priority: string | null;
+  category: string | null;
+  rationale: string | null;
+  expected_impact: string | null;
+  effort: string | null;
+  evidence: RecEvidence | Record<string, never>;
+  live: boolean;
+  status: ActionStatus;
+  raw_status: ActionStatus;
+  owner: string | null;
+  snooze_until: string | null;
+  dismiss_reason: string | null;
+  still_detected: boolean;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  updated_at: string | null;
+}
+export interface TransitionBody {
+  to: "accepted" | "snoozed" | "dismissed" | "done" | "reopened";
+  note?: string;
+  owner?: string;
+  snooze_until?: string; // ISO date
+  actor?: string;
+}
+export interface LedgerEvent {
+  event_id: number;
+  action_key: string;
+  ts: string | null;
+  actor: string | null;
+  kind: string;
+  from_status: string | null;
+  to_status: string | null;
+  note: string | null;
+  evidence: RecEvidence | null;
+  title: string | null;
+}
+export interface LedgerActionSummary {
+  action_key: string;
+  title: string | null;
+  category: string | null;
+  priority: string | null;
+  status: ActionStatus;
+  owner: string | null;
+  still_detected: boolean;
+  first_seen_at: string | null;
+  updated_at: string | null;
+}
+export interface LedgerResponse {
+  events: LedgerEvent[];
+  actions: LedgerActionSummary[];
 }
 
 export interface Bundle {

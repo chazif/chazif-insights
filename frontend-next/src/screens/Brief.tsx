@@ -22,6 +22,9 @@ function RecCard({ rec }: { rec: Recommendation }) {
         <span className="mt-[3px] text-[11px] font-medium uppercase tracking-[0.05em] text-text-muted">{rec.Category}</span>
       </div>
       <h3 className="mt-2 text-[14px] font-semibold leading-snug">{rec.Recommendation}</h3>
+      {rec.status === "accepted" && (
+        <div className="mt-1 text-[11.5px] font-medium text-positive">Accepted{rec.owner ? ` · ${rec.owner}` : ""}</div>
+      )}
       <p className="mt-1 text-[12.5px] leading-relaxed text-text-secondary">{rec.Rationale}</p>
       <div className="mt-2 flex items-center gap-4 text-[11.5px] text-text-muted">
         <span>Impact: <span className="font-medium text-text-secondary">{rec["Expected Impact"]}</span></span>
@@ -74,7 +77,8 @@ export function Brief() {
     frac == null ? undefined : { text: `${signedPct(frac)} ${cmp}`, good: betterUp ? frac >= 0 : frac <= 0 };
 
   const findings = data.findings ?? [];
-  const recs = data.recommendations ?? [];
+  // Open only — hide dismissed/done/resolved (and not-yet-due snoozes) once acted on.
+  const recs = (data.recommendations ?? []).filter((r) => !r.status || r.status === "proposed" || r.status === "accepted");
 
   return (
     <div className="mx-auto max-w-[1180px] px-6 py-6">

@@ -17,13 +17,16 @@ import { AdLpPairing } from "../screens/AdLpPairing";
 import { LpCategoryGrid } from "../screens/LpCategoryGrid";
 import { AuctionInsights } from "../screens/AuctionInsights";
 import { Brief } from "../screens/Brief";
+import { Actions } from "../screens/Actions";
 import { Budget } from "../screens/Budget";
 import { Pacing } from "../screens/Pacing";
+import { Ledger } from "../screens/Ledger";
 
 // slug → screen component. Real screens register here as they're built; every slug not
 // present falls back to the Placeholder.
 export const SCREENS: Record<string, ComponentType> = {
   brief: Brief,
+  actions: Actions,
   overview: Overview,
   "monthly-trends": MonthlyTrends,
   "nb-categories": NonBrandCategories,
@@ -45,4 +48,5 @@ export const SCREENS: Record<string, ComponentType> = {
   "auction-insights": AuctionInsights,
   budget: Budget,
   pacing: Pacing,
+  ledger: Ledger,
 };

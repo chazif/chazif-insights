@@ -36,7 +36,7 @@ export const NAV: JobDef[] = [
   {
     key: "today",
     title: "Today",
-    views: [v("brief", "Brief", [], { built: true }), v("actions", "Actions", ["Sort", "Owner"])],
+    views: [v("brief", "Brief", [], { built: true }), v("actions", "Actions", ["Sort", "Owner"], { built: true })],
   },
   {
     key: "diagnose",
@@ -89,7 +89,7 @@ export const NAV: JobDef[] = [
   {
     key: "prove",
     title: "Prove",
-    views: [v("ledger", "Ledger", ["Dates"]), v("client-view", "Client View")],
+    views: [v("ledger", "Ledger", ["Dates"], { built: true }), v("client-view", "Client View")],
   },
   {
     key: "setup",

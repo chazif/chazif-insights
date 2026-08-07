@@ -24,7 +24,41 @@ async function get<T>(path: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
+async function send<T>(path: string, method: "POST" | "PATCH" | "PUT", body: unknown): Promise<T> {
+  const r = await fetch(path, {
+    method,
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    let detail = `HTTP ${r.status}`;
+    try {
+      detail = (await r.json())?.detail ?? detail;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(detail);
+  }
+  return r.json() as Promise<T>;
+}
+
 export const getHealth = () => get<Health>("/api/health");
 export const getClients = () => get<Client[]>("/api/clients");
 export const getBundle = (clientId: string) =>
   get<import("./types").Bundle>(`/api/bundle?client=${encodeURIComponent(clientId)}`);
+
+// ---- decision system ----
+import type { ActionItem, TransitionBody, LedgerResponse } from "./types";
+
+const cid = (c: string) => `/api/clients/${encodeURIComponent(c)}`;
+
+export const getActions = (clientId: string, status = "open") =>
+  get<{ actions: ActionItem[] }>(`${cid(clientId)}/actions?status=${status}`).then((r) => r.actions);
+
+export const transitionAction = (clientId: string, key: string, body: TransitionBody) =>
+  send<ActionItem>(`${cid(clientId)}/actions/${key}/transition`, "POST", body);
+
+export const assignAction = (clientId: string, key: string, body: { owner?: string; note?: string }) =>
+  send<ActionItem>(`${cid(clientId)}/actions/${key}`, "PATCH", body);
+
+export const getLedger = (clientId: string) => get<LedgerResponse>(`${cid(clientId)}/ledger`);
