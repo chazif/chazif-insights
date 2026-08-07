@@ -1,5 +1,14 @@
 // Typed slices of the DATA bundle the FastAPI backend returns. Grows as screens are built.
 
+// The global top-bar filters that re-compute the bundle server-side (see /api/bundle).
+export interface BundleParams {
+  from?: string;      // date range start (YYYY-MM or YYYY-MM-DD)
+  to?: string;        // date range end
+  seg?: string;       // all | br (brand) | nb (non-brand)
+  campaign?: string;  // exact campaign name, else "all"
+  compare?: string;   // yoy | mom
+}
+
 export interface CampaignRow {
   campaign: string;
   type: string;
@@ -31,6 +40,7 @@ export interface BundleMeta {
   name: string;
   periods?: { current?: string; prior?: string };
   compare?: { mode?: string; label?: string };
+  filters_meta?: { campaigns?: string[]; regions?: string[]; categories?: string[]; brands?: string[] };
   [k: string]: unknown;
 }
 

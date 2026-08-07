@@ -1,6 +1,5 @@
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { getBundle } from "../lib/api";
+import { useBundle } from "../hooks/useBundle";
 import type { PacingMonth } from "../lib/types";
 import { money, pct, signedPct } from "../lib/format";
 import { StatStrip } from "../components/ui/StatStrip";
@@ -13,7 +12,7 @@ const statusTone = (s: string) => (s === "over" ? "neg" : s === "under" ? "warn"
 
 export function Pacing() {
   const { clientId = "" } = useParams();
-  const { data, isLoading, error } = useQuery({ queryKey: ["bundle", clientId], queryFn: () => getBundle(clientId) });
+  const { data, isLoading, error } = useBundle(clientId);
   if (isLoading) return <Loading />;
   if (error) return <ErrorState msg={(error as Error).message} />;
   const sec = data?.budget_pacing;

@@ -1,6 +1,5 @@
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { getBundle } from "../lib/api";
+import { useBundle } from "../hooks/useBundle";
 import type { LpCatSummary, LpCatGridRow } from "../lib/types";
 import { money, num, pct } from "../lib/format";
 import { shortUrl } from "../lib/grades";
@@ -10,7 +9,7 @@ import { Loading, ErrorState, Empty } from "../components/ui/States";
 
 export function LpCategoryGrid() {
   const { clientId = "" } = useParams();
-  const { data, isLoading, error } = useQuery({ queryKey: ["bundle", clientId], queryFn: () => getBundle(clientId) });
+  const { data, isLoading, error } = useBundle(clientId);
   if (isLoading) return <Loading />;
   if (error) return <ErrorState msg={(error as Error).message} />;
   const grid = data?.landing_pages_section?.category_grid;

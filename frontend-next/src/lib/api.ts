@@ -44,8 +44,16 @@ async function send<T>(path: string, method: "POST" | "PATCH" | "PUT", body: unk
 
 export const getHealth = () => get<Health>("/api/health");
 export const getClients = () => get<Client[]>("/api/clients");
-export const getBundle = (clientId: string) =>
-  get<import("./types").Bundle>(`/api/bundle?client=${encodeURIComponent(clientId)}`);
+
+export function getBundle(clientId: string, params: import("./types").BundleParams = {}) {
+  const sp = new URLSearchParams({ client: clientId });
+  if (params.from) sp.set("from", params.from);
+  if (params.to) sp.set("to", params.to);
+  if (params.seg && params.seg !== "all") sp.set("seg", params.seg);
+  if (params.campaign && params.campaign !== "all") sp.set("campaign", params.campaign);
+  if (params.compare && params.compare !== "yoy") sp.set("compare", params.compare);
+  return get<import("./types").Bundle>(`/api/bundle?${sp.toString()}`);
+}
 
 // ---- decision system ----
 import type { ActionItem, TransitionBody, LedgerResponse } from "./types";

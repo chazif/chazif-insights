@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { getBundle } from "../lib/api";
+import { useBundle } from "../hooks/useBundle";
 import type { RegCatRow } from "../lib/types";
 import { money, num } from "../lib/format";
 import { DataTable, type Column } from "../components/ui/DataTable";
@@ -9,7 +8,7 @@ import { Loading, ErrorState, Empty } from "../components/ui/States";
 
 export function KwRegionCategory() {
   const { clientId = "" } = useParams();
-  const { data, isLoading, error } = useQuery({ queryKey: ["bundle", clientId], queryFn: () => getBundle(clientId) });
+  const { data, isLoading, error } = useBundle(clientId);
   const [tab, setTab] = useState(0);
   if (isLoading) return <Loading />;
   if (error) return <ErrorState msg={(error as Error).message} />;

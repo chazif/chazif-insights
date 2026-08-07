@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { getBundle } from "../lib/api";
+import { useBundle } from "../hooks/useBundle";
 import type { RelevantTerm, CompetitorTerm, FlaggedTerm } from "../lib/types";
 import { money, num, pct } from "../lib/format";
 import { DataTable, type Column } from "../components/ui/DataTable";
@@ -59,7 +58,7 @@ function Shell({ title, sub, q, setQ, children }: { title: string; sub: string; 
 
 function useTerms() {
   const { clientId = "" } = useParams();
-  const query = useQuery({ queryKey: ["bundle", clientId], queryFn: () => getBundle(clientId) });
+  const query = useBundle(clientId);
   return { clientId, ...query };
 }
 

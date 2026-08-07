@@ -1,6 +1,5 @@
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { getBundle } from "../lib/api";
+import { useBundle } from "../hooks/useBundle";
 import type { NbCatRow } from "../lib/types";
 import { money, num, signedPct } from "../lib/format";
 import { StatStrip } from "../components/ui/StatStrip";
@@ -15,7 +14,7 @@ const chgCell = (v: number | null, betterUp = true) => {
 
 export function NonBrandCategories() {
   const { clientId = "" } = useParams();
-  const { data, isLoading, error } = useQuery({ queryKey: ["bundle", clientId], queryFn: () => getBundle(clientId) });
+  const { data, isLoading, error } = useBundle(clientId);
   if (isLoading) return <Loading />;
   if (error) return <ErrorState msg={(error as Error).message} />;
   const sec = data?.nb_categories_section;

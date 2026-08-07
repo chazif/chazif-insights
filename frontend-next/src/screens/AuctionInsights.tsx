@@ -1,6 +1,5 @@
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { getBundle } from "../lib/api";
+import { useBundle } from "../hooks/useBundle";
 import type { AuctionRow } from "../lib/types";
 import { pct } from "../lib/format";
 import { DataTable, type Column } from "../components/ui/DataTable";
@@ -8,7 +7,7 @@ import { Loading, ErrorState, Empty } from "../components/ui/States";
 
 export function AuctionInsights() {
   const { clientId = "" } = useParams();
-  const { data, isLoading, error } = useQuery({ queryKey: ["bundle", clientId], queryFn: () => getBundle(clientId) });
+  const { data, isLoading, error } = useBundle(clientId);
   if (isLoading) return <Loading />;
   if (error) return <ErrorState msg={(error as Error).message} />;
   const sec = data?.auction_insights_section;

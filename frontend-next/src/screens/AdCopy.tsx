@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { getBundle } from "../lib/api";
+import { useBundle } from "../hooks/useBundle";
 import type { AdRow, AdScale } from "../lib/types";
 import { money, num, pct } from "../lib/format";
 import { gradeTone } from "../lib/grades";
@@ -65,7 +64,7 @@ function ScaleView({ scale, clientId, tag }: { scale: AdScale; clientId: string;
 
 export function AdCopy() {
   const { clientId = "" } = useParams();
-  const { data, isLoading, error } = useQuery({ queryKey: ["bundle", clientId], queryFn: () => getBundle(clientId) });
+  const { data, isLoading, error } = useBundle(clientId);
   const [scaleKey, setScaleKey] = useState<"nonbranded" | "branded">("nonbranded");
   if (isLoading) return <Loading />;
   if (error) return <ErrorState msg={(error as Error).message} />;

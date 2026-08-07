@@ -1,6 +1,7 @@
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { getBundle, getActions } from "../lib/api";
+import { useBundle } from "../hooks/useBundle";
+import { getActions } from "../lib/api";
 import type { KpiRow, ActionItem } from "../lib/types";
 import { money, num, pct } from "../lib/format";
 import { Loading, ErrorState } from "../components/ui/States";
@@ -30,7 +31,7 @@ function Kpi({ label, value, chg, betterUp }: { label: string; value: string; ch
 
 export function ClientView() {
   const { clientId = "" } = useParams();
-  const bundle = useQuery({ queryKey: ["bundle", clientId], queryFn: () => getBundle(clientId) });
+  const bundle = useBundle(clientId);
   const actions = useQuery({ queryKey: ["actions", clientId, "all"], queryFn: () => getActions(clientId, "all") });
 
   if (bundle.isLoading) return <Loading />;

@@ -1,6 +1,5 @@
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { getBundle } from "../lib/api";
+import { useBundle } from "../hooks/useBundle";
 import { money, num } from "../lib/format";
 import { Loading, ErrorState, Empty } from "../components/ui/States";
 
@@ -8,7 +7,7 @@ const short = (g: string) => g.split(" — ")[0];
 
 export function AdLpPairing() {
   const { clientId = "" } = useParams();
-  const { data, isLoading, error } = useQuery({ queryKey: ["bundle", clientId], queryFn: () => getBundle(clientId) });
+  const { data, isLoading, error } = useBundle(clientId);
   if (isLoading) return <Loading />;
   if (error) return <ErrorState msg={(error as Error).message} />;
   const ac = data?.ads_section?.ad_copy;

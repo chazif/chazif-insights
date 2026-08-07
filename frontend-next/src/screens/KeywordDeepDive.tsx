@@ -1,6 +1,5 @@
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { getBundle } from "../lib/api";
+import { useBundle } from "../hooks/useBundle";
 import type { KeywordRow } from "../lib/types";
 import { money, num } from "../lib/format";
 import { ratingTone } from "../lib/grades";
@@ -14,7 +13,7 @@ const qsTone = (q: number | null) => (q == null ? "neutral" : q >= 7 ? "pos" : q
 
 export function KeywordDeepDive() {
   const { clientId = "" } = useParams();
-  const { data, isLoading, error } = useQuery({ queryKey: ["bundle", clientId], queryFn: () => getBundle(clientId) });
+  const { data, isLoading, error } = useBundle(clientId);
   if (isLoading) return <Loading />;
   if (error) return <ErrorState msg={(error as Error).message} />;
   const sec = data?.keyword_section;

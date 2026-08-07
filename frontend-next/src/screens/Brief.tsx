@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { getBundle } from "../lib/api";
+import { useBundle } from "../hooks/useBundle";
 import type { Recommendation } from "../lib/types";
 import { money, num, pct, signedPct } from "../lib/format";
 import { StatStrip } from "../components/ui/StatStrip";
@@ -63,7 +62,7 @@ function RecCard({ rec }: { rec: Recommendation }) {
 
 export function Brief() {
   const { clientId = "" } = useParams();
-  const { data, isLoading, error } = useQuery({ queryKey: ["bundle", clientId], queryFn: () => getBundle(clientId) });
+  const { data, isLoading, error } = useBundle(clientId);
   if (isLoading) return <Loading />;
   if (error) return <ErrorState msg={(error as Error).message} />;
   if (!data) return <Empty />;

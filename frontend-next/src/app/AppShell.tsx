@@ -87,7 +87,7 @@ export function AppShell() {
       )}
 
       <main className="flex-1 overflow-auto">
-        <ContextBar view={rv} />
+        <ContextBar view={rv} clientId={clientId} />
         <Outlet />
       </main>
 
