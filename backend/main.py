@@ -25,6 +25,8 @@ from engine.warehouse.analytics import read_engine
 from engine.bundle.assemble import build_bundle
 from engine.budget.parse import parse_budget_file
 from backend.budget_intel_routes import router as budget_intel_router
+from backend import decision_routes
+from backend.decision_routes import router as decision_router
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "frontend"
@@ -33,6 +35,7 @@ UPLOADS = ROOT / "data" / "uploads"
 
 app = FastAPI(title="SearchNex Ads", version="0.3.0")
 app.include_router(budget_intel_router)
+app.include_router(decision_router)
 # read_engine wraps the Postgres engine with BigQuery analytics routing once BigQuery is
 # ACTIVE (config vars + USE_BIGQUERY); until cutover it returns the plain Postgres engine.
 _engine = read_engine(get_engine())
@@ -70,6 +73,11 @@ def _bundle_cache_put(key, value):
 def _bundle_cache_clear():
     """Drop all cached bundles — called whenever ingest or config changes the underlying data."""
     _BUNDLE_CACHE.clear()
+
+
+# A lifecycle change (accept/dismiss/…) alters the status join baked into a cached
+# bundle, so wire the decision router's mutations to the same invalidation.
+decision_routes.invalidate_bundle_cache = _bundle_cache_clear
 
 
 def _run_job(job_id, fn):

@@ -195,7 +195,8 @@ def _latest_complete_month(engine, client_id):
             "full": f"{FULL_MONTHS[m-1]} {y}", "abbr": f"{MABBR[m-1]} {y}"}
 
 
-def _to_recommendations(findings):
+def _to_recommendations(findings, client_id=None):
+    from ..decisions.keys import action_key
     recs = []
     for f in sorted(findings, key=lambda x: SEV_ORDER.get(x["severity"], 9)):
         if f["severity"] == "PASS":
@@ -207,6 +208,8 @@ def _to_recommendations(findings):
             "Rationale": f"{f['observation']} {f['impact']}",
             "Expected Impact": DOLLAR_LABEL.get(f["dollar"], f["dollar"]),
             "Effort": EFFORT_LABEL.get(f["effort"], f["effort"]),
+            # stable identity for the decision-system lifecycle (accept/dismiss/…)
+            "action_key": action_key(client_id, f) if client_id else None,
             # the data the recommendation is based on (shown by the "See data" button)
             "evidence": {
                 "severity": f["severity"],
@@ -2090,7 +2093,16 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
     # ---- analyzers -> findings + recommendations ----
     analyzer_findings = R["analyzers"]
     findings = _to_overview_findings(analyzer_findings)
-    recommendations = _to_recommendations(analyzer_findings)
+    recommendations = _to_recommendations(analyzer_findings, client_id)
+    # read-only join of the decision-system lifecycle so Brief/Actions can honour
+    # accept/dismiss/snooze without a second call (cache cleared on any transition)
+    from ..decisions.service import load_action_status
+    _status = load_action_status(engine, client_id)
+    for _r in recommendations:
+        _st = _status.get(_r.get("action_key"))
+        _r["status"] = _st["status"] if _st else "proposed"
+        _r["owner"] = _st["owner"] if _st else None
+        _r["snooze_until"] = _st["snooze_until"] if _st else None
 
     campaigns = R["campaigns"]
     geo = R["geo"]
