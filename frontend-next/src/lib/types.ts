@@ -595,6 +595,22 @@ export interface Inventory {
   missing: string[];
   coverage: string; // "13/12"
 }
+export interface UploadLoaded {
+  report_type: string;
+  source_file: string | null;
+  window: string | null;
+  rows: number | null;
+}
+export interface UploadResult {
+  loaded: UploadLoaded[];
+  unmapped: string[];
+  inventory: Inventory;
+}
+export interface JobStatus {
+  status: "processing" | "done" | "error";
+  result?: UploadResult;
+  error?: string;
+}
 
 export interface Bundle {
   meta: BundleMeta;

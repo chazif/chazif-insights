@@ -64,10 +64,30 @@ export const assignAction = (clientId: string, key: string, body: { owner?: stri
 export const getLedger = (clientId: string) => get<LedgerResponse>(`${cid(clientId)}/ledger`);
 
 // ---- setup / admin ----
-import type { ClientConfig, MappingsResponse, CampaignMapping, Inventory } from "./types";
+import type { ClientConfig, MappingsResponse, CampaignMapping, Inventory, JobStatus } from "./types";
 
 export const getInventory = (clientId: string) =>
   get<Inventory>(`/api/inventory?client=${encodeURIComponent(clientId)}`);
+
+export async function uploadFiles(clientId: string, period: string, files: File[]): Promise<{ job_id: string; status: string }> {
+  const fd = new FormData();
+  fd.append("client", clientId);
+  fd.append("period", period);
+  for (const f of files) fd.append("files", f);
+  const r = await fetch("/api/upload", { method: "POST", body: fd });
+  if (!r.ok) {
+    let detail = `HTTP ${r.status}`;
+    try {
+      detail = (await r.json())?.detail ?? detail;
+    } catch {
+      /* non-JSON */
+    }
+    throw new Error(detail);
+  }
+  return r.json();
+}
+
+export const getUploadStatus = (jobId: string) => get<JobStatus>(`/api/upload/status/${jobId}`);
 
 export const createClient = (name: string) => send<Client>("/api/clients", "POST", { name });
 export const getConfig = (clientId: string) => get<ClientConfig>(`${cid(clientId)}/config`);

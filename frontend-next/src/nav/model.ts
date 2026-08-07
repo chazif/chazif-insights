@@ -97,7 +97,7 @@ export const NAV: JobDef[] = [
     categories: [
       {
         title: "Data",
-        views: [v("upload-data", "Upload Data"), v("data-inventory", "Data Inventory", [], { built: true }), v("campaign-mapping", "Campaign Mapping", [], { built: true })],
+        views: [v("upload-data", "Upload Data", [], { built: true }), v("data-inventory", "Data Inventory", [], { built: true }), v("campaign-mapping", "Campaign Mapping", [], { built: true })],
       },
       { title: "Settings", views: [v("business-context", "Business Context", [], { built: true }), v("clients", "Clients", [], { admin: true, built: true })] },
     ],
