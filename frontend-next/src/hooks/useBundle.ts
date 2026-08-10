@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { getBundle } from "../lib/api";
 import type { BundleParams } from "../lib/types";
 
-const KEYS = ["from", "to", "seg", "campaign", "compare"] as const;
+const KEYS = ["from", "to", "seg", "campaign", "region", "category", "brand", "compare"] as const;
 
 // Active top-bar filters, read from the URL query string. Only non-default values are
 // included, so the React-Query key stays stable until a filter actually changes.

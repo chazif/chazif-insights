@@ -6,7 +6,10 @@ export interface BundleParams {
   to?: string;        // date range end
   seg?: string;       // all | br (brand) | nb (non-brand)
   campaign?: string;  // exact campaign name, else "all"
-  compare?: string;   // yoy | mom
+  region?: string;    // exact region, else "all"
+  category?: string;  // exact category, else "all"
+  brand?: string;     // exact brand, else "all"
+  compare?: string;   // yoy | mom | custom
 }
 
 export interface CampaignRow {
