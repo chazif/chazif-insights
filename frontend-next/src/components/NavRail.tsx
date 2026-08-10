@@ -73,7 +73,7 @@ export function NavRail(props: Props) {
     <aside className="z-[30] flex w-[248px] shrink-0 flex-col bg-rail text-text-disabled">
       <div className="flex items-center gap-2 px-4 pb-3 pt-4">
         <div className="grid h-5 w-5 place-items-center rounded-[5px] bg-accent font-mono text-[11px] font-bold text-ink">N</div>
-        <span className="text-[14px] font-semibold tracking-[-0.01em] text-[#f9fafb]">SearchNex</span>
+        <span className="text-[14px] font-semibold tracking-[-0.01em] text-[#f9fafb]">SearchNex <span className="font-normal text-text-disabled">Ads</span></span>
         <button onClick={onToggleRail} className="ml-auto grid h-6 w-6 place-items-center rounded-[6px] text-text-disabled hover:bg-white/[0.12] hover:text-[#f9fafb]" title="Collapse">
           «
         </button>
