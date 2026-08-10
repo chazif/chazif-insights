@@ -186,13 +186,32 @@ def load_ndjson(table, path, truncate=False):
 
 
 def delete_report(client_id, report_type):
-    """Snapshot-replace step: remove a client's rows for one report_type from raw_rows."""
+    """Snapshot-replace step (undated reports): remove a client's rows for one report_type."""
     from google.cloud import bigquery
     jc = bigquery.QueryJobConfig(query_parameters=[
         bigquery.ScalarQueryParameter("c", "STRING", client_id),
         bigquery.ScalarQueryParameter("r", "STRING", report_type)])
     get_client().query(
         f"DELETE FROM `{table_ref('raw_rows')}` WHERE client_id=@c AND report_type=@r",
+        job_config=jc).result()
+
+
+def delete_report_window(client_id, report_type, ns, ne, undated_upload_ids=()):
+    """Merge-by-window step (dated reports): remove only the rows the new upload supersedes —
+    dated rows whose date_norm is in [ns, ne], plus undated rows (date_norm NULL) belonging to
+    older uploads whose window overlaps (passed as upload ids). Mirrors the Postgres
+    _merge_windowed; see docs/INGEST_MERGE_DESIGN.md."""
+    from google.cloud import bigquery
+    jc = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("c", "STRING", client_id),
+        bigquery.ScalarQueryParameter("r", "STRING", report_type),
+        bigquery.ScalarQueryParameter("ns", "DATE", ns),
+        bigquery.ScalarQueryParameter("ne", "DATE", ne),
+        bigquery.ArrayQueryParameter("ids", "INT64", list(undated_upload_ids))])
+    get_client().query(
+        f"DELETE FROM `{table_ref('raw_rows')}` WHERE client_id=@c AND report_type=@r "
+        "AND ((date_norm BETWEEN @ns AND @ne) "
+        "OR (date_norm IS NULL AND upload_id IN UNNEST(@ids)))",
         job_config=jc).result()
 
 

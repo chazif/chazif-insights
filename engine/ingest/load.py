@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Load a folder of Google Ads CSV exports into the raw landing warehouse for one client.
 
-Snapshot semantics (idempotent): re-loading a report for the same client REPLACES
-that client's rows for that report (Google exports are full snapshots). Loading a
-new client ADDS alongside the others.
+Merge-by-window semantics: a new upload ADDS to the client's existing data. For dated
+reports (per-row dates) it replaces only the overlapping date window, preserving
+non-overlapping history; for undated snapshots it replaces the whole report (latest
+wins). Quality Score is a separate append-only frozen history. Re-uploading the same
+window is idempotent. Loading a new client ADDS alongside the others. See
+docs/INGEST_MERGE_DESIGN.md.
 
 Usage:
   py -m engine.ingest.load --client chiarelli --dir "C:\\path\\to\\csv folder"
@@ -116,20 +119,62 @@ def _row_record(client_id, upload_id, rtype, idx, row, date_col=None, order="mdy
     return rec
 
 
-def replace_report(conn, client_id, rtype, rows, source_file, window_raw, window_start, window_end, now,
-                   date_col=None, order="mdy"):
-    """Snapshot-replace one client's rows for one report_type within an open transaction.
-    Reused by single-account (load_folder) and MCC (per-account) ingestion. `rows` may be
-    a list OR a lazy iterator (streaming ingest) — it's consumed once, in CHUNK batches,
-    so peak memory stays flat regardless of file size. `date_col`/`order` drive the
-    normalized date_norm per row. For search_keyword_qs, each row's QS is also appended
-    to the frozen qs_history (stamped with the row's day, else the export window-end).
-    Returns the number of rows written."""
+def _snapshot_replace(conn, client_id, rtype):
+    """Latest-snapshot-wins for UNDATED reports (no per-row date): drop the client's
+    existing rows for this report before the new snapshot goes in."""
     old = conn.execute(select(uploads.c.upload_id).where(
         (uploads.c.client_id == client_id) & (uploads.c.report_type == rtype))).scalars().all()
     if old:
         conn.execute(delete(raw_rows).where(raw_rows.c.upload_id.in_(old)))
         conn.execute(delete(uploads).where(uploads.c.upload_id.in_(old)))
+
+
+def _merge_windowed(conn, client_id, rtype, ns, ne):
+    """Merge-by-window for DATED reports: replace only the rows the new upload's window
+    [ns, ne] supersedes, so non-overlapping history survives. Overlapping dated rows are
+    replaced; an older undated snapshot whose window overlaps is superseded too (else the
+    bundle would keep a stale whole-window snapshot beside the fresh dated data); uploads
+    left empty are removed so Data Inventory stays honest."""
+    old = conn.execute(select(uploads.c.upload_id, uploads.c.window_start, uploads.c.window_end).where(
+        (uploads.c.client_id == client_id) & (uploads.c.report_type == rtype))).all()
+    # 1) overlapping dated rows (any prior upload) in [ns, ne]
+    conn.execute(delete(raw_rows).where(
+        (raw_rows.c.client_id == client_id) & (raw_rows.c.report_type == rtype)
+        & (raw_rows.c.date_norm >= ns) & (raw_rows.c.date_norm <= ne)))
+    # 2) undated rows from older uploads whose window overlaps [ns, ne]
+    overlap_ids = [u.upload_id for u in old
+                   if u.window_start and u.window_end and u.window_start <= ne and u.window_end >= ns]
+    if overlap_ids:
+        conn.execute(delete(raw_rows).where(
+            raw_rows.c.upload_id.in_(overlap_ids) & raw_rows.c.date_norm.is_(None)))
+    # 3) drop uploads that no longer have any rows
+    old_ids = [u.upload_id for u in old]
+    if old_ids:
+        nonempty = set(conn.execute(select(raw_rows.c.upload_id).where(
+            raw_rows.c.upload_id.in_(old_ids)).distinct()).scalars().all())
+        empty = [i for i in old_ids if i not in nonempty]
+        if empty:
+            conn.execute(delete(uploads).where(uploads.c.upload_id.in_(empty)))
+
+
+def replace_report(conn, client_id, rtype, rows, source_file, window_raw, window_start, window_end, now,
+                   date_col=None, order="mdy"):
+    """Ingest one client's rows for one report_type within an open transaction, MERGING by
+    date window so a new upload adds to (rather than wipes) existing data. Reused by
+    single-account (load_folder) and MCC (per-account) ingestion. `rows` may be a list OR a
+    lazy iterator (streaming ingest) — consumed once, in CHUNK batches, so peak memory stays
+    flat regardless of file size.
+
+    Dated reports (date_col present + a parseable window) merge by window: overlapping dates
+    are replaced, non-overlapping history is preserved. Undated snapshots keep
+    latest-snapshot-wins. `date_col`/`order` drive the normalized date_norm per row. For
+    search_keyword_qs, each row's QS is also appended to the frozen qs_history (unchanged —
+    stamped with the row's day, else the export window-end). Returns the number of rows written.
+    See docs/INGEST_MERGE_DESIGN.md."""
+    if date_col and window_start is not None and window_end is not None:
+        _merge_windowed(conn, client_id, rtype, window_start, window_end)
+    else:
+        _snapshot_replace(conn, client_id, rtype)
 
     # row_count is filled in after streaming, since `rows` may be a lazy iterator.
     res = conn.execute(uploads.insert().values(
@@ -161,19 +206,41 @@ def replace_report(conn, client_id, rtype, rows, source_file, window_raw, window
 def replace_report_bq(conn, client_id, rtype, rows, source_file, window_raw, window_start, window_end, now,
                       date_col=None, order="mdy"):
     """BigQuery ingestion (post-cutover). The uploads ledger stays in Postgres (on `conn`);
-    raw_rows / qs_history go to BigQuery via free load jobs. Snapshot-replace for raw_rows
-    (delete the report's rows, then append the new load); append-with-freeze MERGE for
-    qs_history. Rows stream to NDJSON temp files so memory stays flat. Returns rows written."""
-    old = conn.execute(select(uploads.c.upload_id).where(
-        (uploads.c.client_id == client_id) & (uploads.c.report_type == rtype))).scalars().all()
-    if old:
-        # The migrated rows still sit in Postgres raw_rows (data now lives in BigQuery),
-        # and that legacy table keeps its FK to uploads until decommission. Clear the
-        # stale rows for this report so the uploads parent can be replaced. Guarded so
-        # this is a harmless no-op once Postgres raw_rows is dropped post-cutover.
-        if inspect(conn).has_table(raw_rows.name):
-            conn.execute(delete(raw_rows).where(raw_rows.c.upload_id.in_(old)))
-        conn.execute(delete(uploads).where(uploads.c.upload_id.in_(old)))
+    raw_rows / qs_history go to BigQuery via free load jobs. MERGES by date window (dated
+    reports) or latest-snapshot-wins (undated) to mirror replace_report; append-with-freeze
+    MERGE for qs_history. Rows stream to NDJSON temp files so memory stays flat. Returns rows
+    written. See docs/INGEST_MERGE_DESIGN.md."""
+    dated = bool(date_col) and window_start is not None and window_end is not None
+    has_legacy = inspect(conn).has_table(raw_rows.name)
+    bq_overlap_ids = ()
+    if dated:
+        # Windowed merge: keep the uploads ledger (older uploads may retain non-overlapping
+        # rows in BigQuery); clear only the superseded rows. Empty-upload cleanup is skipped
+        # on the BQ path (row counts live in BigQuery, not this transaction) — a stale ledger
+        # row is harmless.
+        old = conn.execute(select(uploads.c.upload_id, uploads.c.window_start, uploads.c.window_end).where(
+            (uploads.c.client_id == client_id) & (uploads.c.report_type == rtype))).all()
+        bq_overlap_ids = [u.upload_id for u in old
+                          if u.window_start and u.window_end and u.window_start <= window_end and u.window_end >= window_start]
+        if has_legacy:                          # windowed delete of the legacy Postgres mirror
+            conn.execute(delete(raw_rows).where(
+                (raw_rows.c.client_id == client_id) & (raw_rows.c.report_type == rtype)
+                & (raw_rows.c.date_norm >= window_start) & (raw_rows.c.date_norm <= window_end)))
+            if bq_overlap_ids:
+                conn.execute(delete(raw_rows).where(
+                    raw_rows.c.upload_id.in_(bq_overlap_ids) & raw_rows.c.date_norm.is_(None)))
+    else:
+        # Undated snapshot: latest-wins — clear the client's rows for this report.
+        old = conn.execute(select(uploads.c.upload_id).where(
+            (uploads.c.client_id == client_id) & (uploads.c.report_type == rtype))).scalars().all()
+        if old:
+            # The migrated rows still sit in Postgres raw_rows (data now lives in BigQuery),
+            # and that legacy table keeps its FK to uploads until decommission. Clear the
+            # stale rows for this report so the uploads parent can be replaced. Guarded so
+            # this is a harmless no-op once Postgres raw_rows is dropped post-cutover.
+            if has_legacy:
+                conn.execute(delete(raw_rows).where(raw_rows.c.upload_id.in_(old)))
+            conn.execute(delete(uploads).where(uploads.c.upload_id.in_(old)))
     res = conn.execute(uploads.insert().values(
         client_id=client_id, report_type=rtype, source_file=source_file,
         window_raw=window_raw, window_start=window_start, window_end=window_end,
@@ -195,7 +262,10 @@ def replace_report_bq(conn, client_id, rtype, rows, source_file, window_raw, win
                     if qrec:
                         qout.write(bq.ndjson_line(qrec, bq.TABLES["qs_history"][0]) + "\n"); qs_n += 1
                 n += 1
-        bq.delete_report(client_id, rtype)          # drop the old snapshot
+        if dated:
+            bq.delete_report_window(client_id, rtype, window_start, window_end, bq_overlap_ids)
+        else:
+            bq.delete_report(client_id, rtype)      # undated: drop the old snapshot
         bq.load_ndjson("raw_rows", rpath)           # append the new one
         if qs_n:
             bq.merge_qs(qpath)                      # append-only freeze
