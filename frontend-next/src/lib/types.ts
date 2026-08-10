@@ -311,6 +311,7 @@ export interface RegionCategorySection {
   components: RegCatComponent[];
   categories: string[];
   regions: string[];
+  derived?: boolean; // region inferred from campaign names (no geo-segmented keyword export)
 }
 
 // ---- Ad Copy ----

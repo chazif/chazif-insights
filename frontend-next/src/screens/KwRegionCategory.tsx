@@ -37,6 +37,11 @@ export function KwRegionCategory() {
     <div className="mx-auto max-w-[1280px] px-6 py-6">
       <h2 className="mb-1 text-[16px] font-semibold">KW by Region & Category</h2>
       <p className="mb-3 text-[12.5px] text-text-muted">CPC split by the keyword's component rating — the Below−Above spread is what a QS fix could recover.</p>
+      {sec.derived && (
+        <p className="mb-3 rounded-[8px] border border-[#fcd34d] bg-[#fffbeb] px-3 py-2 text-[12px] text-[#92400e]">
+          Region inferred from your geo-tiered campaign names — for true per-keyword geography, re-export the Search Keyword report with a Region/State segment.
+        </p>
+      )}
       <div className="mb-3 flex gap-1.5">
         {sec.components.map((c, i) => (
           <button

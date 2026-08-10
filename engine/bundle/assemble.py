@@ -768,24 +768,27 @@ def _qs_breakdown(engine, client_id, cm, config, keep=None, date_from=None, date
 def _region_category(engine, client_id, config, keep=None, date_from=None, date_to=None):
     """Region & Category — for each Brand×Region×Category slice, avg CPC split by the
     keyword's component rating (Below / Average / Above) per QS component, with the
-    Below−Above CPC spread. Joins the region-segmented keyword export (region + spend)
-    to search_keyword_qs (component ratings). None if the segmented export is absent."""
+    Below−Above CPC spread. Prefers the region-segmented keyword export ('keyword_geo',
+    region + spend) joined to search_keyword_qs (component ratings). When that export is
+    absent, falls back to deriving each keyword's region from its geo-tiered campaign name
+    (like the Regions view) so region-structured accounts still get the view — coarser than
+    a true geo segment (`derived: true` in the result). None if neither source yields data."""
     keep = keep or (lambda d: True)
     rc, rp = _range_sql(date_from, date_to)
     with engine.connect() as c:
         geo = c.execute(text("SELECT clicks, cost, row FROM raw_rows WHERE client_id=:c "
                              "AND report_type='keyword_geo'" + rc), {"c": client_id, **rp}).all()
-    if not geo:
+        kqs = c.execute(text("SELECT cost, clicks, row FROM raw_rows WHERE client_id=:c "
+                             "AND report_type='search_keyword_qs'" + rc), {"c": client_id, **rp}).all()
+    used_geo = bool(geo)
+    if not geo and not kqs:
         return None
-    with engine.connect() as c:
-        kqs = c.execute(text("SELECT row FROM raw_rows WHERE client_id=:c "
-                             "AND report_type='search_keyword_qs'"), {"c": client_id}).all()
     kw_ratings = {}
-    for (row,) in kqs:
+    for cost, clicks, row in kqs:
         d = _asdict(row); kw = (d.get("search_keyword") or "").lower()
         if kw:
             kw_ratings[kw] = {ck: _norm_rating(d.get(ck)) for ck, _, _ in QS_COMPONENTS}
-    if not kw_ratings:
+    if used_geo and not kw_ratings:
         return None
 
     config = config or {}
@@ -802,29 +805,39 @@ def _region_category(engine, client_id, config, keep=None, date_from=None, date_
         return "Uncategorized"
 
     slices = {}
-    for clicks, cost, row in geo:
-        d = _asdict(row)
-        if not keep(d):
-            continue
-        kw = d.get("search_keyword"); region = _region_value(d)
+
+    def add(region, kw, cost, clicks, ratings):
         if not kw or not region:
-            continue
-        kwl = kw.lower()
-        if brand_terms and any(b in kwl for b in brand_terms):
-            continue                                  # non-brand only
-        cost = _num(cost); clicks = _num(clicks)
+            return
+        if brand_terms and any(b in kw.lower() for b in brand_terms):
+            return                                    # non-brand only
         key = (brand_label, region, categorize(kw))
         s = slices.get(key)
         if s is None:
             s = slices[key] = {"total": 0.0, "comp": {ck: {r: [0.0, 0.0] for r in QS_RATINGS}
                                                       for ck, _, _ in QS_COMPONENTS}}
         s["total"] += cost
-        rr = kw_ratings.get(kwl)
-        if rr:
+        if ratings:
             for ck, _, _ in QS_COMPONENTS:
-                rating = rr.get(ck)
+                rating = ratings.get(ck)
                 if rating:
                     b = s["comp"][ck][rating]; b[0] += cost; b[1] += clicks
+
+    if used_geo:                                      # true per-keyword geography
+        for clicks, cost, row in geo:
+            d = _asdict(row)
+            if not keep(d):
+                continue
+            kw = d.get("search_keyword")
+            add(_region_value(d), kw, _num(cost), _num(clicks), kw_ratings.get((kw or "").lower()))
+    else:                                             # fallback: region parsed from the campaign name
+        for cost, clicks, row in kqs:
+            d = _asdict(row)
+            if not keep(d):
+                continue
+            kw = d.get("search_keyword")
+            ratings = {ck: _norm_rating(d.get(ck)) for ck, _, _ in QS_COMPONENTS}
+            add(_region_of(d.get("campaign")), kw, _num(cost), _num(clicks), ratings)
     if not slices:
         return None
 
@@ -847,7 +860,7 @@ def _region_category(engine, client_id, config, keep=None, date_from=None, date_
         components.append({"key": ck, "label": label, "total": len(rows), "rows": rows[:100]})
     cats = sorted({r["category"] for comp in components for r in comp["rows"] if r["category"] != "Uncategorized"})
     regs = sorted({r["region"] for comp in components for r in comp["rows"]})
-    return {"components": components, "categories": cats, "regions": regs}
+    return {"components": components, "categories": cats, "regions": regs, "derived": not used_geo}
 
 
 def _search_terms(engine, client_id, config):
