@@ -6,19 +6,25 @@ can evolve without touching the main app file. Spec: docs/budget-intel/.
 """
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
 
 from engine.ingest.store import get_engine
+from engine.ingest.service import get_config
 from engine.warehouse.analytics import read_engine
 from engine.budget_intel import tables as bi_tables
 from engine.budget_intel import service as bi
 from engine.budget_intel import curves as bi_curves
+from engine import mapping as cmap
 
 router = APIRouter(prefix="/api/clients/{client_id}/budget-intel",
                    tags=["budget-intel"])
 
 _engine = None
+
+# main.py injects its bundle-cache clearer here after include_router — mapping
+# changes alter the attribution baked into cached bundles.
+invalidate_bundle_cache = lambda: None   # noqa: E731
 
 
 def engine():
@@ -72,16 +78,49 @@ class RunIn(BaseModel):
 
 @router.get("/mappings")
 def mappings(client_id: str):
-    unmapped = bi.unmapped_campaigns(engine(), client_id)
-    return {"mappings": bi.get_mappings(engine(), client_id),
-            "unmapped": unmapped,
-            "suggestions": [bi.suggest_mapping(c) for c in unmapped]}
+    """The central mapping engine's view state: sync first (auto-map any campaigns
+    that appeared in newly uploaded data), then return every mapping with its
+    source / confidence / review status. `unmapped`/`suggestions` kept (now always
+    empty post-sync) for backward compatibility."""
+    eng = engine()
+    cmap.sync(eng, client_id, get_config(client_id, engine=eng) or {})
+    out = cmap.get_all(eng, client_id)
+    out["unmapped"] = bi.unmapped_campaigns(eng, client_id)
+    out["suggestions"] = []
+    return out
 
 
 @router.put("/mappings")
 def put_mappings(client_id: str, rows: List[MappingRow]):
-    n = bi.upsert_mappings(engine(), client_id, [r.model_dump() for r in rows])
+    """Inline edits from the mapping tab — human input overrides auto-mapping."""
+    n = cmap.save_user(engine(), client_id, [r.model_dump() for r in rows])
+    invalidate_bundle_cache()
     return {"saved": n, "unmapped": bi.unmapped_campaigns(engine(), client_id)}
+
+
+class ApproveIn(BaseModel):
+    campaigns: Optional[List[str]] = None    # None -> approve all pending
+
+
+@router.post("/mappings/approve")
+def approve_mappings(client_id: str, body: ApproveIn):
+    n = cmap.approve(engine(), client_id, campaigns=body.campaigns)
+    invalidate_bundle_cache()
+    return {"approved": n, **{k: v for k, v in cmap.get_all(engine(), client_id).items() if k != "mappings"}}
+
+
+@router.post("/mappings/upload")
+async def upload_mappings(client_id: str, file: UploadFile = File(...)):
+    """Upload a mapping document (CSV/XLSX: Campaign + Brand/Region/Category[/Engine/
+    Type]) — rows land as source 'file', approved, overriding auto-mapping."""
+    data = await file.read()
+    try:
+        rows = cmap.parse_mapping_file(data, file.filename)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    n = cmap.save_user(engine(), client_id, rows, source="file")
+    invalidate_bundle_cache()
+    return {"saved": n, **cmap.get_all(engine(), client_id)}
 
 
 @router.get("/business-metrics")

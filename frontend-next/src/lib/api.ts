@@ -123,6 +123,24 @@ export const updateConfig = (clientId: string, patch: Partial<ClientConfig>) =>
 export const getMappings = (clientId: string) => get<MappingsResponse>(`${cid(clientId)}/budget-intel/mappings`);
 export const putMappings = (clientId: string, rows: CampaignMapping[]) =>
   send<{ saved: number; unmapped: string[] }>(`${cid(clientId)}/budget-intel/mappings`, "PUT", rows);
+export const approveMappings = (clientId: string, campaigns?: string[]) =>
+  send<{ approved: number; pending: number }>(`${cid(clientId)}/budget-intel/mappings/approve`, "POST", { campaigns: campaigns ?? null });
+
+export async function uploadMappingFile(clientId: string, file: File): Promise<{ saved: number; pending?: number }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const r = await fetch(`${cid(clientId)}/budget-intel/mappings/upload`, { method: "POST", body: fd });
+  if (!r.ok) {
+    let detail = `HTTP ${r.status}`;
+    try {
+      detail = (await r.json())?.detail ?? detail;
+    } catch {
+      /* non-JSON */
+    }
+    throw new Error(detail);
+  }
+  return r.json();
+}
 
 export async function uploadBudget(clientId: string, file: File): Promise<{ lines: unknown[]; [k: string]: unknown }> {
   const fd = new FormData();

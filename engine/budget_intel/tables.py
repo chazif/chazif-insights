@@ -20,6 +20,11 @@ campaign_mappings = Table(
     Column("category", String(64)),
     Column("engine", String(16)),      # G / B / ...
     Column("camp_type", String(32)),   # PMX / SEARCH / ...
+    # central mapping engine metadata (engine/mapping.py): who set this row and
+    # how sure the auto-mapper was. Legacy NULLs read as user/approved/1.0.
+    Column("source", String(16)),      # auto | user | file
+    Column("confidence", Float),       # 0..1 (auto-mapper score; 1 for human rows)
+    Column("status", String(16)),      # pending | approved
     Column("updated_at", DateTime),
 )
 

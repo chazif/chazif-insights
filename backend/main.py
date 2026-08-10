@@ -24,6 +24,8 @@ from engine.ingest.store import get_engine
 from engine.warehouse.analytics import read_engine
 from engine.bundle.assemble import build_bundle
 from engine.budget.parse import parse_budget_file
+from engine import mapping as campaign_mapping
+from backend import budget_intel_routes
 from backend.budget_intel_routes import router as budget_intel_router
 from backend import decision_routes
 from backend.decision_routes import router as decision_router
@@ -76,8 +78,21 @@ def _bundle_cache_clear():
 
 
 # A lifecycle change (accept/dismiss/…) alters the status join baked into a cached
-# bundle, so wire the decision router's mutations to the same invalidation.
+# bundle, so wire the decision router's mutations to the same invalidation. Mapping
+# edits/approvals change every view's attribution, so they invalidate too.
 decision_routes.invalidate_bundle_cache = _bundle_cache_clear
+budget_intel_routes.invalidate_bundle_cache = _bundle_cache_clear
+
+
+def _sync_mappings(*client_ids):
+    """Auto-map any campaigns that arrived in freshly ingested data (the central
+    mapping engine's continuous-sync step). Fail-soft — a mapping hiccup must
+    never fail an ingest."""
+    for cid in {c for c in client_ids if c}:
+        try:
+            campaign_mapping.sync(_engine, cid, service.get_config(cid, engine=_engine) or {})
+        except Exception:   # noqa: BLE001
+            pass
 
 
 def _run_job(job_id, fn):
@@ -217,7 +232,12 @@ async def upload(background: BackgroundTasks, client: str = Form(...), period: s
         raise HTTPException(400, "no .csv files in upload")
     job_id = uuid.uuid4().hex[:12]
     _JOBS[job_id] = {"status": "processing"}
-    background.add_task(_run_job, job_id, lambda: service.ingest_folder(client, str(dest), engine=_engine))
+
+    def _ingest_then_map():
+        result = service.ingest_folder(client, str(dest), engine=_engine)
+        _sync_mappings(client)                    # auto-map new campaigns for review
+        return result
+    background.add_task(_run_job, job_id, _ingest_then_map)
     return {"job_id": job_id, "status": "processing"}
 
 
@@ -262,7 +282,12 @@ def mcc_commit(body: dict, background: BackgroundTasks):
     mapping = body.get("mapping") or {}
     job_id = uuid.uuid4().hex[:12]
     _JOBS[job_id] = {"status": "processing"}
-    background.add_task(_run_job, job_id, lambda: service.commit_mcc(str(dest), mapping, engine=_engine))
+
+    def _commit_then_map():
+        result = service.commit_mcc(str(dest), mapping, engine=_engine)
+        _sync_mappings(*[r.get("client_id") for r in result.get("ingested", [])])
+        return result
+    background.add_task(_run_job, job_id, _commit_then_map)
     return {"job_id": job_id, "status": "processing"}
 
 

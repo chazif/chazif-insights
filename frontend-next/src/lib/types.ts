@@ -44,6 +44,7 @@ export interface BundleMeta {
   periods?: { current?: string; prior?: string };
   compare?: { mode?: string; label?: string };
   filters_meta?: { campaigns?: string[]; regions?: string[]; categories?: string[]; brands?: string[] };
+  mapping?: { pending: number; total: number } | null; // central mapping review state
   [k: string]: unknown;
 }
 
@@ -587,11 +588,16 @@ export interface CampaignMapping {
   category: string | null;
   engine: string | null;
   camp_type: string | null;
+  source?: "auto" | "user" | "file";
+  status?: "pending" | "approved";
+  confidence?: number | null; // 0..1 auto-mapper score; 1 for human rows
 }
 export interface MappingsResponse {
   mappings: CampaignMapping[];
   unmapped: string[];
   suggestions: CampaignMapping[];
+  pending?: number;
+  total?: number;
 }
 
 // ---- Setup: data inventory ----

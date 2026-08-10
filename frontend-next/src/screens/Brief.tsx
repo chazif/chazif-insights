@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useBundle } from "../hooks/useBundle";
 import type { Recommendation } from "../lib/types";
 import { money, num, pct, signedPct } from "../lib/format";
@@ -82,6 +82,13 @@ export function Brief() {
   return (
     <div className="mx-auto max-w-[1180px] px-6 py-6">
       <h1 className="mb-4 text-[19px] font-semibold tracking-[-0.01em]">{data.meta?.name ?? "Brief"}</h1>
+
+      {(data.meta?.mapping?.pending ?? 0) > 0 && (
+        <div className="mb-4 flex items-center gap-2 rounded-[10px] border border-[#fcd34d] bg-[#fffbeb] px-4 py-2.5 text-[12.5px] text-[#92400e]">
+          <strong>{data.meta!.mapping!.pending}</strong> new campaign{data.meta!.mapping!.pending > 1 ? "s were" : " was"} auto-mapped and need{data.meta!.mapping!.pending > 1 ? "" : "s"} review —{" "}
+          <Link to={`/c/${clientId}/campaign-mapping`} className="font-medium underline hover:opacity-70">review mappings</Link>
+        </div>
+      )}
 
       {tot && (
         <StatStrip
