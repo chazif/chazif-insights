@@ -186,7 +186,8 @@ export function ContextBar({ view, clientId = "" }: { view?: ResolvedView; clien
   const showBar = filters.some((f) => DATA_FILTERS.has(f)) && !!clientId;
   const { data } = useBundle(clientId, showBar);
 
-  const subtitle = view ? [view.job.title, view.category?.title].filter(Boolean).join(" › ") : "";
+  // Ordered breadcrumb trail: Job › Category (the parents that lead to this view).
+  const trail = view ? [view.job.title, view.category?.title].filter(Boolean) : [];
   const set = (k: string, v: string, dflt: string) => {
     const next = new URLSearchParams(sp);
     if (!v || v === dflt) next.delete(k);
@@ -204,9 +205,14 @@ export function ContextBar({ view, clientId = "" }: { view?: ResolvedView; clien
 
   return (
     <div className="sticky top-0 z-20 border-b border-strip-border bg-strip-bg">
-      <div className="flex h-11 items-center gap-3 px-6">
-        <span className="text-[13px] font-semibold text-ink">{view?.title ?? "—"}</span>
-        {subtitle && <span className="text-[12px] text-text-muted">{subtitle}</span>}
+      <div className="flex h-11 items-center gap-1.5 px-6 text-[13px]">
+        {trail.map((c) => (
+          <span key={c} className="flex items-center gap-1.5 text-text-muted">
+            {c}
+            <span className="text-text-disabled">›</span>
+          </span>
+        ))}
+        <span className="font-semibold text-ink">{view?.title ?? "—"}</span>
       </div>
       {showBar && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-strip-border px-6 py-2">
