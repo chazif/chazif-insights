@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Load a folder of Google Ads CSV exports into the raw landing warehouse for one client.
 
-Snapshot semantics (idempotent): re-loading a report for the same client REPLACES
-that client's rows for that report (Google exports are full snapshots). Loading a
-new client ADDS alongside the others.
+Merge-by-window semantics: a new upload ADDS to the client's existing data. For dated
+reports (per-row dates) it replaces only the overlapping date window, preserving
+non-overlapping history; for undated snapshots it replaces the whole report (latest
+wins). Quality Score is a separate append-only frozen history. Re-uploading the same
+window is idempotent. Loading a new client ADDS alongside the others. See
+docs/INGEST_MERGE_DESIGN.md.
 
 Usage:
   py -m engine.ingest.load --client chiarelli --dir "C:\\path\\to\\csv folder"
