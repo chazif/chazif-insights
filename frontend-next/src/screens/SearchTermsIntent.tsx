@@ -64,7 +64,7 @@ export function SearchTermsIntent() {
       {fRow && fRow.spend > 0 && (
         <div className="mt-5 rounded-[10px] border border-[#fcd34d] bg-[#fffbeb] p-4 text-[12.5px] text-[#92400e]">
           <strong>{money(fRow.spend)}</strong> sits on <strong>{num(fRow.terms)}</strong> F-graded terms that converted essentially nothing — the exact spend a{" "}
-          <span className="underline">negative keyword shield</span> removes. (Staging this becomes an action once the Actions queue is wired up.)
+          <span className="underline">negative keyword shield</span> removes.
         </div>
       )}
     </div>
