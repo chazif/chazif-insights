@@ -317,6 +317,21 @@ class Resolver:
         m = self.lookup(name)
         return (m.get("brand") or self.brand_label) if m else self.brand_label
 
+    def camp_type(self, name):
+        m = self.lookup(name)
+        t = (m.get("camp_type") or "").strip() if m else ""
+        return t or None
+
+    def is_shopping(self, name):
+        """True for Shopping / Performance Max campaigns (a feed + products, not keywords)."""
+        t = (self.camp_type(name) or "").lower()
+        return "shop" in t or "pmax" in t or "performance max" in t
+
+    @property
+    def types(self):
+        return sorted({str(m["camp_type"]).strip() for m in self.map.values()
+                       if m.get("camp_type") and str(m["camp_type"]).strip()})
+
     @property
     def regions(self):
         return sorted({str(m["region"]).strip() for m in self.map.values()

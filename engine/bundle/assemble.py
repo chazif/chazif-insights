@@ -1855,10 +1855,11 @@ def _row_filter(filters, config, engine=None, client_id=None, res=None):
     region = filters.get("region") or "all"
     category = filters.get("category") or "all"
     brand = filters.get("brand") or "all"
+    ctype = filters.get("type") or "all"
     brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
     catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
              for c in (config.get("product_categories") or [])}
-    active = any(x != "all" for x in (seg, campaign, region, category, brand))
+    active = any(x != "all" for x in (seg, campaign, region, category, brand, ctype))
     res = res or _MapResolver([], config)
     mapping_regions = set(res.regions)
 
@@ -1896,6 +1897,10 @@ def _row_filter(filters, config, engine=None, client_id=None, res=None):
             return True
         camp = d.get("campaign") or ag2camp.get(d.get("ad_group") or "")
         mapped = camp is not None and res.known(camp)
+        if ctype != "all":                          # campaign-type filter (mapping camp_type)
+            t = res.camp_type(camp) if camp else None
+            if t is not None and t.strip().lower() != ctype.strip().lower():
+                return False
         if campaign != "all":
             if d.get("campaign"):
                 if d["campaign"] != campaign:
@@ -1972,7 +1977,7 @@ def _filters_meta(engine, client_id, config, res=None):
     brand_label = (config.get("brand_terms") or [None])[0] or _client_name(engine, client_id)
     brands = res.brands or ([brand_label] if brand_label else [])
     return {"campaigns": campaigns[:300], "regions": regions,
-            "categories": categories, "brands": brands}
+            "categories": categories, "brands": brands, "types": res.types}
 
 
 def _auction_insights_section(engine, client_id, date_from=None, date_to=None):
@@ -2039,6 +2044,90 @@ def _auction_insights_section(engine, client_id, date_from=None, date_to=None):
     out = [{"domain": dom, **{k: value(dom, k) for k in FIELDS}} for dom in flat]
     out.sort(key=lambda r: (r["impr_share"] is None, -(r["impr_share"] or 0)))
     return {"rows": out, "count": len(out), "weighted": any_weighted}
+
+
+_UNIT_SLUGS = ("product_quantity", "units_sold", "purchased_quantity", "qty_sold", "units", "product_units_sold")
+
+
+def _products_sold(engine, client_id, keep=None):
+    """Top products actually sold, from the Products Sold export (product title + conversions
+    + conv value, and units when the export carries a quantity column). None if absent."""
+    keep = keep or (lambda d: True)
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT entity, conversions, conv_value, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='products_sold'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    agg = defaultdict(lambda: [0.0, 0.0, 0.0])   # conv, value, units
+    for ent, conv, val, row in rows:
+        d = _asdict(row)
+        if not keep(d):
+            continue
+        title = ent or d.get("product_title_sold") or d.get("item_id_sold") or "(unknown)"
+        units = _num(next((d[s] for s in _UNIT_SLUGS if d.get(s) is not None), None))
+        a = agg[title]; a[0] += _num(conv); a[1] += _num(val); a[2] += units
+    if not agg:
+        return None
+    out = [{"product": p, "conv": round(cv, 1), "conv_value": round(v, 2), "units": round(u, 1)}
+           for p, (cv, v, u) in sorted(agg.items(), key=lambda kv: (-kv[1][1], -kv[1][0]))][:75]
+    tot = [sum(x) for x in zip(*[[r["conv"], r["conv_value"], r["units"]] for r in out])]
+    return {"rows": out, "total_products": len(agg), "has_units": any(r["units"] for r in out),
+            "totals": {"conv": round(tot[0], 1), "conv_value": round(tot[1], 2), "units": round(tot[2], 1)}}
+
+
+def _shopping_section(engine, client_id, cm, config, keep=None, res=None, compare="yoy"):
+    """Shopping + Performance Max module (S1): per-campaign spend / conversions / value / CPA /
+    ROAS for Shopping & PMax campaigns (identified by the central mapping's camp_type), the
+    module's share of total account spend, a monthly trend, and top products sold. None when
+    the account runs no Shopping/PMax campaigns (the module hides for lead-gen accounts)."""
+    if not cm:
+        return None
+    keep = keep or (lambda d: True)
+    res = res or _MapResolver([], config)
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT date, campaign, cost, conversions, conv_value, row FROM raw_rows "
+            "WHERE client_id=:c AND report_type='campaign_performance'"), {"c": client_id}).all()
+    if not any(r[1] and res.is_shopping(r[1]) for r in rows):
+        return None
+    order = _slash_order(r[0] for r in rows)
+    dateless = not any(_month_key(r[0], order) for r in rows)
+    cur_t = (cm["year"], cm["month"])
+
+    per = {}                                         # shopping campaign -> [cost, conv, value] (current month)
+    acct_cost = 0.0                                  # whole-account cost this month (for share)
+    monthly = defaultdict(lambda: [0.0, 0.0, 0.0])   # (y, m) -> shopping cost / conv / value
+    for date, camp, cost, conv, val, row in rows:
+        if not camp or not keep(_asdict(row)):
+            continue
+        cost, conv, val = _num(cost), _num(conv), _num(val)
+        mk = _month_key(date, order)
+        in_cur = (mk[:2] == cur_t) if mk else dateless
+        shopping = res.is_shopping(camp)
+        if in_cur:
+            acct_cost += cost
+            if shopping:
+                e = per.setdefault(camp, [0.0, 0.0, 0.0]); e[0] += cost; e[1] += conv; e[2] += val
+        if shopping and (mk or dateless):
+            m = monthly[mk[:2] if mk else cur_t]; m[0] += cost; m[1] += conv; m[2] += val
+
+    rows_out = [{"campaign": (camp or "").split("|")[-1].strip() or camp, "type": res.camp_type(camp) or "—",
+                 "cost": round(cost, 2), "conv": round(conv, 1), "conv_value": round(val, 2),
+                 "cpa": round(cost / conv, 2) if conv else 0, "roas": round(val / cost, 2) if cost else 0}
+                for camp, (cost, conv, val) in sorted(per.items(), key=lambda kv: -kv[1][0])]
+    tc = sum(r["cost"] for r in rows_out); tv = sum(r["conv_value"] for r in rows_out)
+    tn = sum(r["conv"] for r in rows_out)
+    totals = {"cost": round(tc, 2), "conv": round(tn, 1), "conv_value": round(tv, 2),
+              "cpa": round(tc / tn, 2) if tn else 0, "roas": round(tv / tc, 2) if tc else 0}
+    trend = [{"Month": f"{y}-{mo:02d}", "Spend": round(v[0], 2), "Main Conv": round(v[1], 1),
+              "conv_value": round(v[2], 2), "roas": round(v[2] / v[0], 2) if v[0] else 0}
+             for (y, mo), v in sorted(monthly.items()) if (y, mo) <= cur_t][-12:]
+    return {"has_shopping": True,
+            "overview": {"month": cm["abbr"], "rows": rows_out, "totals": totals,
+                         "account_cost": round(acct_cost, 2),
+                         "share": round(tc / acct_cost, 4) if acct_cost else 0, "trend": trend},
+            "products": _products_sold(engine, client_id, keep)}
 
 
 def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=None,
@@ -2218,6 +2307,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         "lp_category_grid": lambda: _lp_category_grid(engine, client_id, config, keep, d_from, d_to),
         "nb_cats": (lambda: _nb_categories(engine, client_id, cm, config, keep, compare, res)) if cm else _none,
         "regions": (lambda: _regions(engine, client_id, cm, config, keep, compare, res)) if cm else _none,
+        "shopping": (lambda: _shopping_section(engine, client_id, cm, config, keep, res, compare)) if cm else _none,
     }
     R = _run_sections(_tasks, parallel=bq.active())
 
@@ -2263,6 +2353,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         lps["category_grid"] = R["lp_category_grid"]
     nb_cats = R["nb_cats"]
     regions = R["regions"]
+    shopping = R["shopping"]
 
     # Performance section — mirrors the reference nav order (Overview, Monthly Trends,
     # NB Categories, Regions, Campaign, Budget). NB Categories and Regions are both
@@ -2274,6 +2365,10 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
     if regions:
         view_list.append("regions")
     view_list += ["campaign-perf", "budget-intel", "budget", "pacing", "budget-input"]
+    if shopping:
+        view_list.append("shopping-overview")
+        if shopping.get("products"):
+            view_list.append("products-sold")
     if keyword or kw_regions:
         view_list.append("kw-deep-dive")
     if qscore:
@@ -2356,7 +2451,8 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
             },
             "filters": {"seg": (filters or {}).get("seg") or "all", "campaign": (filters or {}).get("campaign") or "all",
                         "region": (filters or {}).get("region") or "all", "category": (filters or {}).get("category") or "all",
-                        "brand": (filters or {}).get("brand") or "all", "active": _flt_active},
+                        "brand": (filters or {}).get("brand") or "all", "type": (filters or {}).get("type") or "all",
+                        "active": _flt_active},
             "compare": {"mode": compare, "from": compare_from, "to": compare_to,
                         "label": {"yoy": "YoY", "mom": "MoM", "custom": "vs " + (meta_periods.get("prior") or "custom")}.get(compare, "YoY")},
             "filters_meta": _filters_meta(engine, client_id, config, res),
@@ -2383,5 +2479,6 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         "landing_pages_section": lps,
         "nb_categories_section": nb_cats,
         "regions_section": regions,
+        "shopping_section": shopping,
         "auction_insights_section": _auction_insights_section(engine, client_id, d_from, d_to),
     }
