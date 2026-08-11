@@ -16,6 +16,8 @@ from ..ingest.service import get_config
 from ..ingest.parser import GEO_SLUGS, impr_share_frac
 from ..analyze.analyzers import run_analyzers, _asdict, _num
 from ..warehouse import bq
+from ..mapping import (Resolver as _MapResolver, resolver as _build_resolver,
+                       pending_counts as _mapping_pending)
 
 
 def _run_sections(tasks, parallel):
@@ -195,7 +197,8 @@ def _latest_complete_month(engine, client_id):
             "full": f"{FULL_MONTHS[m-1]} {y}", "abbr": f"{MABBR[m-1]} {y}"}
 
 
-def _to_recommendations(findings):
+def _to_recommendations(findings, client_id=None):
+    from ..decisions.keys import action_key
     recs = []
     for f in sorted(findings, key=lambda x: SEV_ORDER.get(x["severity"], 9)):
         if f["severity"] == "PASS":
@@ -207,6 +210,8 @@ def _to_recommendations(findings):
             "Rationale": f"{f['observation']} {f['impact']}",
             "Expected Impact": DOLLAR_LABEL.get(f["dollar"], f["dollar"]),
             "Effort": EFFORT_LABEL.get(f["effort"], f["effort"]),
+            # stable identity for the decision-system lifecycle (accept/dismiss/…)
+            "action_key": action_key(client_id, f) if client_id else None,
             # the data the recommendation is based on (shown by the "See data" button)
             "evidence": {
                 "severity": f["severity"],
@@ -762,27 +767,30 @@ def _qs_breakdown(engine, client_id, cm, config, keep=None, date_from=None, date
     }
 
 
-def _region_category(engine, client_id, config, keep=None, date_from=None, date_to=None):
+def _region_category(engine, client_id, config, keep=None, date_from=None, date_to=None, res=None):
     """Region & Category — for each Brand×Region×Category slice, avg CPC split by the
     keyword's component rating (Below / Average / Above) per QS component, with the
-    Below−Above CPC spread. Joins the region-segmented keyword export (region + spend)
-    to search_keyword_qs (component ratings). None if the segmented export is absent."""
+    Below−Above CPC spread. Prefers the region-segmented keyword export ('keyword_geo',
+    region + spend) joined to search_keyword_qs (component ratings). When that export is
+    absent, falls back to deriving each keyword's region from its geo-tiered campaign name
+    (like the Regions view) so region-structured accounts still get the view — coarser than
+    a true geo segment (`derived: true` in the result). None if neither source yields data."""
     keep = keep or (lambda d: True)
     rc, rp = _range_sql(date_from, date_to)
     with engine.connect() as c:
         geo = c.execute(text("SELECT clicks, cost, row FROM raw_rows WHERE client_id=:c "
                              "AND report_type='keyword_geo'" + rc), {"c": client_id, **rp}).all()
-    if not geo:
+        kqs = c.execute(text("SELECT cost, clicks, row FROM raw_rows WHERE client_id=:c "
+                             "AND report_type='search_keyword_qs'" + rc), {"c": client_id, **rp}).all()
+    used_geo = bool(geo)
+    if not geo and not kqs:
         return None
-    with engine.connect() as c:
-        kqs = c.execute(text("SELECT row FROM raw_rows WHERE client_id=:c "
-                             "AND report_type='search_keyword_qs'"), {"c": client_id}).all()
     kw_ratings = {}
-    for (row,) in kqs:
+    for cost, clicks, row in kqs:
         d = _asdict(row); kw = (d.get("search_keyword") or "").lower()
         if kw:
             kw_ratings[kw] = {ck: _norm_rating(d.get(ck)) for ck, _, _ in QS_COMPONENTS}
-    if not kw_ratings:
+    if used_geo and not kw_ratings:
         return None
 
     config = config or {}
@@ -799,29 +807,40 @@ def _region_category(engine, client_id, config, keep=None, date_from=None, date_
         return "Uncategorized"
 
     slices = {}
-    for clicks, cost, row in geo:
-        d = _asdict(row)
-        if not keep(d):
-            continue
-        kw = d.get("search_keyword"); region = _region_value(d)
+
+    def add(region, kw, cost, clicks, ratings):
         if not kw or not region:
-            continue
-        kwl = kw.lower()
-        if brand_terms and any(b in kwl for b in brand_terms):
-            continue                                  # non-brand only
-        cost = _num(cost); clicks = _num(clicks)
+            return
+        if brand_terms and any(b in kw.lower() for b in brand_terms):
+            return                                    # non-brand only
         key = (brand_label, region, categorize(kw))
         s = slices.get(key)
         if s is None:
             s = slices[key] = {"total": 0.0, "comp": {ck: {r: [0.0, 0.0] for r in QS_RATINGS}
                                                       for ck, _, _ in QS_COMPONENTS}}
         s["total"] += cost
-        rr = kw_ratings.get(kwl)
-        if rr:
+        if ratings:
             for ck, _, _ in QS_COMPONENTS:
-                rating = rr.get(ck)
+                rating = ratings.get(ck)
                 if rating:
                     b = s["comp"][ck][rating]; b[0] += cost; b[1] += clicks
+
+    if used_geo:                                      # true per-keyword geography
+        for clicks, cost, row in geo:
+            d = _asdict(row)
+            if not keep(d):
+                continue
+            kw = d.get("search_keyword")
+            add(_region_value(d), kw, _num(cost), _num(clicks), kw_ratings.get((kw or "").lower()))
+    else:                                             # fallback: region resolved from the campaign mapping
+        res = res or _MapResolver([], config)
+        for cost, clicks, row in kqs:
+            d = _asdict(row)
+            if not keep(d):
+                continue
+            kw = d.get("search_keyword")
+            ratings = {ck: _norm_rating(d.get(ck)) for ck, _, _ in QS_COMPONENTS}
+            add(res.region(d.get("campaign")), kw, _num(cost), _num(clicks), ratings)
     if not slices:
         return None
 
@@ -844,7 +863,7 @@ def _region_category(engine, client_id, config, keep=None, date_from=None, date_
         components.append({"key": ck, "label": label, "total": len(rows), "rows": rows[:100]})
     cats = sorted({r["category"] for comp in components for r in comp["rows"] if r["category"] != "Uncategorized"})
     regs = sorted({r["region"] for comp in components for r in comp["rows"]})
-    return {"components": components, "categories": cats, "regions": regs}
+    return {"components": components, "categories": cats, "regions": regs, "derived": not used_geo}
 
 
 def _search_terms(engine, client_id, config):
@@ -1215,35 +1234,16 @@ def _lp_categories(lps, product_categories):
     return out if any(not c["category"].startswith("Other") for c in out) else None
 
 
-def _nb_category_of(name, catkw, brand_terms):
-    """Bucket a campaign into a non-brand category from its name, mirroring how the
-    reference groups by campaign structure. Returns None for brand campaigns (excluded)."""
-    n = (name or "").lower()
-    if "brand defense" in n or "| brand" in n or (brand_terms and any(bt in n for bt in brand_terms)):
-        return None  # brand campaign -> not "non-brand"
-    for cat, kws in catkw.items():                 # product category named in the campaign
-        if cat.lower() in n or any(w in n for w in kws):
-            return cat[:1].upper() + cat[1:]
-    if "pmax" in n or "performance max" in n:
-        return "PMax"
-    if "conquest" in n or "competitor" in n:
-        return "Conquest"
-    if "non-brand" in n or "nonbrand" in n or "non brand" in n:
-        return "Non-Brand Search"
-    return "Other Non-Brand"
-
-
-def _nb_categories(engine, client_id, cm, config, keep=None, compare="yoy"):
-    """YoY non-brand spend/conversions by category, bucketed from campaign structure
-    (the date-segmented source), latest complete month vs same month prior year — with a
-    prior-calendar-month fallback when the account has under a year of history, matching
-    the KPI logic. Brand campaigns are excluded. None if there is no non-brand data."""
+def _nb_categories(engine, client_id, cm, config, keep=None, compare="yoy", res=None):
+    """YoY non-brand spend/conversions by category, resolved through the central
+    campaign mapping (name-heuristic fallback for unmapped campaigns), latest complete
+    month vs same month prior year — with a prior-calendar-month fallback when the
+    account has under a year of history, matching the KPI logic. Brand campaigns are
+    excluded. None if there is no non-brand data."""
     if not cm:
         return None
     keep = keep or (lambda d: True)
-    catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
-             for c in (config.get("product_categories") or [])}
-    brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
+    res = res or _MapResolver([], config)
 
     with engine.connect() as c:
         allrows = c.execute(text(
@@ -1259,7 +1259,7 @@ def _nb_categories(engine, client_id, cm, config, keep=None, compare="yoy"):
             match = (mk[:2] == target) if mk else (allow_dateless and target == (cm["year"], cm["month"]))
             if not match or not keep({"campaign": camp}):
                 continue
-            cat = _nb_category_of(camp, catkw, brand_terms)
+            cat = res.nb_category(camp)
             if cat is None:
                 continue
             a = agg[cat]; a[0] += _num(cost); a[1] += _num(conv)
@@ -1294,29 +1294,15 @@ def _nb_categories(engine, client_id, cm, config, keep=None, compare="yoy"):
     return {"prior_label": prior["abbr"], "cur_label": cm["abbr"], "rows": rows, "totals": totals}
 
 
-def _region_of(name):
-    """Region token parsed from a geo-segmented campaign name, e.g.
-    'Search | Non-Brand | Tier A - NYC Metro Core' -> 'NYC Metro Core'. Short tokens
-    (nyc, la) are upper-cased. None when the campaign carries no region."""
-    m = re.search(r"tier\s+\S+\s*[-–:|]\s*(.+)$", (name or "").lower())
-    if not m:
-        return None
-    raw = m.group(1).strip(" -–|")
-    label = " ".join(w.upper() if len(w) <= 3 else w.capitalize() for w in raw.split())
-    return label or None
-
-
-def _regions(engine, client_id, cm, config, keep=None, compare="yoy"):
-    """YoY non-brand spend/conversions by region, parsed from geo-segmented campaign
-    names (mirrors the reference 'Non-Brand campaigns · YoY by region'). Returns per
+def _regions(engine, client_id, cm, config, keep=None, compare="yoy", res=None):
+    """YoY non-brand spend/conversions by region, resolved through the central campaign
+    mapping (geo-tier name parsing as fallback for unmapped campaigns). Returns per
     (region, category) cells so the frontend can filter by category; None if no
-    region-segmented campaigns exist."""
+    region-attributed campaigns exist."""
     if not cm:
         return None
     keep = keep or (lambda d: True)
-    catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
-             for c in (config.get("product_categories") or [])}
-    brand_terms = [b.lower() for b in (config.get("brand_terms") or []) if b]
+    res = res or _MapResolver([], config)
 
     with engine.connect() as c:
         allrows = c.execute(text(
@@ -1332,11 +1318,11 @@ def _regions(engine, client_id, cm, config, keep=None, compare="yoy"):
             match = (mk[:2] == target) if mk else (allow_dateless and target == (cm["year"], cm["month"]))
             if not match or not keep({"campaign": camp}):
                 continue
-            cat = _nb_category_of(camp, catkw, brand_terms)
+            cat = res.nb_category(camp)
             if cat is None:                 # brand campaign
                 continue
-            region = _region_of(camp)
-            if region is None:              # not region-segmented
+            region = res.region(camp)
+            if region is None:              # account-wide ("All") / no region attribution
                 continue
             a = agg[(region, cat)]; a[0] += _num(cost); a[1] += _num(conv)
         return agg
@@ -1736,13 +1722,15 @@ def _row_text(d):
     return " ".join(str(d.get(f) or "") for f in _FILTER_TEXT_FIELDS).lower()
 
 
-def _row_filter(filters, config, engine=None, client_id=None):
+def _row_filter(filters, config, engine=None, client_id=None, res=None):
     """Build a keep(row_dict) predicate for the global topbar filters.
 
-    Most exports carry only some of the filter dimensions, so we bridge through
-    ad_group where possible: ad_group_performance maps ad_group -> campaign, and the
-    geographic report maps ad_group -> region. That lets a Campaign or Region filter
-    reach keyword / ad / landing-page / geo rows that have no such column of their own.
+    Attribution is MAPPING-FIRST: when a row's campaign is in the central campaign
+    mapping (engine/mapping.py), its brand / region / category / segment come from
+    there. Unmapped campaigns — and rows carrying no campaign at all — fall back to
+    the original text/geo heuristics. Most exports carry only some of the filter
+    dimensions, so we bridge through ad_group where possible: ad_group_performance
+    maps ad_group -> campaign, and the geographic report maps ad_group -> region.
     A filter is only skipped for a row when there is genuinely no way to resolve it."""
     filters = filters or {}
     seg = (filters.get("seg") or "all").lower()
@@ -1754,6 +1742,8 @@ def _row_filter(filters, config, engine=None, client_id=None):
     catkw = {c: [w for w in re.findall(r"[a-z]+", c.lower()) if len(w) >= 4]
              for c in (config.get("product_categories") or [])}
     active = any(x != "all" for x in (seg, campaign, region, category, brand))
+    res = res or _MapResolver([], config)
+    mapping_regions = set(res.regions)
 
     def is_brand(txt):
         return bool(brand_terms and any(b in txt for b in brand_terms))
@@ -1764,16 +1754,16 @@ def _row_filter(filters, config, engine=None, client_id=None):
                 return c[:1].upper() + c[1:]
         return None
 
-    # ---- ad_group bridges, built only for the filters actually in use ----
+    # ---- ad_group bridges (ad_group -> campaign, ad_group -> region) ----
     ag2camp, region_ags, region_camps = {}, None, None
-    if active and engine is not None and client_id and (campaign != "all" or region != "all"):
+    if active and engine is not None and client_id:
         with engine.connect() as c:
             for ag, camp in c.execute(text(
                 "SELECT DISTINCT ad_group, campaign FROM raw_rows WHERE client_id=:c "
                 "AND report_type='ad_group_performance'"), {"c": client_id}):
                 if ag:
                     ag2camp[ag] = camp
-        if region != "all":
+        if region != "all" and region not in mapping_regions:
             region_ags = set()
             with engine.connect() as c:
                 for ag, row in c.execute(text(
@@ -1787,61 +1777,85 @@ def _row_filter(filters, config, engine=None, client_id=None):
     def keep(d):
         if not active:
             return True
+        camp = d.get("campaign") or ag2camp.get(d.get("ad_group") or "")
+        mapped = camp is not None and res.known(camp)
         if campaign != "all":
-            camp = d.get("campaign")
-            if camp:
-                if camp != campaign:
+            if d.get("campaign"):
+                if d["campaign"] != campaign:
                     return False
             else:                                   # bridge: ad_group -> campaign
                 ag = d.get("ad_group")
                 if ag and ag in ag2camp and ag2camp[ag] != campaign:
                     return False
         txt = _row_text(d)
-        if seg == "br" and not is_brand(txt):
-            return False
-        if seg == "nb" and is_brand(txt):
-            return False
-        if brand != "all" and brand.lower() not in txt:
-            return False
-        if category != "all":
-            c = cat_of(txt)
-            if c is not None and c != category:
+        if seg != "all":
+            is_b = res.is_brand(camp) if mapped else is_brand(txt)
+            if seg == "br" and not is_b:
                 return False
-        if region != "all":
-            rv = _region_value(d)
-            if rv is not None:
-                if rv != region:
+            if seg == "nb" and is_b:
+                return False
+        if brand != "all":
+            mb = (res.brand(camp) or "") if mapped else ""
+            if mb:
+                if mb.strip().lower() != brand.strip().lower():
                     return False
-            elif region_ags is not None:
-                ag = d.get("ad_group")
-                if ag:                                          # bridge: ad_group -> region
-                    if ag not in region_ags:
+            elif brand.lower() not in txt:
+                return False
+        if category != "all":
+            if mapped:
+                if (res.category(camp) or "").strip().lower() != category.strip().lower():
+                    return False
+            else:
+                c = cat_of(txt)
+                if c is not None and c != category:
+                    return False
+        if region != "all":
+            if region in mapping_regions:           # a mapping-defined region slice
+                if mapped:
+                    mr = res.region(camp)           # None == "All" -> serves every region
+                    if mr is not None and mr != region:
                         return False
-                else:                                           # bridge: campaign -> region
-                    camp = d.get("campaign")
-                    if camp and region_camps and camp not in region_camps:
+                # unmapped campaign under a mapping-region filter: no way to place it -> keep
+            else:                                   # a geo value (state etc.) -> legacy paths
+                rv = _region_value(d)
+                if rv is not None:
+                    if rv != region:
                         return False
+                elif region_ags is not None:
+                    ag = d.get("ad_group")
+                    if ag:                                      # bridge: ad_group -> region
+                        if ag not in region_ags:
+                            return False
+                    else:                                       # bridge: campaign -> region
+                        if d.get("campaign") and region_camps and d["campaign"] not in region_camps:
+                            return False
         return True
 
     return keep, active
 
 
-def _filters_meta(engine, client_id, config):
-    """Option lists for the topbar filter dropdowns (from the full, unfiltered data)."""
+def _filters_meta(engine, client_id, config, res=None):
+    """Option lists for the topbar filter dropdowns. The central campaign mapping's
+    vocabulary comes first (its regions/categories/brands are what the mapping-first
+    filter matches); geo values and config products fill in behind it."""
+    res = res or _MapResolver([], config)
     with engine.connect() as c:
         campaigns = [r[0] for r in c.execute(text(
             "SELECT DISTINCT campaign FROM raw_rows WHERE client_id=:c AND campaign IS NOT NULL "
             "AND campaign<>'' ORDER BY campaign"), {"c": client_id}) if r[0]]
-        regions = set()
+        geo_regions = set()
         for (row,) in c.execute(text("SELECT row FROM raw_rows WHERE client_id=:c "
                                      "AND report_type IN ('geographic','keyword_geo')"), {"c": client_id}):
             rv = _region_value(_asdict(row))
             if rv:
-                regions.add(rv)
-    categories = [c[:1].upper() + c[1:] for c in (config.get("product_categories") or [])]
+                geo_regions.add(rv)
+    regions = res.regions + sorted(geo_regions - set(res.regions))
+    cfg_cats = [c[:1].upper() + c[1:] for c in (config.get("product_categories") or [])]
+    categories = res.categories + [c for c in cfg_cats if c not in set(res.categories)]
     brand_label = (config.get("brand_terms") or [None])[0] or _client_name(engine, client_id)
-    return {"campaigns": campaigns[:300], "regions": sorted(regions),
-            "categories": categories, "brands": [brand_label] if brand_label else []}
+    brands = res.brands or ([brand_label] if brand_label else [])
+    return {"campaigns": campaigns[:300], "regions": regions,
+            "categories": categories, "brands": brands}
 
 
 def _auction_insights_section(engine, client_id, date_from=None, date_to=None):
@@ -1918,7 +1932,10 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
     engine = engine or get_engine()
     rng_from, rng_to = _ym_bound(date_from), _ym_bound(date_to)
     config = get_config(client_id, engine) or {}
-    keep, _flt_active = _row_filter(filters, config, engine, client_id)
+    # The central campaign mapping resolves brand/region/category for every view;
+    # unmapped campaigns fall back to the name/config heuristics inside the resolver.
+    res = _build_resolver(engine, client_id, config)
+    keep, _flt_active = _row_filter(filters, config, engine, client_id, res)
     with engine.connect() as c:
         has = c.execute(text("SELECT COUNT(*) FROM raw_rows WHERE client_id=:c AND report_type='campaign_performance'"),
                         {"c": client_id}).scalar()
@@ -2076,21 +2093,30 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         "qs_break": lambda: _qs_breakdown(engine, client_id, cm, config, keep, d_from, d_to),
         "keyword": lambda: _keyword_section(engine, client_id, keep, d_from, d_to),
         "kw_regions": lambda: _keyword_regions(engine, client_id, config, keep, d_from, d_to),
-        "reg_cat": lambda: _region_category(engine, client_id, config, keep, d_from, d_to),
+        "reg_cat": lambda: _region_category(engine, client_id, config, keep, d_from, d_to, res),
         "st": lambda: _search_terms_section(engine, client_id, config, keep, d_from, d_to),
         "ads": lambda: _ads_section(engine, client_id, config, keep, d_from, d_to),
         "lps": lambda: _landing_pages(engine, client_id, config, keep, d_from, d_to),
         "lp_perf": lambda: _lp_performance(engine, client_id, keep, d_from, d_to),
         "lp_category_grid": lambda: _lp_category_grid(engine, client_id, config, keep, d_from, d_to),
-        "nb_cats": (lambda: _nb_categories(engine, client_id, cm, config, keep, compare)) if cm else _none,
-        "regions": (lambda: _regions(engine, client_id, cm, config, keep, compare)) if cm else _none,
+        "nb_cats": (lambda: _nb_categories(engine, client_id, cm, config, keep, compare, res)) if cm else _none,
+        "regions": (lambda: _regions(engine, client_id, cm, config, keep, compare, res)) if cm else _none,
     }
     R = _run_sections(_tasks, parallel=bq.active())
 
     # ---- analyzers -> findings + recommendations ----
     analyzer_findings = R["analyzers"]
     findings = _to_overview_findings(analyzer_findings)
-    recommendations = _to_recommendations(analyzer_findings)
+    recommendations = _to_recommendations(analyzer_findings, client_id)
+    # read-only join of the decision-system lifecycle so Brief/Actions can honour
+    # accept/dismiss/snooze without a second call (cache cleared on any transition)
+    from ..decisions.service import load_action_status
+    _status = load_action_status(engine, client_id)
+    for _r in recommendations:
+        _st = _status.get(_r.get("action_key"))
+        _r["status"] = _st["status"] if _st else "proposed"
+        _r["owner"] = _st["owner"] if _st else None
+        _r["snooze_until"] = _st["snooze_until"] if _st else None
 
     campaigns = R["campaigns"]
     geo = R["geo"]
@@ -2214,7 +2240,10 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
                         "brand": (filters or {}).get("brand") or "all", "active": _flt_active},
             "compare": {"mode": compare, "from": compare_from, "to": compare_to,
                         "label": {"yoy": "YoY", "mom": "MoM", "custom": "vs " + (meta_periods.get("prior") or "custom")}.get(compare, "YoY")},
-            "filters_meta": _filters_meta(engine, client_id, config),
+            "filters_meta": _filters_meta(engine, client_id, config, res),
+            # central mapping review state: {pending, total} — drives the "new
+            # campaigns need mapping review" notification in the UI
+            "mapping": _mapping_pending(engine, client_id),
             "generated_from": "warehouse",
         },
         "total_trend": total_trend,

@@ -24,7 +24,11 @@ from engine.ingest.store import get_engine
 from engine.warehouse.analytics import read_engine
 from engine.bundle.assemble import build_bundle
 from engine.budget.parse import parse_budget_file
+from engine import mapping as campaign_mapping
+from backend import budget_intel_routes
 from backend.budget_intel_routes import router as budget_intel_router
+from backend import decision_routes
+from backend.decision_routes import router as decision_router
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "frontend"
@@ -33,6 +37,7 @@ UPLOADS = ROOT / "data" / "uploads"
 
 app = FastAPI(title="SearchNex Ads", version="0.3.0")
 app.include_router(budget_intel_router)
+app.include_router(decision_router)
 # read_engine wraps the Postgres engine with BigQuery analytics routing once BigQuery is
 # ACTIVE (config vars + USE_BIGQUERY); until cutover it returns the plain Postgres engine.
 _engine = read_engine(get_engine())
@@ -70,6 +75,24 @@ def _bundle_cache_put(key, value):
 def _bundle_cache_clear():
     """Drop all cached bundles — called whenever ingest or config changes the underlying data."""
     _BUNDLE_CACHE.clear()
+
+
+# A lifecycle change (accept/dismiss/…) alters the status join baked into a cached
+# bundle, so wire the decision router's mutations to the same invalidation. Mapping
+# edits/approvals change every view's attribution, so they invalidate too.
+decision_routes.invalidate_bundle_cache = _bundle_cache_clear
+budget_intel_routes.invalidate_bundle_cache = _bundle_cache_clear
+
+
+def _sync_mappings(*client_ids):
+    """Auto-map any campaigns that arrived in freshly ingested data (the central
+    mapping engine's continuous-sync step). Fail-soft — a mapping hiccup must
+    never fail an ingest."""
+    for cid in {c for c in client_ids if c}:
+        try:
+            campaign_mapping.sync(_engine, cid, service.get_config(cid, engine=_engine) or {})
+        except Exception:   # noqa: BLE001
+            pass
 
 
 def _run_job(job_id, fn):
@@ -209,7 +232,12 @@ async def upload(background: BackgroundTasks, client: str = Form(...), period: s
         raise HTTPException(400, "no .csv files in upload")
     job_id = uuid.uuid4().hex[:12]
     _JOBS[job_id] = {"status": "processing"}
-    background.add_task(_run_job, job_id, lambda: service.ingest_folder(client, str(dest), engine=_engine))
+
+    def _ingest_then_map():
+        result = service.ingest_folder(client, str(dest), engine=_engine)
+        _sync_mappings(client)                    # auto-map new campaigns for review
+        return result
+    background.add_task(_run_job, job_id, _ingest_then_map)
     return {"job_id": job_id, "status": "processing"}
 
 
@@ -254,7 +282,12 @@ def mcc_commit(body: dict, background: BackgroundTasks):
     mapping = body.get("mapping") or {}
     job_id = uuid.uuid4().hex[:12]
     _JOBS[job_id] = {"status": "processing"}
-    background.add_task(_run_job, job_id, lambda: service.commit_mcc(str(dest), mapping, engine=_engine))
+
+    def _commit_then_map():
+        result = service.commit_mcc(str(dest), mapping, engine=_engine)
+        _sync_mappings(*[r.get("client_id") for r in result.get("ingested", [])])
+        return result
+    background.add_task(_run_job, job_id, _commit_then_map)
     return {"job_id": job_id, "status": "processing"}
 
 
@@ -292,5 +325,24 @@ def bundle(client: str = Query("mavis"), period: str = Query("2026-03"),
     return JSONResponse(computed)
 
 
-# Static frontend mounted last so /api/* routes win.
+# ---- Redesign (React) build, served at /next -----------------------------
+# Present only when frontend-next has been built (frontend-next/dist). One catch-all
+# route serves the hashed static assets and falls back to index.html for client-side
+# (SPA) routes so deep links / refreshes work. Registered before the "/" mount so it wins.
+NEXT_DIST = ROOT / "frontend-next" / "dist"
+
+
+@app.get("/next")
+@app.get("/next/{path:path}")
+def next_app(path: str = ""):
+    if not NEXT_DIST.is_dir():
+        raise HTTPException(404, "redesign build not present (run `npm run build` in frontend-next)")
+    root = NEXT_DIST.resolve()
+    target = (NEXT_DIST / path).resolve()
+    if target.is_file() and root in target.parents:      # real asset (traversal-guarded)
+        return FileResponse(target)
+    return FileResponse(NEXT_DIST / "index.html")         # SPA fallback
+
+
+# Static frontend (current app) mounted last so /api/* and /next win.
 app.mount("/", StaticFiles(directory=str(FRONTEND), html=True), name="frontend")

@@ -1,0 +1,1495 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;background:#FBFAF7;}
+  *{box-sizing:border-box;}
+  a{color:#2440E8;text-decoration:none;}
+  a:hover{color:#1a31b8;text-decoration:underline;}
+  ::selection{background:#2440E8;color:#fff;}
+  input,select,button,textarea{font-family:inherit;}
+  .sx-scroll::-webkit-scrollbar{width:10px;height:10px;}
+  .sx-scroll::-webkit-scrollbar-thumb{background:#D9D5CA;border-radius:8px;border:3px solid #FBFAF7;}
+</style>
+</helmet>
+
+<div style="display:flex; height:100vh; width:100%; overflow:hidden; font-family:'Instrument Sans',system-ui,sans-serif; color:#14150F; background:#FBFAF7; font-size:13px; -webkit-font-smoothing:antialiased">
+
+  <!-- ============ LEFT RAIL ============ -->
+  <div style="width:248px; flex:0 0 248px; background:#14150F; color:#EDEBE3; display:flex; flex-direction:column; overflow:hidden">
+    <div style="padding:16px 16px 12px; display:flex; align-items:center; gap:8px">
+      <div style="width:20px;height:20px;border-radius:5px;background:#2440E8;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff">N</div>
+      <div style="font-size:14px;font-weight:600;letter-spacing:-0.01em">SearchNex</div>
+    </div>
+
+    <div style="padding:0 12px 12px">
+      <button onClick="{{ openPalette }}" style="width:100%;display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10);color:#8F8D82;border-radius:7px;padding:7px 9px;font-size:12.5px;cursor:pointer;text-align:left" style-hover="background:rgba(255,255,255,0.11); color:#EDEBE3">
+        <span style="opacity:0.7;white-space:nowrap">Search anything</span>
+        <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:10.5px;opacity:0.55">⌘K</span>
+      </button>
+    </div>
+
+    <div style="padding:0 12px 14px">
+      <div style="font-size:9.5px;letter-spacing:0.09em;text-transform:uppercase;color:#78766B;margin-bottom:5px;font-weight:600">Client</div>
+      <div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10);border-radius:7px;padding:7px 9px;display:flex;align-items:center;gap:7px;cursor:pointer">
+        <div style="width:16px;height:16px;border-radius:4px;background:#C8A44A;color:#14150F;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center">CR</div>
+        <div style="font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Chiarelli's Religious</div>
+        <div style="margin-left:auto;color:#78766B;font-size:9px">▼</div>
+      </div>
+    </div>
+
+    <div class="sx-scroll" style="flex:1;overflow-y:auto;padding:0 8px 16px">
+      <sc-for list="{{ navGroups }}" as="g" hint-placeholder-count="13">
+        <div style="margin-bottom:2px">
+          <div onClick="{{ g.toggle }}" style="{{ g.headerStyle }}" style-hover="background:rgba(255,255,255,0.06)">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;width:7px;letter-spacing:0">{{ g.chev }}</span>
+            <span>{{ g.label }}</span>
+            <span style="{{ g.alertStyle }}"></span>
+            <span style="{{ g.countStyle }}">{{ g.count }}</span>
+          </div>
+          <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="2">
+            <div onClick="{{ it.go }}" style="{{ it.style }}">
+              <span style="{{ it.dotStyle }}"></span>
+              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ it.label }}</span>
+              <span style="{{ it.badgeStyle }}">{{ it.badge }}</span>
+            </div>
+          </sc-for>
+          <sc-for list="{{ g.cats }}" as="c" hint-placeholder-count="0">
+            <div>
+              <div onClick="{{ c.toggle }}" style="{{ c.headerStyle }}" style-hover="background:rgba(255,255,255,0.06)">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:10px;width:7px;letter-spacing:0">{{ c.chev }}</span>
+                <span>{{ c.label }}</span>
+                <span style="{{ c.alertStyle }}"></span>
+                <span style="{{ c.countStyle }}">{{ c.count }}</span>
+              </div>
+              <sc-for list="{{ c.items }}" as="it" hint-placeholder-count="0">
+                <div onClick="{{ it.go }}" style="{{ it.style }}">
+                  <span style="{{ it.dotStyle }}"></span>
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ it.label }}</span>
+                  <span style="{{ it.badgeStyle }}">{{ it.badge }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="padding:12px 16px;border-top:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;gap:8px">
+      <div style="width:22px;height:22px;border-radius:50%;background:#2440E8;color:#fff;font-size:9.5px;font-weight:600;display:flex;align-items:center;justify-content:center">CI</div>
+      <div style="font-size:11.5px;color:#8F8D82;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">ci@chazif.com</div>
+    </div>
+  </div>
+
+  <!-- ============ MAIN ============ -->
+  <div style="flex:1; min-width:0; display:flex; flex-direction:column; overflow:hidden; position:relative">
+
+    <!-- context bar -->
+    <div style="flex:0 0 auto;border-bottom:1px solid #E4E1D9;background:#FBFAF7;padding:0 24px;display:flex;align-items:center;gap:14px;height:48px">
+      <div style="font-size:13px;font-weight:600;letter-spacing:-0.01em">{{ screenTitle }}</div>
+      <div style="font-size:12px;color:#5C5A50">{{ screenSub }}</div>
+      <sc-if value="{{ hasFilters }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
+          <sc-for list="{{ filters }}" as="f" hint-placeholder-count="2">
+            <div style="border:1px solid #DDD9CE;background:#fff;border-radius:6px;padding:4px 9px;font-size:12px;color:#3E3D34;cursor:pointer;display:flex;gap:6px;align-items:center" style-hover="border-color:#2440E8">
+              <span style="color:#66645A;font-size:11px">{{ f.k }}</span>
+              <span style="font-weight:500">{{ f.v }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+      <sc-if value="{{ noFilters }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-left:auto;font-size:11.5px;color:#A3A093;font-style:italic">no filters apply on this screen</div>
+      </sc-if>
+    </div>
+
+    <div class="sx-scroll" style="flex:1;overflow-y:auto;overflow-x:hidden">
+
+      <!-- ==================== BRIEF ==================== -->
+      <sc-if value="{{ isBrief }}" hint-placeholder-val="{{ true }}">
+        <div style="max-width:1180px;margin:0 auto;padding:32px 24px 64px">
+          <div style="display:flex;align-items:flex-end;gap:24px;margin-bottom:28px;flex-wrap:wrap">
+            <div>
+              <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#66645A;font-weight:600;margin-bottom:8px">Tuesday, 4 August</div>
+              <div style="font-family:'Instrument Serif',serif;font-size:40px;line-height:1.05;letter-spacing:-0.015em;max-width:620px;text-wrap:pretty">{{ headlinePre }} <span style="color:#2440E8">{{ headlineMoney }}</span> {{ headlinePost }}</div>
+            </div>
+            <div style="margin-left:auto;display:flex;gap:0;border:1px solid #E4E1D9;border-radius:10px;overflow:hidden;background:#fff">
+              <div style="padding:12px 18px;border-right:1px solid #E4E1D9">
+                <div style="font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">Open</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:500;margin-top:2px">{{ openCount }}</div>
+              </div>
+              <div style="padding:12px 18px;border-right:1px solid #E4E1D9">
+                <div style="font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">Staged</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:500;margin-top:2px;color:#2440E8">{{ stagedCount }}</div>
+              </div>
+              <div style="padding:12px 18px">
+                <div style="font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">Verifying</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:500;margin-top:2px">4</div>
+              </div>
+            </div>
+          </div>
+
+          <sc-if value="{{ blockerOpen }}" hint-placeholder-val="{{ true }}">
+            <div style="border:1px solid #E8C98A;background:#FDF7E8;border-radius:10px;padding:14px 16px;display:flex;align-items:center;gap:14px;margin-bottom:24px">
+              <div style="width:26px;height:26px;border-radius:7px;background:#9A6207;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;flex:0 0 auto">!</div>
+              <div style="min-width:0">
+                <div style="font-weight:600;font-size:13px">{{ blockerHead }}</div>
+                <div style="color:#6E6A5C;font-size:12.5px;margin-top:2px">{{ blockerBody }}</div>
+              </div>
+              <button onClick="{{ goMapping }}" style="margin-left:auto;flex:0 0 auto;background:#14150F;color:#fff;border:0;border-radius:7px;padding:8px 14px;font-size:12.5px;font-weight:500;cursor:pointer;white-space:nowrap" style-hover="background:#2440E8">Map campaigns</button>
+            </div>
+          </sc-if>
+
+          <div style="display:grid;grid-template-columns:1.55fr 1fr;gap:20px;align-items:start">
+
+            <div>
+              <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#66645A;font-weight:600;margin-bottom:10px">Decide first</div>
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <sc-for list="{{ topActions }}" as="a" hint-placeholder-count="3">
+                  <div onClick="{{ a.open }}" style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;padding:14px 16px;cursor:pointer;display:flex;gap:14px;align-items:flex-start" style-hover="border-color:#2440E8;box-shadow:0 1px 0 #2440E8">
+                    <div style="flex:0 0 auto;text-align:right;min-width:86px">
+                      <div style="font-family:'JetBrains Mono',monospace;font-size:17px;font-weight:600;letter-spacing:-0.02em">{{ a.money }}</div>
+                      <div style="font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:#66645A;font-weight:600;margin-top:1px">{{ a.moneyLabel }}</div>
+                    </div>
+                    <div style="min-width:0;flex:1">
+                      <div style="font-weight:600;font-size:13.5px;line-height:1.35;text-wrap:pretty">{{ a.title }}</div>
+                      <div style="color:#6E6A5C;font-size:12.5px;margin-top:4px;line-height:1.45;text-wrap:pretty">{{ a.oneLine }}</div>
+                      <div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap;align-items:center">
+                        <span style="{{ a.confStyle }}">{{ a.confLabel }}</span>
+                        <span style="border:1px solid #E4E1D9;border-radius:20px;padding:2px 8px;font-size:11px;color:#6E6A5C">{{ a.effort }} effort</span>
+                        <span style="border:1px solid #E4E1D9;border-radius:20px;padding:2px 8px;font-size:11px;color:#6E6A5C">{{ a.area }}</span>
+                      </div>
+                    </div>
+                    <div style="flex:0 0 auto;color:#B5B2A5;font-size:16px;align-self:center">→</div>
+                  </div>
+                </sc-for>
+              </div>
+              <div onClick="{{ goActions }}" style="margin-top:12px;font-size:12.5px;color:#2440E8;cursor:pointer;font-weight:500">{{ allLabel }}</div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:16px">
+              <div style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;padding:16px">
+                <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#66645A;font-weight:600;margin-bottom:12px">What moved — 7 days vs prior 7</div>
+                <sc-for list="{{ movers }}" as="m" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #F0EEE7">
+                    <div style="width:78px;flex:0 0 auto;font-size:12px;color:#4A4940">{{ m.label }}</div>
+                    <svg viewBox="0 0 100 22" preserveAspectRatio="none" style="flex:1;height:22px;min-width:0">
+                      <polyline points="{{ m.spark }}" fill="none" stroke="#B5B2A5" stroke-width="1.6" vector-effect="non-scaling-stroke"></polyline>
+                    </svg>
+                    <div style="width:64px;text-align:right;flex:0 0 auto;font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:500">{{ m.value }}</div>
+                    <div style="width:62px;text-align:right;flex:0 0 auto;font-family:'JetBrains Mono',monospace;font-size:12px;{{ m.deltaColor }}">{{ m.delta }}</div>
+                  </div>
+                </sc-for>
+                <div style="font-size:11.5px;color:#66645A;margin-top:10px;line-height:1.45">Green means <em>better</em>, not <em>up</em>. CPA falling is green.</div>
+              </div>
+
+              <div style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;padding:16px">
+                <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#66645A;font-weight:600;margin-bottom:12px">Data health</div>
+                <sc-for list="{{ health }}" as="h" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;gap:9px;padding:6px 0">
+                    <div style="{{ h.dot }}"></div>
+                    <div style="font-size:12.5px">{{ h.label }}</div>
+                    <div style="margin-left:auto;font-size:12px;color:#5C5A50;font-family:'JetBrains Mono',monospace">{{ h.value }}</div>
+                  </div>
+                </sc-for>
+                <div onClick="{{ goData }}" style="margin-top:10px;font-size:12.5px;color:#2440E8;cursor:pointer;font-weight:500">Data inventory →</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ==================== ACTIONS QUEUE ==================== -->
+      <sc-if value="{{ isActions }}" hint-placeholder-val="{{ false }}">
+        <div style="max-width:1320px;margin:0 auto;padding:24px 24px 64px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+            <sc-for list="{{ queueTabs }}" as="t" hint-placeholder-count="4">
+              <div onClick="{{ t.go }}" style="{{ t.style }}">{{ t.label }} <span style="opacity:0.55;font-family:'JetBrains Mono',monospace;font-size:11px">{{ t.count }}</span></div>
+            </sc-for>
+            <div style="margin-left:auto;display:flex;gap:8px">
+              <button style="border:1px solid #DDD9CE;background:#fff;border-radius:7px;padding:6px 12px;font-size:12.5px;cursor:pointer;color:#3E3D34" style-hover="border-color:#14150F">Export CSV</button>
+              <button onClick="{{ goBudget }}" style="border:0;background:#14150F;color:#fff;border-radius:7px;padding:6px 14px;font-size:12.5px;cursor:pointer;font-weight:500" style-hover="background:#2440E8">Review staged change set</button>
+            </div>
+          </div>
+
+          <div style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;overflow:hidden">
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead>
+                <tr style="background:#F6F4EE;border-bottom:1px solid #E4E1D9">
+                  <th style="text-align:left;padding:9px 14px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">Action</th>
+                  <th style="text-align:right;padding:9px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:110px">$ / month</th>
+                  <th style="text-align:left;padding:9px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:110px">Confidence</th>
+                  <th style="text-align:left;padding:9px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:80px">Effort</th>
+                  <th style="text-align:left;padding:9px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:130px">Area</th>
+                  <th style="text-align:left;padding:9px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:110px">Owner</th>
+                  <th style="text-align:left;padding:9px 14px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:120px">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{ queue }}" as="a" hint-placeholder-count="8">
+                  <tr onClick="{{ a.open }}" style="{{ a.rowStyle }}" style-hover="background:#F6F8FF">
+                    <td style="padding:11px 14px">
+                      <div style="font-weight:600;font-size:13px">{{ a.title }}</div>
+                      <div style="color:#5C5A50;font-size:12px;margin-top:2px">{{ a.oneLine }}</div>
+                    </td>
+                    <td style="padding:11px 10px;text-align:right;font-family:'JetBrains Mono',monospace;font-weight:600;font-size:13px">{{ a.money }}</td>
+                    <td style="padding:11px 10px"><span style="{{ a.confStyle }}">{{ a.confLabel }}</span></td>
+                    <td style="padding:11px 10px;color:#4A4940">{{ a.effort }}</td>
+                    <td style="padding:11px 10px;color:#4A4940">{{ a.area }}</td>
+                    <td style="padding:11px 10px;color:#4A4940">{{ a.owner }}</td>
+                    <td style="padding:11px 14px"><span style="{{ a.statusStyle }}">{{ a.status }}</span></td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top:12px;font-size:12px;color:#66645A;max-width:660px;line-height:1.5">Every row carries a lifecycle: open → staged → applied → verified. The queue is the product; the 28 report views become evidence for it.</div>
+        </div>
+      </sc-if>
+
+      <!-- ==================== ACTION DETAIL ==================== -->
+      <sc-if value="{{ isAction }}" hint-placeholder-val="{{ false }}">
+        <div style="max-width:1000px;margin:0 auto;padding:24px 24px 96px">
+          <div onClick="{{ goActions }}" style="font-size:12.5px;color:#2440E8;cursor:pointer;margin-bottom:14px;font-weight:500">← All actions</div>
+
+          <div style="display:flex;gap:18px;align-items:flex-start;margin-bottom:20px">
+            <div style="min-width:0;flex:1">
+              <div style="display:flex;gap:7px;margin-bottom:10px;flex-wrap:wrap">
+                <span style="{{ act.confStyle }}">{{ act.confLabel }}</span>
+                <span style="border:1px solid #E4E1D9;border-radius:20px;padding:2px 9px;font-size:11px;color:#6E6A5C">{{ act.area }}</span>
+                <span style="border:1px solid #E4E1D9;border-radius:20px;padding:2px 9px;font-size:11px;color:#6E6A5C">{{ act.effort }} effort</span>
+              </div>
+              <div style="font-family:'Instrument Serif',serif;font-size:32px;line-height:1.12;letter-spacing:-0.01em;text-wrap:pretty">{{ act.title }}</div>
+              <div style="color:#4A4940;font-size:14px;margin-top:10px;line-height:1.55;max-width:660px;text-wrap:pretty">{{ act.oneLine }}</div>
+            </div>
+            <div style="flex:0 0 auto;border:1px solid #E4E1D9;background:#fff;border-radius:10px;padding:14px 18px;text-align:right">
+              <div style="font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">{{ act.moneyLabel }}</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:600;letter-spacing:-0.02em;margin-top:3px">{{ act.money }}</div>
+            </div>
+          </div>
+
+          <div style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;padding:18px;margin-bottom:16px">
+            <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#66645A;font-weight:600;margin-bottom:12px">How we got here</div>
+            <div style="display:flex;flex-direction:column;gap:0">
+              <sc-for list="{{ act.method }}" as="m" hint-placeholder-count="3">
+                <div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #F0EEE7;align-items:flex-start">
+                  <div style="flex:0 0 auto;width:20px;height:20px;border-radius:50%;background:#F0EEE7;color:#4A4940;font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace">{{ m.n }}</div>
+                  <div style="min-width:0;flex:1;font-size:13px;line-height:1.5;text-wrap:pretty">{{ m.text }}</div>
+                  <div onClick="{{ m.evidence }}" style="flex:0 0 auto;font-size:12px;color:#2440E8;cursor:pointer;font-weight:500;white-space:nowrap">{{ m.link }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="margin-top:12px;font-size:11.5px;color:#66645A;line-height:1.5">Thresholds come from the account's own history, not a global default. <a href="#" style="color:#2440E8">Methodology</a></div>
+          </div>
+
+          <div style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;overflow:hidden;margin-bottom:16px">
+            <div style="padding:14px 18px;border-bottom:1px solid #E4E1D9;display:flex;align-items:center;gap:10px">
+              <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#66645A;font-weight:600">The change set</div>
+              <div style="font-size:12px;color:#5C5A50">{{ act.changeCount }} changes · reversible</div>
+              <button style="margin-left:auto;border:1px solid #DDD9CE;background:#fff;border-radius:6px;padding:5px 11px;font-size:12px;cursor:pointer;color:#3E3D34" style-hover="border-color:#14150F">Download as Editor CSV</button>
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead>
+                <tr style="background:#F6F4EE;border-bottom:1px solid #E4E1D9">
+                  <th style="text-align:left;padding:8px 18px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">Entity</th>
+                  <th style="text-align:left;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:150px">Field</th>
+                  <th style="text-align:left;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:150px">Now</th>
+                  <th style="text-align:left;padding:8px 18px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:170px">Proposed</th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{ act.changes }}" as="c" hint-placeholder-count="4">
+                  <tr style="border-bottom:1px solid #F0EEE7">
+                    <td style="padding:9px 18px;font-weight:500">{{ c.entity }}</td>
+                    <td style="padding:9px 10px;color:#6E6A5C">{{ c.field }}</td>
+                    <td style="padding:9px 10px;font-family:'JetBrains Mono',monospace;color:#66645A;text-decoration:line-through">{{ c.from }}</td>
+                    <td style="padding:9px 18px;font-family:'JetBrains Mono',monospace;font-weight:500;color:#14150F">{{ c.to }}</td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+
+          <div style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;padding:16px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+            <div style="min-width:0">
+              <div style="font-size:13px;font-weight:600">Verification is automatic</div>
+              <div style="font-size:12.5px;color:#6E6A5C;margin-top:2px">14 days after apply, we compare CPA and conversion volume against the pre-change baseline and post the result to the Ledger.</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="position:sticky;bottom:0;background:#FBFAF7;border-top:1px solid #E4E1D9;padding:12px 24px;display:flex;align-items:center;gap:10px">
+          <div style="font-size:12.5px;color:#6E6A5C">Assign to</div>
+          <div style="border:1px solid #DDD9CE;background:#fff;border-radius:7px;padding:5px 10px;font-size:12.5px;display:flex;align-items:center;gap:7px;cursor:pointer">
+            <div style="width:17px;height:17px;border-radius:50%;background:#2440E8;color:#fff;font-size:8.5px;font-weight:600;display:flex;align-items:center;justify-content:center">CI</div>
+            <span>Me</span>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+            <button onClick="{{ dismissAct }}" style="border:1px solid #DDD9CE;background:#fff;border-radius:7px;padding:8px 14px;font-size:12.5px;cursor:pointer;color:#3E3D34" style-hover="border-color:#B3311B;color:#B3311B">Dismiss</button>
+            <button onClick="{{ snoozeAct }}" style="border:1px solid #DDD9CE;background:#fff;border-radius:7px;padding:8px 14px;font-size:12.5px;cursor:pointer;color:#3E3D34" style-hover="border-color:#14150F">Snooze 30d</button>
+            <button onClick="{{ stageAct }}" style="border:0;background:#14150F;color:#fff;border-radius:7px;padding:9px 18px;font-size:12.5px;font-weight:600;cursor:pointer" style-hover="background:#2440E8">{{ stageLabel }}</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ==================== NOT REBUILT ==================== -->
+      <sc-if value="{{ isStub }}" hint-placeholder-val="{{ false }}">
+        <div style="max-width:640px;margin:0 auto;padding:88px 24px 64px;text-align:center">
+          <div style="font-size:10px;letter-spacing:0.09em;text-transform:uppercase;color:#66645A;font-weight:600">{{ stubGroup }}</div>
+          <div style="font-family:'Instrument Serif',serif;font-size:34px;line-height:1.15;margin-top:10px">{{ stubName }}</div>
+          <div style="font-size:13.5px;color:#4A4940;line-height:1.6;margin-top:14px;text-wrap:pretty">This view exists in the product and stays in the navigation. It has not been rebuilt in this prototype — the eleven screens that were rebuilt demonstrate the patterns every view inherits: capped charts above dense tables, one honest totals row, sticky headers, column chooser and CSV export, and an evidence drawer that opens over the view rather than navigating away from it.</div>
+          <div style="display:flex;gap:8px;justify-content:center;margin-top:22px;flex-wrap:wrap">
+            <button onClick="{{ goCampaigns }}" style="border:1px solid #DDD9CE;background:#fff;border-radius:7px;padding:8px 15px;font-size:12.5px;cursor:pointer;color:#3E3D34" style-hover="border-color:#14150F">See the table pattern</button>
+            <button onClick="{{ goActions }}" style="border:0;background:#14150F;color:#fff;border-radius:7px;padding:8px 15px;font-size:12.5px;font-weight:500;cursor:pointer" style-hover="background:#2440E8">Back to recommendations</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ==================== CAMPAIGNS ==================== -->
+      <sc-if value="{{ isCampaigns }}" hint-placeholder-val="{{ false }}">
+        <div style="max-width:1320px;margin:0 auto;padding:24px 24px 64px">
+          <div style="display:flex;gap:0;border:1px solid #E4E1D9;border-radius:10px;overflow:hidden;background:#fff;margin-bottom:16px">
+            <sc-for list="{{ campKpis }}" as="k" hint-placeholder-count="5">
+              <div style="flex:1;padding:12px 16px;border-right:1px solid #E4E1D9">
+                <div style="font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">{{ k.label }}</div>
+                <div style="display:flex;align-items:baseline;gap:8px;margin-top:3px">
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:600;letter-spacing:-0.02em">{{ k.value }}</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:11.5px;{{ k.deltaColor }}">{{ k.delta }}</div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;overflow:hidden">
+            <div style="padding:12px 16px;border-bottom:1px solid #E4E1D9;display:flex;align-items:center;gap:10px">
+              <div style="font-size:13px;font-weight:600">Spend and efficiency by campaign</div>
+              <div style="font-size:12px;color:#5C5A50">bar length = share of spend</div>
+              <button style="margin-left:auto;border:1px solid #DDD9CE;background:#fff;border-radius:6px;padding:5px 11px;font-size:12px;cursor:pointer;color:#3E3D34" style-hover="border-color:#14150F">Columns</button>
+              <button style="border:1px solid #DDD9CE;background:#fff;border-radius:6px;padding:5px 11px;font-size:12px;cursor:pointer;color:#3E3D34" style-hover="border-color:#14150F">Export CSV</button>
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead>
+                <tr style="background:#F6F4EE;border-bottom:1px solid #E4E1D9">
+                  <th style="text-align:left;padding:8px 16px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">Campaign</th>
+                  <th style="text-align:left;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:130px">Type</th>
+                  <th style="text-align:left;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:230px">Cost</th>
+                  <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:80px">Conv</th>
+                  <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:90px">CPA</th>
+                  <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:80px">CVR</th>
+                  <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:90px">Δ conv</th>
+                  <th style="text-align:left;padding:8px 16px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:160px">Flag</th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{ campRows }}" as="r" hint-placeholder-count="8">
+                  <tr style="border-bottom:1px solid #F2F0E9">
+                    <td style="padding:9px 16px;font-weight:500">{{ r.name }}</td>
+                    <td style="padding:9px 10px;color:#6E6A5C">{{ r.type }}</td>
+                    <td style="padding:9px 10px">
+                      <div style="display:flex;align-items:center;gap:9px">
+                        <div style="flex:1;height:6px;background:#F0EEE7;border-radius:3px;overflow:hidden;min-width:40px">
+                          <div style="{{ r.barStyle }}"></div>
+                        </div>
+                        <div style="font-family:'JetBrains Mono',monospace;width:56px;text-align:right">{{ r.cost }}</div>
+                      </div>
+                    </td>
+                    <td style="padding:9px 10px;text-align:right;font-family:'JetBrains Mono',monospace">{{ r.conv }}</td>
+                    <td style="padding:9px 10px;text-align:right;font-family:'JetBrains Mono',monospace">{{ r.cpa }}</td>
+                    <td style="padding:9px 10px;text-align:right;font-family:'JetBrains Mono',monospace">{{ r.cvr }}</td>
+                    <td style="padding:9px 10px;text-align:right;font-family:'JetBrains Mono',monospace;{{ r.deltaColor }}">{{ r.delta }}</td>
+                    <td style="padding:9px 16px"><span style="{{ r.flagStyle }}" onClick="{{ r.goAction }}">{{ r.flag }}</span></td>
+                  </tr>
+                </sc-for>
+                <tr style="background:#F6F4EE;border-top:2px solid #E4E1D9">
+                  <td style="padding:11px 16px;font-weight:600">Account total</td>
+                  <td style="padding:11px 10px"></td>
+                  <td style="padding:11px 10px;text-align:right;font-family:'JetBrains Mono',monospace;font-weight:600">$2,377</td>
+                  <td style="padding:11px 10px;text-align:right;font-family:'JetBrains Mono',monospace;font-weight:600">92.0</td>
+                  <td style="padding:11px 10px;text-align:right;font-family:'JetBrains Mono',monospace;font-weight:600">$25.83</td>
+                  <td style="padding:11px 10px;text-align:right;font-family:'JetBrains Mono',monospace;font-weight:600">3.78%</td>
+                  <td style="padding:11px 10px"></td>
+                  <td style="padding:11px 16px"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top:10px;font-size:12px;color:#66645A;max-width:700px;line-height:1.5">One totals row, not two. Counts and currency sum; CPA and CVR are weighted averages; ratio columns that cannot be aggregated stay blank.</div>
+        </div>
+      </sc-if>
+
+      <!-- ==================== SEARCH TERMS ==================== -->
+      <sc-if value="{{ isTerms }}" hint-placeholder-val="{{ false }}">
+        <div style="max-width:1320px;margin:0 auto;padding:24px 24px 64px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+            <div style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;padding:16px">
+              <div style="font-size:13px;font-weight:600;margin-bottom:3px">Where the money goes</div>
+              <div style="font-size:12px;color:#5C5A50;margin-bottom:14px">Share of $2,212 search-term spend by intent class</div>
+              <sc-for list="{{ intentBars }}" as="b" hint-placeholder-count="4">
+                <div style="margin-bottom:11px">
+                  <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px">
+                    <div style="font-size:12.5px;font-weight:500">{{ b.label }}</div>
+                    <div style="font-size:12px;color:#5C5A50">{{ b.terms }} terms</div>
+                    <div style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:500">{{ b.spend }}</div>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#5C5A50;width:48px;text-align:right">{{ b.pct }}</div>
+                  </div>
+                  <div style="height:8px;background:#F0EEE7;border-radius:4px;overflow:hidden">
+                    <div style="{{ b.barStyle }}"></div>
+                  </div>
+                </div>
+              </sc-for>
+              <div style="margin-top:14px;padding-top:12px;border-top:1px solid #F0EEE7;font-size:12px;color:#6E6A5C;line-height:1.5">Sorted descending and self-labelled. No legend to cross-reference.</div>
+            </div>
+
+            <div style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;overflow:hidden">
+              <div style="padding:14px 16px;border-bottom:1px solid #E4E1D9">
+                <div style="font-size:13px;font-weight:600">Performance grades</div>
+                <div style="font-size:12px;color:#5C5A50;margin-top:2px">Graded on this account's own CVR distribution, non-brand only</div>
+              </div>
+              <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+                <thead>
+                  <tr style="background:#F6F4EE;border-bottom:1px solid #E4E1D9">
+                    <th style="text-align:left;padding:8px 16px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">Grade</th>
+                    <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">Terms</th>
+                    <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">Spend</th>
+                    <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">Conv</th>
+                    <th style="text-align:right;padding:8px 16px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">CPA</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <sc-for list="{{ gradeRows }}" as="g" hint-placeholder-count="6">
+                    <tr style="border-bottom:1px solid #F2F0E9">
+                      <td style="padding:9px 16px"><span style="{{ g.pill }}">{{ g.grade }}</span></td>
+                      <td style="padding:9px 10px;text-align:right;font-family:'JetBrains Mono',monospace">{{ g.terms }}</td>
+                      <td style="padding:9px 10px;text-align:right;font-family:'JetBrains Mono',monospace">{{ g.spend }}</td>
+                      <td style="padding:9px 10px;text-align:right;font-family:'JetBrains Mono',monospace">{{ g.conv }}</td>
+                      <td style="padding:9px 16px;text-align:right;font-family:'JetBrains Mono',monospace">{{ g.cpa }}</td>
+                    </tr>
+                  </sc-for>
+                  <tr style="background:#F6F4EE;border-top:2px solid #E4E1D9">
+                    <td style="padding:10px 16px;font-weight:600">Total</td>
+                    <td style="padding:10px 10px;text-align:right;font-family:'JetBrains Mono',monospace;font-weight:600">11,332</td>
+                    <td style="padding:10px 10px;text-align:right;font-family:'JetBrains Mono',monospace;font-weight:600">$2,212</td>
+                    <td style="padding:10px 10px;text-align:right;font-family:'JetBrains Mono',monospace;font-weight:600">48</td>
+                    <td style="padding:10px 16px;text-align:right;font-family:'JetBrains Mono',monospace;font-weight:600">$46.08</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style="margin-top:16px;border:1px solid #DDE3FF;background:#F4F6FF;border-radius:10px;padding:14px 16px;display:flex;align-items:center;gap:14px">
+            <div style="min-width:0">
+              <div style="font-weight:600;font-size:13px">F-graded terms carry $281 with four conversions</div>
+              <div style="color:#4A4940;font-size:12.5px;margin-top:2px">This is the evidence behind the negative-shield action. 45 terms, 12.7% of spend.</div>
+            </div>
+            <button onClick="{{ goShield }}" style="margin-left:auto;flex:0 0 auto;border:0;background:#2440E8;color:#fff;border-radius:7px;padding:8px 14px;font-size:12.5px;font-weight:500;cursor:pointer">Open the action</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ==================== KEYWORDS ==================== -->
+      <sc-if value="{{ isKeywords }}" hint-placeholder-val="{{ false }}">
+        <div style="max-width:1320px;margin:0 auto;padding:24px 24px 64px">
+          <div style="border:1px solid #E8C98A;background:#FDF7E8;border-radius:10px;padding:11px 15px;margin-bottom:14px;font-size:12.5px;color:#6E5A2E;display:flex;align-items:center;gap:10px">
+            <span style="font-weight:600">Quality Score is available for 12% of keywords.</span>
+            <span>Google only reports QS for keywords with sufficient impression volume — the column is not broken.</span>
+            <span onClick="{{ goData }}" style="margin-left:auto;color:#2440E8;cursor:pointer;font-weight:500;white-space:nowrap">Upload keyword report →</span>
+          </div>
+
+          <div style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;overflow:hidden">
+            <div style="padding:11px 16px;border-bottom:1px solid #E4E1D9;display:flex;align-items:center;gap:10px">
+              <input placeholder="Filter keyword…" style="border:1px solid #DDD9CE;border-radius:7px;padding:6px 11px;font-size:12.5px;width:240px;outline:none;color:#14150F" />
+              <div style="display:flex;gap:6px">
+                <span style="border:1px solid #DDD9CE;background:#fff;border-radius:20px;padding:3px 10px;font-size:11.5px;color:#4A4940;cursor:pointer">Below-avg eCTR · 597</span>
+                <span style="border:1px solid #DDD9CE;background:#fff;border-radius:20px;padding:3px 10px;font-size:11.5px;color:#4A4940;cursor:pointer">QS 1–3 · 159</span>
+                <span style="border:1px solid #DDD9CE;background:#fff;border-radius:20px;padding:3px 10px;font-size:11.5px;color:#4A4940;cursor:pointer">Zero conv · 1,204</span>
+              </div>
+              <div style="margin-left:auto;font-size:12px;color:#5C5A50">1,847 rows · virtualised</div>
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead>
+                <tr style="background:#F6F4EE;border-bottom:1px solid #E4E1D9">
+                  <th style="text-align:left;padding:8px 16px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">Keyword</th>
+                  <th style="text-align:left;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:230px">Campaign · ad group</th>
+                  <th style="text-align:left;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:110px">Match</th>
+                  <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:70px">QS</th>
+                  <th style="text-align:left;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:130px">Weakest component</th>
+                  <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:90px">Cost</th>
+                  <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:70px">Conv</th>
+                  <th style="text-align:right;padding:8px 16px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:90px">CPA</th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{ kwRows }}" as="r" hint-placeholder-count="10">
+                  <tr style="border-bottom:1px solid #F2F0E9" style-hover="background:#F6F8FF">
+                    <td style="padding:9px 16px;font-weight:500">{{ r.kw }}</td>
+                    <td style="padding:9px 10px;color:#6E6A5C">{{ r.ag }}</td>
+                    <td style="padding:9px 10px;color:#6E6A5C">{{ r.match }}</td>
+                    <td style="padding:9px 10px;text-align:right;font-family:'JetBrains Mono',monospace;{{ r.qsColor }}">{{ r.qs }}</td>
+                    <td style="padding:9px 10px;font-size:12px;color:#6E6A5C">{{ r.weak }}</td>
+                    <td style="padding:9px 10px;text-align:right;font-family:'JetBrains Mono',monospace">{{ r.cost }}</td>
+                    <td style="padding:9px 10px;text-align:right;font-family:'JetBrains Mono',monospace">{{ r.conv }}</td>
+                    <td style="padding:9px 16px;text-align:right;font-family:'JetBrains Mono',monospace">{{ r.cpa }}</td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top:10px;font-size:12px;color:#66645A;max-width:720px;line-height:1.5">Identical keywords now carry their campaign and ad group, so three rows reading "church goods" are visibly three different keywords rather than an apparent duplication bug.</div>
+        </div>
+      </sc-if>
+
+      <!-- ==================== BUDGET ==================== -->
+      <sc-if value="{{ isBudget }}" hint-placeholder-val="{{ false }}">
+        <div style="max-width:1240px;margin:0 auto;padding:24px 24px 64px">
+          <div style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;padding:16px;margin-bottom:16px;display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap">
+            <div>
+              <div style="font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;margin-bottom:5px">Goal</div>
+              <div style="border:1px solid #DDD9CE;border-radius:7px;padding:7px 11px;font-size:13px;min-width:150px">Maximise conversions</div>
+            </div>
+            <div>
+              <div style="font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;margin-bottom:5px">Weekly budget</div>
+              <div style="border:1px solid #DDD9CE;border-radius:7px;padding:7px 11px;font-size:13px;font-family:'JetBrains Mono',monospace;min-width:110px">$48,000</div>
+            </div>
+            <div>
+              <div style="font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;margin-bottom:5px">Max weekly change</div>
+              <div style="border:1px solid #DDD9CE;border-radius:7px;padding:7px 11px;font-size:13px;font-family:'JetBrains Mono',monospace;min-width:80px">±30%</div>
+            </div>
+            <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+              <div style="font-size:12px;color:#16713F;display:flex;align-items:center;gap:6px"><span style="width:7px;height:7px;border-radius:50%;background:#16713F;display:inline-block"></span>Curves fitted · 8 campaigns</div>
+              <button style="border:0;background:#14150F;color:#fff;border-radius:7px;padding:9px 18px;font-size:12.5px;font-weight:600;cursor:pointer" style-hover="background:#2440E8">Run allocation</button>
+            </div>
+          </div>
+
+          <div style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;overflow:hidden">
+            <div style="padding:13px 16px;border-bottom:1px solid #E4E1D9;display:flex;align-items:center;gap:12px">
+              <div>
+                <div style="font-size:13px;font-weight:600">Proposed allocation</div>
+                <div style="font-size:12px;color:#5C5A50;margin-top:2px">Run 4 Aug 09:12 · marginal-return model · +11.4 est. conversions per week</div>
+              </div>
+              <button style="margin-left:auto;border:1px solid #DDD9CE;background:#fff;border-radius:7px;padding:7px 13px;font-size:12.5px;cursor:pointer;color:#3E3D34" style-hover="border-color:#14150F">Compare to last run</button>
+              <button onClick="{{ approveAlloc }}" style="border:0;background:#2440E8;color:#fff;border-radius:7px;padding:7px 15px;font-size:12.5px;font-weight:600;cursor:pointer">Approve & stage 6 moves</button>
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead>
+                <tr style="background:#F6F4EE;border-bottom:1px solid #E4E1D9">
+                  <th style="text-align:left;padding:8px 16px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">Brand · region · category</th>
+                  <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:110px">Current /wk</th>
+                  <th style="text-align:left;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:220px">Proposed /wk</th>
+                  <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:100px">tCPA move</th>
+                  <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:110px">Est. Δ conv</th>
+                  <th style="text-align:left;padding:8px 16px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:150px">Why</th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{ allocRows }}" as="r" hint-placeholder-count="6">
+                  <tr style="border-bottom:1px solid #F2F0E9">
+                    <td style="padding:10px 16px;font-weight:500">{{ r.name }}</td>
+                    <td style="padding:10px 10px;text-align:right;font-family:'JetBrains Mono',monospace;color:#66645A">{{ r.current }}</td>
+                    <td style="padding:10px 10px">
+                      <div style="display:flex;align-items:center;gap:9px">
+                        <div style="flex:1;height:6px;background:#F0EEE7;border-radius:3px;overflow:hidden;min-width:40px"><div style="{{ r.barStyle }}"></div></div>
+                        <div style="font-family:'JetBrains Mono',monospace;font-weight:600;width:64px;text-align:right">{{ r.proposed }}</div>
+                        <div style="font-family:'JetBrains Mono',monospace;font-size:11.5px;width:48px;text-align:right;{{ r.deltaColor }}">{{ r.delta }}</div>
+                      </div>
+                    </td>
+                    <td style="padding:10px 10px;text-align:right;font-family:'JetBrains Mono',monospace">{{ r.tcpa }}</td>
+                    <td style="padding:10px 10px;text-align:right;font-family:'JetBrains Mono',monospace;{{ r.convColor }}">{{ r.estConv }}</td>
+                    <td style="padding:10px 16px;font-size:12px;color:#6E6A5C">{{ r.why }}</td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top:10px;font-size:12px;color:#66645A;max-width:740px;line-height:1.5">The engine's output now ends in a decision rather than a table. Approving stages the moves into the same change set the actions queue feeds, so budget and bidding changes ship together and get verified together.</div>
+        </div>
+      </sc-if>
+
+      <!-- ==================== MAPPING ==================== -->
+      <sc-if value="{{ isMapping }}" hint-placeholder-val="{{ false }}">
+        <div style="max-width:940px;margin:0 auto;padding:24px 24px 96px">
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">
+            <div style="flex:1">
+              <div style="display:flex;align-items:baseline;gap:10px">
+                <div style="font-size:16px;font-weight:600">{{ mapDone }} of 16 campaigns mapped</div>
+                <div style="font-size:12.5px;color:#5C5A50">Budget allocation unblocks at 16</div>
+              </div>
+              <div style="height:6px;background:#F0EEE7;border-radius:3px;overflow:hidden;margin-top:9px">
+                <div style="{{ mapBarStyle }}"></div>
+              </div>
+            </div>
+            <button onClick="{{ acceptAll }}" style="{{ acceptAllStyle }}">{{ acceptAllLabel }}</button>
+          </div>
+
+          <div style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;overflow:hidden">
+            <div style="display:flex;background:#F6F4EE;border-bottom:1px solid #E4E1D9;padding:8px 16px;gap:12px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">
+              <div style="flex:0 0 300px">Campaign</div>
+              <div style="flex:1">Brand</div>
+              <div style="flex:1">Region</div>
+              <div style="flex:1">Category</div>
+              <div style="flex:0 0 76px"></div>
+            </div>
+            <sc-for list="{{ mapRows }}" as="m" hint-placeholder-count="8">
+              <div style="display:flex;align-items:center;gap:12px;padding:9px 16px;border-bottom:1px solid #F2F0E9">
+                <div style="flex:0 0 300px;font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.name }}</div>
+                <div style="{{ m.cellStyle }}">{{ m.brand }}</div>
+                <div style="{{ m.cellStyle }}">{{ m.region }}</div>
+                <div style="{{ m.cellStyle }}">{{ m.category }}</div>
+                <div style="flex:0 0 76px;text-align:right">
+                  <span style="{{ m.tagStyle }}" onClick="{{ m.accept }}">{{ m.tag }}</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:10px;font-size:12px;color:#66645A;max-width:700px;line-height:1.5">Fields are aligned to a fixed column grid, labelled once in the header, and prefilled from the campaign naming convention. Accepting a suggestion is one click; overriding is still free-text.</div>
+        </div>
+      </sc-if>
+
+      <!-- ==================== DATA ==================== -->
+      <sc-if value="{{ isData }}" hint-placeholder-val="{{ false }}">
+        <div style="max-width:1040px;margin:0 auto;padding:24px 24px 64px">
+          <div style="border:1.5px dashed #CFCBBF;background:#fff;border-radius:10px;padding:28px;text-align:center;margin-bottom:18px">
+            <div style="font-size:15px;font-weight:600">Drop Google Ads CSV exports here</div>
+            <div style="font-size:12.5px;color:#5C5A50;margin-top:5px;line-height:1.5">We detect the report type from the header row — no need to say which is which.<br>Campaign, keyword, search term, placement, geo, auction insights and landing page reports are recognised.</div>
+            <button style="margin-top:14px;border:1px solid #DDD9CE;background:#fff;border-radius:7px;padding:8px 16px;font-size:12.5px;cursor:pointer;color:#3E3D34" style-hover="border-color:#14150F">Choose files</button>
+          </div>
+
+          <div style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;overflow:hidden">
+            <div style="padding:13px 16px;border-bottom:1px solid #E4E1D9;font-size:13px;font-weight:600">What we hold for this client</div>
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead>
+                <tr style="background:#F6F4EE;border-bottom:1px solid #E4E1D9">
+                  <th style="text-align:left;padding:8px 16px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">Report</th>
+                  <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:100px">Rows</th>
+                  <th style="text-align:left;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:120px">Through</th>
+                  <th style="text-align:left;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:130px">Freshness</th>
+                  <th style="text-align:left;padding:8px 16px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">Unlocks</th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{ dataRows }}" as="d" hint-placeholder-count="7">
+                  <tr style="border-bottom:1px solid #F2F0E9">
+                    <td style="padding:9px 16px;font-weight:500">{{ d.report }}</td>
+                    <td style="padding:9px 10px;text-align:right;font-family:'JetBrains Mono',monospace">{{ d.rows }}</td>
+                    <td style="padding:9px 10px;font-family:'JetBrains Mono',monospace;color:#6E6A5C">{{ d.through }}</td>
+                    <td style="padding:9px 10px"><span style="{{ d.freshStyle }}">{{ d.fresh }}</span></td>
+                    <td style="padding:9px 16px;font-size:12px;color:#6E6A5C">{{ d.unlocks }}</td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top:10px;font-size:12px;color:#66645A;max-width:700px;line-height:1.5">Freshness is stated against what each report unlocks, so a stale placement export explains why the PMax action is marked medium confidence rather than high.</div>
+        </div>
+      </sc-if>
+
+      <!-- ==================== LEDGER ==================== -->
+      <sc-if value="{{ isLedger }}" hint-placeholder-val="{{ false }}">
+        <div style="max-width:1180px;margin:0 auto;padding:28px 24px 64px">
+          <div style="display:flex;gap:0;border:1px solid #E4E1D9;border-radius:10px;overflow:hidden;background:#fff;margin-bottom:20px">
+            <sc-for list="{{ ledgerKpis }}" as="k" hint-placeholder-count="4">
+              <div style="flex:1;padding:14px 18px;border-right:1px solid #E4E1D9">
+                <div style="font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">{{ k.label }}</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:600;letter-spacing:-0.02em;margin-top:3px;{{ k.color }}">{{ k.value }}</div>
+                <div style="font-size:11.5px;color:#5C5A50;margin-top:2px">{{ k.sub }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="border:1px solid #E4E1D9;background:#fff;border-radius:10px;overflow:hidden">
+            <div style="padding:13px 16px;border-bottom:1px solid #E4E1D9;font-size:13px;font-weight:600">Every change, and what happened after</div>
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead>
+                <tr style="background:#F6F4EE;border-bottom:1px solid #E4E1D9">
+                  <th style="text-align:left;padding:8px 16px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:100px">Applied</th>
+                  <th style="text-align:left;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">Change</th>
+                  <th style="text-align:left;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:100px">By</th>
+                  <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:110px">Predicted</th>
+                  <th style="text-align:right;padding:8px 10px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:110px">Actual</th>
+                  <th style="text-align:left;padding:8px 16px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;width:130px">Verdict</th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{ ledgerRows }}" as="l" hint-placeholder-count="6">
+                  <tr style="border-bottom:1px solid #F2F0E9">
+                    <td style="padding:10px 16px;font-family:'JetBrains Mono',monospace;color:#6E6A5C">{{ l.date }}</td>
+                    <td style="padding:10px 10px;font-weight:500">{{ l.change }}</td>
+                    <td style="padding:10px 10px;color:#6E6A5C">{{ l.by }}</td>
+                    <td style="padding:10px 10px;text-align:right;font-family:'JetBrains Mono',monospace;color:#66645A">{{ l.pred }}</td>
+                    <td style="padding:10px 10px;text-align:right;font-family:'JetBrains Mono',monospace;font-weight:600;{{ l.actualColor }}">{{ l.actual }}</td>
+                    <td style="padding:10px 16px"><span style="{{ l.verdictStyle }}">{{ l.verdict }}</span></td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top:10px;font-size:12px;color:#66645A;max-width:740px;line-height:1.5">Recording the prediction alongside the outcome is what makes the methodology auditable — and over time it calibrates the confidence labels on new recommendations.</div>
+        </div>
+      </sc-if>
+
+      <!-- ==================== CLIENT VIEW ==================== -->
+      <sc-if value="{{ isShare }}" hint-placeholder-val="{{ false }}">
+        <div style="background:#F3F1EA;min-height:100%;padding:24px">
+          <div style="max-width:900px;margin:0 auto">
+            <div style="font-size:11.5px;color:#66645A;margin-bottom:10px;display:flex;align-items:center;gap:8px">
+              <span style="width:7px;height:7px;border-radius:50%;background:#2440E8;display:inline-block"></span>
+              Preview of the read-only client link · no filters, no raw tables, no internal notes
+            </div>
+            <div style="background:#fff;border:1px solid #E4E1D9;border-radius:12px;padding:36px 40px">
+              <div style="display:flex;align-items:center;gap:12px;padding-bottom:22px;border-bottom:1px solid #EDEAE2">
+                <div style="width:30px;height:30px;border-radius:8px;background:#C8A44A;color:#14150F;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center">CR</div>
+                <div>
+                  <div style="font-size:15px;font-weight:600">Chiarelli's Religious Goods</div>
+                  <div style="font-size:12px;color:#5C5A50">Paid search · July 2026</div>
+                </div>
+                <div style="margin-left:auto;font-size:11.5px;color:#66645A;text-align:right">Prepared by Chazif<br>Data through 3 August</div>
+              </div>
+
+              <div style="font-family:'Instrument Serif',serif;font-size:30px;line-height:1.2;margin:26px 0 14px;max-width:600px;text-wrap:pretty">Conversions rose 14% while cost per conversion fell to $24.98.</div>
+              <div style="font-size:14px;color:#4A4940;line-height:1.6;max-width:640px;text-wrap:pretty">Three changes shipped in July. Merging the Neighboring tier into NYC Metro Core lifted the combined campaign above the volume threshold Google needs to bid efficiently, and the negative keyword shield stopped roughly $400 a month of spend on searches that have never converted.</div>
+
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#EDEAE2;border:1px solid #EDEAE2;border-radius:10px;overflow:hidden;margin:26px 0">
+                <sc-for list="{{ shareKpis }}" as="k" hint-placeholder-count="4">
+                  <div style="background:#fff;padding:16px 18px">
+                    <div style="font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600">{{ k.label }}</div>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:600;letter-spacing:-0.02em;margin-top:4px">{{ k.value }}</div>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:11.5px;margin-top:2px;{{ k.color }}">{{ k.delta }}</div>
+                  </div>
+                </sc-for>
+              </div>
+
+              <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#66645A;font-weight:600;margin-bottom:10px">What we did</div>
+              <sc-for list="{{ shareItems }}" as="s" hint-placeholder-count="3">
+                <div style="display:flex;gap:14px;padding:12px 0;border-bottom:1px solid #F2F0E9;align-items:flex-start">
+                  <div style="flex:0 0 66px;font-family:'JetBrains Mono',monospace;font-size:12px;color:#66645A;padding-top:1px">{{ s.date }}</div>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:13.5px;font-weight:600">{{ s.title }}</div>
+                    <div style="font-size:13px;color:#4A4940;margin-top:3px;line-height:1.5;text-wrap:pretty">{{ s.body }}</div>
+                  </div>
+                  <div style="flex:0 0 auto;font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:600;color:#16713F">{{ s.result }}</div>
+                </div>
+              </sc-for>
+
+              <div style="margin-top:28px;padding-top:18px;border-top:1px solid #EDEAE2;font-size:11.5px;color:#66645A">Next review 1 September · questions to ci@chazif.com</div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+
+  <!-- ============ EVIDENCE DRAWER ============ -->
+  <sc-if value="{{ drawerOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeDrawer }}" style="position:fixed;inset:0;background:rgba(20,21,15,0.28);z-index:40"></div>
+    <div style="position:fixed;top:0;right:0;bottom:0;width:min(700px,74vw);background:#fff;z-index:41;box-shadow:-16px 0 48px rgba(20,21,15,0.14);display:flex;flex-direction:column">
+      <div style="padding:16px 20px;border-bottom:1px solid #E4E1D9;display:flex;align-items:flex-start;gap:12px">
+        <div style="min-width:0">
+          <div style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#66645A;font-weight:600">Evidence</div>
+          <div style="font-size:16px;font-weight:600;margin-top:3px;letter-spacing:-0.01em">{{ drawer.title }}</div>
+          <div style="font-size:12.5px;color:#5C5A50;margin-top:2px">{{ drawer.sub }}</div>
+        </div>
+        <button onClick="{{ closeDrawer }}" style="margin-left:auto;flex:0 0 auto;border:1px solid #DDD9CE;background:#fff;border-radius:6px;width:26px;height:26px;cursor:pointer;color:#6E6A5C;font-size:13px;line-height:1">✕</button>
+      </div>
+      <div class="sx-scroll" style="flex:1;overflow:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead>
+            <tr style="background:#F6F4EE;border-bottom:1px solid #E4E1D9;position:sticky;top:0">
+              <sc-for list="{{ drawer.cols }}" as="c" hint-placeholder-count="4">
+                <th style="{{ c.style }}">{{ c.label }}</th>
+              </sc-for>
+            </tr>
+          </thead>
+          <tbody>
+            <sc-for list="{{ drawer.rows }}" as="r" hint-placeholder-count="8">
+              <tr style="border-bottom:1px solid #F2F0E9">
+                <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="4">
+                  <td style="{{ c.style }}">{{ c.v }}</td>
+                </sc-for>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid #E4E1D9;display:flex;align-items:center;gap:10px">
+        <div style="font-size:12px;color:#5C5A50">{{ drawer.foot }}</div>
+        <button style="margin-left:auto;border:1px solid #DDD9CE;background:#fff;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;color:#3E3D34" style-hover="border-color:#14150F">Open full view</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ COMMAND PALETTE ============ -->
+  <sc-if value="{{ paletteOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closePalette }}" style="position:fixed;inset:0;background:rgba(20,21,15,0.34);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding-top:12vh">
+      <div onClick="{{ stop }}" style="width:min(600px,90vw);background:#fff;border-radius:12px;box-shadow:0 24px 64px rgba(20,21,15,0.28);overflow:hidden">
+        <input value="{{ q }}" onChange="{{ setQ }}" placeholder="Jump to a view, campaign, keyword or action…" autoFocus="{{ true }}" style="width:100%;border:0;border-bottom:1px solid #E4E1D9;padding:16px 18px;font-size:15px;outline:none;color:#14150F" />
+        <div class="sx-scroll" style="max-height:56vh;overflow:auto;padding:6px">
+          <sc-for list="{{ paletteResults }}" as="r" hint-placeholder-count="6">
+            <div onClick="{{ r.go }}" style="padding:9px 12px;border-radius:7px;cursor:pointer;display:flex;align-items:center;gap:10px" style-hover="background:#F2F5FF">
+              <span style="font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:#66645A;font-weight:600;width:74px;flex:0 0 auto">{{ r.kind }}</span>
+              <span style="font-size:13px;font-weight:500">{{ r.label }}</span>
+              <span style="margin-left:auto;font-size:12px;color:#66645A">{{ r.meta }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ toastOn }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#14150F;color:#fff;padding:11px 18px;border-radius:9px;font-size:13px;z-index:60;box-shadow:0 8px 28px rgba(20,21,15,0.3)">{{ toast }}</div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900}}">
+const PILL = {
+  hi:  "background:#FBE9E4;color:#B3311B;border-radius:20px;padding:2px 9px;font-size:11px;font-weight:600;white-space:nowrap",
+  med: "background:#FDF3DF;color:#8A5806;border-radius:20px;padding:2px 9px;font-size:11px;font-weight:600;white-space:nowrap",
+  lo:  "background:#EAF0FF;color:#2440E8;border-radius:20px;padding:2px 9px;font-size:11px;font-weight:600;white-space:nowrap"
+};
+const STATUS = {
+  Open:     "background:#F0EEE7;color:#4A4940;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600",
+  Staged:   "background:#EAF0FF;color:#2440E8;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600",
+  Applied:  "background:#E6F2EA;color:#16713F;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600",
+  Snoozed:  "background:#F0EEE7;color:#66645A;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600",
+  Dismissed:"background:#F0EEE7;color:#66645A;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600"
+};
+
+const ACTIONS = [
+  { id:"a1", money:"$986", moneyLabel:"recoverable", conf:"hi", confLabel:"High confidence", effort:"Medium", area:"Budget & bidding", owner:"Unassigned", status:"Open",
+    title:"Pool six sub-floor campaigns into one portfolio bid strategy",
+    oneLine:"Six of eight campaigns are below the 15-conversion/month Smart Bidding floor. They spend without enough signal to optimise against.",
+    changeCount:7,
+    method:[
+      {n:"1", text:"Counted June conversions per campaign. Two clear the 15/mo tCPA floor; six sit below it.", link:"8 campaigns", ev:"campaigns"},
+      {n:"2", text:"Of those six, four carry material spend (>$100/mo) — they are burning budget while learning.", link:"$1,298 spend", ev:"campaigns"},
+      {n:"3", text:"Pooling them into a shared portfolio lifts the combined signal above the floor without changing targeting.", link:"Model", ev:"campaigns"}
+    ],
+    changes:[
+      {entity:"Tier B - Neighboring", field:"Bid strategy", from:"tCPA (own)", to:"Portfolio: NB Core"},
+      {entity:"Tier C - Southern Expansion", field:"Bid strategy", from:"tCPA (own)", to:"Portfolio: NB Core"},
+      {entity:"pMax (test)", field:"Bid strategy", from:"tCPA (own)", to:"Portfolio: PMax Pool"},
+      {entity:"pMax Candles (Legacy)", field:"Bid strategy", from:"tCPA (own)", to:"Portfolio: PMax Pool"},
+      {entity:"Portfolio: NB Core", field:"Target CPA", from:"—", to:"$28.00"}
+    ]
+  },
+  { id:"a2", money:"$1,912", moneyLabel:"zero-conv spend", conf:"hi", confLabel:"High confidence", effort:"Medium", area:"Keywords & negatives", owner:"Unassigned", status:"Open",
+    title:"Build a three-tier negative shield seeded from the waste themes",
+    oneLine:"82% of search-term spend went to terms with zero conversions. Without negatives the same queries fire again every period.",
+    changeCount:64,
+    method:[
+      {n:"1", text:"Isolated search terms with zero conversions over the trailing 90 days, excluding protected brand and competitor terms.", link:"5,326 terms", ev:"terms"},
+      {n:"2", text:"Clustered the wasted spend into themes: religious ($543), catholic ($506), stores ($274), church ($262), supplies ($125), goods ($84).", link:"6 themes", ev:"terms"},
+      {n:"3", text:"Assigned each theme to account / campaign / ad-group level based on whether it ever converts anywhere.", link:"3 tiers", ev:"terms"}
+    ],
+    changes:[
+      {entity:"Account negative list", field:"Add phrase", from:"—", to:'"free"'},
+      {entity:"Account negative list", field:"Add phrase", from:"—", to:'"wholesale"'},
+      {entity:"Tier A - NYC Metro Core", field:"Add exact", from:"—", to:'[religious stores near me]'},
+      {entity:"Tier B - Neighboring", field:"Add phrase", from:"—", to:'"church supplies catalog"'}
+    ]
+  },
+  { id:"a3", money:"$443", moneyLabel:"diluted budget", conf:"med", confLabel:"Medium confidence", effort:"Low", area:"Performance Max", owner:"D. Reyes", status:"Open",
+    title:"Exclude the one-impression PMax placement tail",
+    oneLine:"55,718 of 65,819 placements (85%) served a single impression or fewer — mostly foreign-language and video reach inventory.",
+    changeCount:12,
+    method:[
+      {n:"1", text:"Pulled the PMax placement report and bucketed placements by impressions served.", link:"65,819 rows", ev:"placements"},
+      {n:"2", text:"Only 10,101 placements (15.3%) reached two or more impressions — the rest cannot accumulate signal.", link:"Distribution", ev:"placements"},
+      {n:"3", text:"Cross-checked the tail against brand-safety categories; 41% is video reach, 22% foreign-language.", link:"Breakdown", ev:"placements"}
+    ],
+    changes:[
+      {entity:"pMax (test)", field:"Content exclusion", from:"None", to:"Video reach"},
+      {entity:"pMax (test)", field:"Language signal", from:"All", to:"English"},
+      {entity:"pMax Candles (Legacy)", field:"Content exclusion", from:"None", to:"Video reach"}
+    ]
+  },
+  { id:"a4", money:"$1,400", moneyLabel:"CPC premium", conf:"med", confLabel:"Medium confidence", effort:"Medium", area:"Quality Score", owner:"Unassigned", status:"Open",
+    title:"Rework the 597 keywords carrying Below-Average expected CTR",
+    oneLine:"Account average Quality Score is 6.2. Below-Average eCTR is the weakest of the three QS components and carries a direct CPC premium.",
+    changeCount:23,
+    method:[
+      {n:"1", text:"Split QS into its three components across all keywords with sufficient impressions.", link:"1,847 keywords", ev:"keywords"},
+      {n:"2", text:"597 keywords flag Below-Average eCTR while landing-page and relevance components sit at Average or better.", link:"597 keywords", ev:"keywords"},
+      {n:"3", text:"Grouped them by ad group so a single RSA headline rewrite covers multiple keywords at once.", link:"23 ad groups", ev:"keywords"}
+    ],
+    changes:[
+      {entity:"AG: Church Goods", field:"RSA headline 1", from:"Religious Goods Store", to:"Church Goods — Ships in 24h"},
+      {entity:"AG: Communion", field:"RSA headline 2", from:"Shop Communion", to:"First Communion Gifts & Sets"}
+    ]
+  },
+  { id:"a5", money:"$233", moneyLabel:"idle inventory", conf:"lo", confLabel:"Low confidence", effort:"Low", area:"Keywords & negatives", owner:"Unassigned", status:"Snoozed",
+    title:"Right-size Exact / Phrase / Broad and retire idle match-type layers",
+    oneLine:"Phrase carries most spend (1,762 kw / $3,600). Exact contributes 631 keywords for $233 and 26 conversions.",
+    changeCount:9,
+    method:[{n:"1", text:"Compared conversion contribution per match-type layer against its share of spend.", link:"3 layers", ev:"keywords"}],
+    changes:[{entity:"Exact layer", field:"Status", from:"Enabled", to:"Paused (18 kw)"}]
+  },
+  { id:"a6", money:"$45", moneyLabel:"low-QS spend", conf:"lo", confLabel:"Low confidence", effort:"Medium", area:"Quality Score", owner:"Unassigned", status:"Open",
+    title:"Pause or rework the 159 keywords sitting in the QS 1–3 danger zone",
+    oneLine:"Low-QS keywords pay a CPC penalty on every auction. Freeing the spend moves it to higher-QS terms.",
+    changeCount:159,
+    method:[{n:"1", text:"Filtered keywords to QS 1–3 with any spend in the trailing 90 days.", link:"159 keywords", ev:"keywords"}],
+    changes:[{entity:"159 keywords", field:"Status", from:"Enabled", to:"Paused"}]
+  },
+  { id:"a7", money:"$89", moneyLabel:"brand spend", conf:"lo", confLabel:"Low confidence", effort:"Low", area:"Measurement", owner:"Unassigned", status:"Open",
+    title:"Measure non-brand on its own target instead of the blended CPA",
+    oneLine:"Brand runs at $1.51 CPA on $89; non-brand at $15.64 on $5,047. A blended target flatters brand and starves growth.",
+    changeCount:2,
+    method:[{n:"1", text:"Split spend and conversions by brand / non-brand segment and computed separate CPAs.", link:"2 segments", ev:"campaigns"}],
+    changes:[{entity:"NB campaigns", field:"Target CPA", from:"$25.83 (blended)", to:"$17.50"}]
+  },
+  { id:"a8", money:"$525", moneyLabel:"below floor", conf:"hi", confLabel:"High confidence", effort:"Low", area:"Budget & bidding", owner:"S. Kaur", status:"Applied",
+    title:"Consolidate Tier B into Tier A rather than running it below the floor",
+    oneLine:"Tier B - Neighboring took 13 conversions on $525 — under the floor while spending materially.",
+    changeCount:3,
+    method:[{n:"1", text:"Applied 3 July. Verification window closes 17 July.", link:"Ledger", ev:"campaigns"}],
+    changes:[{entity:"Tier B - Neighboring", field:"Status", from:"Enabled", to:"Merged into Tier A"}]
+  }
+];
+
+const EVIDENCE = {
+  campaigns:{
+    title:"Campaign performance · June 2026", sub:"Sorted by spend. Rates are weighted, never summed.",
+    cols:["Campaign","Type","Clicks","Cost","Conv","CPA","CVR"],
+    rows:[
+      ["Tier A - NYC Metro Core","Search","612","$1,047","23.5","$44.57","3.84%"],
+      ["Tier B - Neighboring","Search","309","$525","13.0","$40.39","4.21%"],
+      ["pMax (test)","Performance Max","347","$281","13.0","$21.54","3.76%"],
+      ["pMax Candles (Legacy)","Performance Max","815","$281","9.0","$31.19","1.10%"],
+      ["Tier C - Southern Expansion","Search","159","$211","10.5","$20.05","6.60%"],
+      ["250th - Patriotic Prayer Cards","Shopping","42","$25","1.0","$24.80","2.38%"],
+      ["Brand Defense","Search","150","$8","22.0","$0.36","14.67%"],
+      ["Conquest - Competitors","Search","0","$0","0.0","—","—"],
+      ["Account total","","2,434","$2,377","92.0","$25.83","3.78%"]
+    ], foot:"One totals row. CPA and CVR are weighted averages — the old build summed them."
+  },
+  terms:{
+    title:"Zero-conversion search terms", sub:"Trailing 90 days · brand and competitor terms excluded",
+    cols:["Search term","Theme","Cost","Clicks","Conv","Grade"],
+    rows:[
+      ["religious articles store","religious","$543","218","0","F"],
+      ["catholic gift shop","catholic","$506","201","0","F"],
+      ["religious stores near me","stores","$274","112","0","F"],
+      ["church supplies catalog","church","$262","98","0","F"],
+      ["liturgical supplies free","supplies","$125","51","0","F"],
+      ["religious goods wholesale","goods","$84","36","0","F"]
+    ], foot:"5,326 terms total · $1,912 · 82% of search-term spend"
+  },
+  placements:{
+    title:"PMax placements by impressions served", sub:"65,819 placement candidates",
+    cols:["Bucket","Placements","Share","Impressions","Est. cost"],
+    rows:[
+      ["1 impression or fewer","55,718","84.7%","41,204","$443"],
+      ["2–10 impressions","7,912","12.0%","28,116","$188"],
+      ["11–100 impressions","1,884","2.9%","61,048","$97"],
+      ["100+ impressions","305","0.5%","184,220","$334"]
+    ], foot:"41% of the tail is video reach, 22% foreign-language"
+  },
+  keywords:{
+    title:"Keywords with Below-Average expected CTR", sub:"Campaign and ad group shown so identical keywords are distinguishable",
+    cols:["Keyword","Campaign · ad group","Match","QS","Cost","CPA"],
+    rows:[
+      ["church goods","Tier A · Church Goods","Phrase","4","$1,158","$32.49"],
+      ["church goods","Tier B · Church Goods","Phrase","—","$459","$24.82"],
+      ["church goods","Tier C · Goods Broad","Phrase","5","$200","$30.78"],
+      ["church supply company","Tier A · Supply Co","Phrase","—","$446","$63.78"],
+      ["church supply company","Tier B · Supply Co","Phrase","—","$326","$72.41"],
+      ["catholic church goods","Tier A · Catholic","Phrase","6","$76","$37.92"]
+    ], foot:"Quality Score is available for 12% of keywords — upload the keyword report to populate the rest."
+  }
+};
+
+const NAV_JOB = [
+  { label:"Today", items:[
+    {label:"Brief", screen:"brief"},
+    {label:"Actions", screen:"actions", key:"actions"}
+  ]},
+  { label:"Diagnose", cats:[
+    { label:"Performance", items:[
+      {label:"Overview"},
+      {label:"Monthly Trends"},
+      {label:"Non-Brand Categories"},
+      {label:"Regions"}
+    ]},
+    { label:"Campaign", items:[
+      {label:"Campaign Performance", screen:"campaigns"}
+    ]},
+    { label:"Keyword", items:[
+      {label:"Keyword Deep Dive", screen:"keywords"},
+      {label:"Quality Score"},
+      {label:"Quality Score by Component"},
+      {label:"KW by Region & Category"}
+    ]},
+    { label:"Search terms", items:[
+      {label:"Intent & Grades", screen:"terms"},
+      {label:"Relevant Terms"},
+      {label:"Competitor Terms"},
+      {label:"Triage"}
+    ]},
+    { label:"Ad copy", items:[
+      {label:"Ad Copy"},
+      {label:"Ad ↔ LP Pairing"}
+    ]},
+    { label:"Landing pages", items:[
+      {label:"LP Performance"},
+      {label:"LP Category Grid"}
+    ]},
+    { label:"Geo", items:[
+      {label:"Geo Performance"}
+    ]},
+    { label:"Competition", items:[
+      {label:"Auction Insights"}
+    ]}
+  ]},
+  { label:"Plan", items:[
+    {label:"Budget Input"},
+    {label:"Budget Allocation", screen:"budget"},
+    {label:"Budget"},
+    {label:"Pacing"}
+  ]},
+  { label:"Prove", items:[
+    {label:"Ledger", screen:"ledger"},
+    {label:"Client View", screen:"share"}
+  ]},
+  { label:"Setup", cats:[
+    { label:"Data", items:[
+      {label:"Upload Data", screen:"data"},
+      {label:"Data Inventory"},
+      {label:"Campaign Mapping", screen:"mapping", key:"mapping"}
+    ]},
+    { label:"Settings", items:[
+      {label:"Business Context"},
+      {label:"Clients", admin:true}
+    ]}
+  ]}
+];
+
+const LABEL_FOR = {
+  brief:"Brief", actions:"Actions", action:"Actions",
+  campaigns:"Campaign Performance", terms:"Intent & Grades", keywords:"Keyword Deep Dive",
+  budget:"Budget Allocation", ledger:"Ledger", share:"Client View",
+  data:"Upload Data", mapping:"Campaign Mapping"
+};
+
+const META = {
+  brief:    ["Brief", "Chiarelli's Religious Goods · data through 3 Aug", []],
+  actions:  ["Actions", "8 open · $2,341/mo at stake", [{k:"Sort",v:"$ impact"},{k:"Owner",v:"Anyone"}]],
+  action:   ["Action", "", []],
+  campaigns:["Campaign Performance", "June 2026 · vs May", [{k:"Segment",v:"All"},{k:"Dates",v:"Jun 2026"},{k:"vs",v:"MoM"}]],
+  terms:    ["Intent & Grades", "11,332 terms · $2,212", [{k:"Segment",v:"Non-brand"},{k:"Dates",v:"90 days"}]],
+  keywords: ["Keyword Deep Dive", "1,847 keywords with impressions", [{k:"Campaign",v:"All"},{k:"Dates",v:"90 days"}]],
+  budget:   ["Budget Allocation", "Weekly · goal-driven", [{k:"Goal",v:"Conversions"},{k:"Budget",v:"$48,000/wk"}]],
+  ledger:   ["Ledger", "What we changed and what happened", [{k:"Dates",v:"Last 6 months"}]],
+  share:    ["Client View", "Read-only · what the client sees", []],
+  data:     ["Upload Data", "Uploads and freshness", []],
+  mapping:  ["Campaign Mapping", "6 of 16 mapped", []]
+};
+
+class Component extends DCLogic {
+  state = { screen:"brief", actionId:"a1", drawer:null, palette:false, q:"", toast:null, staged:["a8"], statusOverride:{}, accepted:[], stubName:"", stubGroup:"", openGroups:[] };
+
+  componentDidMount(){
+    this._key = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); this.setState({palette:!this.state.palette, q:""}); }
+      if (e.key === "Escape") this.setState({palette:false, drawer:null});
+    };
+    window.addEventListener("keydown", this._key);
+  }
+  componentWillUnmount(){ window.removeEventListener("keydown", this._key); }
+
+  go(screen){ return () => this.setState({screen, palette:false, drawer:null}); }
+  toast(t){ this.setState({toast:t}); clearTimeout(this._t); this._t = setTimeout(()=>this.setState({toast:null}), 2600); }
+
+  status(a){ return this.state.statusOverride[a.id] || (this.state.staged.includes(a.id) ? "Staged" : a.status); }
+
+  decorate(a){
+    const st = this.status(a);
+    return Object.assign({}, a, {
+      confStyle: PILL[a.conf],
+      statusStyle: STATUS[st] || STATUS.Open,
+      status: st,
+      open: () => this.setState({screen:"action", actionId:a.id, drawer:null})
+    });
+  }
+
+  openEvidence(key){ return () => this.setState({drawer:key}); }
+
+  renderVals(){
+    const s = this.state;
+    const meta = META[s.screen] || META.brief;
+    const act = ACTIONS.find(a => a.id === s.actionId) || ACTIONS[0];
+    const decorated = ACTIONS.map(a => this.decorate(a));
+    const open = decorated.filter(a => a.status === "Open");
+
+    const cash = (a) => Number(String(a.money).replace(/[$,]/g, "")) || 0;
+    const usd = (n) => "$" + n.toLocaleString("en-US");
+    const WORDS = ["No","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten"];
+    const top = open.slice(0, 3);
+    const openMoney = open.reduce((t, a) => t + cash(a), 0);
+    const topMoney = top.reduce((t, a) => t + cash(a), 0);
+
+    const mapped = 6 + s.accepted.length;
+    const unmapped = 16 - mapped;
+    const suggestable = Math.max(0, 6 - s.accepted.length);
+
+    const activeLabel = s.screen === "stub" ? s.stubName : LABEL_FOR[s.screen];
+
+    const navSource = NAV_JOB;
+
+    const isOpenKey = (k) => s.openGroups.indexOf(k) >= 0;
+    const toggleKey = (k) => () => this.setState(prev => ({
+      openGroups: prev.openGroups.indexOf(k) >= 0
+        ? prev.openGroups.filter(x => x !== k)
+        : prev.openGroups.concat([k])
+    }));
+    const pendingOf = (items) => items.reduce((t, it) =>
+      t + (it.key === "mapping" ? unmapped : it.key === "actions" ? open.length : 0), 0);
+    const headerStyle = (level, isOpen, active) =>
+      "display:flex;align-items:center;gap:7px;padding:4px 9px;border-radius:6px;cursor:pointer;font-weight:600;"
+      + (level === 0
+          ? "font-size:9.5px;letter-spacing:0.1em;text-transform:uppercase;margin-top:1px;color:" + (isOpen ? "#EDEBE3" : "#A8A599")
+          : "font-size:11.5px;letter-spacing:0.01em;margin-left:9px;color:" + (active ? "#EDEBE3" : "#9C9A8E"));
+    const countStyle = (isOpen, hasAlert) => isOpen
+      ? "display:none"
+      : (hasAlert ? "" : "margin-left:auto;") + "font-family:'JetBrains Mono',monospace;font-size:10px;color:#8A8779;letter-spacing:0;text-transform:none;font-weight:400";
+    const alertStyle = (isOpen, pending) => (!isOpen && pending > 0)
+      ? "margin-left:auto;width:5px;height:5px;border-radius:50%;background:#2440E8;flex:0 0 auto"
+      : "display:none";
+    const countText = (n) => n + (n === 1 ? " view" : " views");
+
+    const decItem = (it, groupLabel, level) => {
+      const active = activeLabel === it.label;
+      const badge = it.key === "mapping" ? (unmapped > 0 ? String(unmapped) : "")
+                  : it.key === "actions" ? (open.length > 0 ? String(open.length) : "")
+                  : "";
+      return {
+        label: it.label, badge: badge,
+        badgeStyle: badge
+          ? "margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:10px;background:" + (active ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.12)") + ";color:#EDEBE3;border-radius:20px;padding:1px 6px"
+          : "display:none",
+        dotStyle: "flex:0 0 auto;width:4px;height:4px;border-radius:50%;background:" + (it.screen ? (active ? "#fff" : "#6E6C61") : "transparent"),
+        style: "display:flex;align-items:center;gap:8px;padding:4px 9px;border-radius:6px;cursor:pointer;font-size:12px;line-height:1.35;margin-left:" + (level === 2 ? 22 : 9) + "px;"
+          + (active ? "background:#2440E8;color:#fff;font-weight:500" : "color:#B8B5A9"),
+        go: it.screen
+          ? () => this.setState({screen: it.screen, palette:false, drawer:null})
+          : () => this.setState({screen:"stub", stubName: it.label, stubGroup: groupLabel, palette:false, drawer:null})
+      };
+    };
+
+    const navGroups = navSource.map(g => {
+      const cats = g.cats || [];
+      const direct = g.items || [];
+      const allItems = direct.concat(cats.reduce((acc, c) => acc.concat(c.items), []));
+      const holdsActive = allItems.some(it => it.label === activeLabel);
+      const key = "job:" + g.label;
+      const jobOpen = holdsActive || isOpenKey(key);
+      const pending = pendingOf(allItems);
+      return {
+        label: g.label,
+        headerStyle: headerStyle(0, jobOpen, false),
+        chev: jobOpen ? "−" : "+",
+        alertStyle: alertStyle(jobOpen, pending),
+        countStyle: countStyle(jobOpen, pending > 0),
+        count: countText(allItems.length),
+        toggle: toggleKey(key),
+        items: (jobOpen ? direct : []).map(it => decItem(it, g.label, 1)),
+        cats: (jobOpen ? cats : []).map(c => {
+          const cHoldsActive = c.items.some(it => it.label === activeLabel);
+          const cKey = "cat:" + g.label + "/" + c.label;
+          const cOpen = cHoldsActive || isOpenKey(cKey);
+          const cPending = pendingOf(c.items);
+          return {
+            label: c.label,
+            headerStyle: headerStyle(1, cOpen, cHoldsActive),
+            chev: cOpen ? "−" : "+",
+            alertStyle: alertStyle(cOpen, cPending),
+            countStyle: countStyle(cOpen, cPending > 0),
+            count: countText(c.items.length),
+            toggle: toggleKey(cKey),
+            items: (cOpen ? c.items : []).map(it => decItem(it, c.label, 2))
+          };
+        })
+      };
+    });
+
+    const d = EVIDENCE[s.drawer];
+    const drawer = d ? {
+      title: d.title, sub: d.sub, foot: d.foot,
+      cols: d.cols.map((c,i) => ({ label:c, style:"text-align:" + (i>1?"right":"left") + ";padding:8px 14px;font-size:10px;letter-spacing:0.07em;text-transform:uppercase;color:#5C5A50;font-weight:600;background:#F6F4EE" })),
+      rows: d.rows.map(r => ({ cells: r.map((v,i) => ({ v, style:"padding:8px 14px;text-align:" + (i>1?"right":"left") + ";" + (i>1?"font-family:'JetBrains Mono',monospace;":"") + (i===0?"font-weight:500;":"color:#4A4940;") })) }))
+    } : {cols:[],rows:[]};
+
+    const dest = [];
+    navSource.forEach(g => {
+      const push = (it, groupLabel) => dest.push({
+        kind:"View", label: it.label, meta: groupLabel,
+        go: it.screen
+          ? () => this.setState({screen: it.screen, palette:false, q:""})
+          : () => this.setState({screen:"stub", stubName: it.label, stubGroup: groupLabel, palette:false, q:""})
+      });
+      (g.items || []).forEach(it => push(it, g.label));
+      (g.cats || []).forEach(c => c.items.forEach(it => push(it, g.label + " › " + c.label)));
+    });
+    ACTIONS.forEach(a => dest.push({
+      kind:"Action", label: a.title, meta: a.money,
+      go: () => this.setState({screen:"action", actionId:a.id, palette:false, q:""})
+    }));
+    [["Tier A - NYC Metro Core","$1,047","campaigns"],["Tier B - Neighboring","$525","campaigns"],["pMax Candles (Legacy)","$281","campaigns"]].forEach(c => dest.push({
+      kind:"Campaign", label:c[0], meta:c[1], go: () => this.setState({screen:c[2], palette:false, q:""})
+    }));
+    [["church goods","3 instances"],["church supply company","2 instances"],["religious stores","broad"]].forEach(k => dest.push({
+      kind:"Keyword", label:k[0], meta:k[1], go: () => this.setState({screen:"keywords", palette:false, q:""})
+    }));
+
+    const ql = s.q.trim().toLowerCase();
+    const paletteResults = dest
+      .filter(r => !ql || r.label.toLowerCase().includes(ql) || r.kind.toLowerCase().includes(ql) || r.meta.toLowerCase().includes(ql))
+      .slice(0,10);
+
+    const spark = (a) => a.map((v,i) => (i*(100/(a.length-1))).toFixed(1) + "," + (22 - (v/Math.max.apply(null,a))*20).toFixed(1)).join(" ");
+
+    return {
+      navGroups,
+      screenTitle: s.screen === "stub" ? s.stubName : meta[0],
+      isStub: s.screen === "stub", stubName: s.stubName, stubGroup: s.stubGroup,
+      screenSub: s.screen === "stub" ? s.stubGroup
+        : s.screen === "action" ? act.area
+        : s.screen === "mapping" ? mapped + " of 16 mapped"
+        : s.screen === "actions" ? open.length + " open · " + usd(openMoney) + "/mo at stake"
+        : meta[1],
+      filters: meta[2],
+      hasFilters: meta[2].length > 0 && s.screen !== "stub",
+      noFilters: meta[2].length === 0 && s.screen !== "stub",
+
+      isBrief: s.screen === "brief", isActions: s.screen === "actions", isAction: s.screen === "action",
+      isCampaigns: s.screen === "campaigns", isTerms: s.screen === "terms", isKeywords: s.screen === "keywords",
+      isBudget: s.screen === "budget", isLedger: s.screen === "ledger", isShare: s.screen === "share",
+      isData: s.screen === "data", isMapping: s.screen === "mapping",
+
+      topActions: top,
+      openCount: open.length,
+      allLabel: open.length === 1 ? "See the 1 open action →" : "See all " + open.length + " open actions →",
+      headlinePre: top.length > 0 ? (WORDS[top.length] || top.length) + (top.length === 1 ? " decision is waiting, worth" : " decisions are waiting, worth") : "Nothing needs a decision today.",
+      headlineMoney: top.length > 0 ? usd(topMoney) : "",
+      headlinePost: top.length > 0 ? "a month." : "",
+      queue: decorated,
+      queueTabs: [
+        {label:"Open", count:open.length, style:"padding:5px 12px;border-radius:7px;background:#14150F;color:#fff;font-size:12.5px;font-weight:500;cursor:pointer", go:()=>{}},
+        {label:"Staged", count:s.staged.length, style:"padding:5px 12px;border-radius:7px;border:1px solid #DDD9CE;background:#fff;color:#4A4940;font-size:12.5px;cursor:pointer", go:()=>{}},
+        {label:"Verifying", count:4, style:"padding:5px 12px;border-radius:7px;border:1px solid #DDD9CE;background:#fff;color:#4A4940;font-size:12.5px;cursor:pointer", go:()=>{}},
+        {label:"Snoozed", count: decorated.filter(a => a.status === "Snoozed").length, style:"padding:5px 12px;border-radius:7px;border:1px solid #DDD9CE;background:#fff;color:#4A4940;font-size:12.5px;cursor:pointer", go:()=>{}}
+      ],
+      stagedCount: s.staged.length,
+
+      act: Object.assign({}, this.decorate(act), {
+        method: act.method.map(m => Object.assign({}, m, { evidence: this.openEvidence(m.ev) }))
+      }),
+      stageLabel: s.staged.includes(act.id) ? "Staged ✓" : "Approve & stage",
+      stageAct: () => {
+        if (s.staged.includes(act.id)) return;
+        this.setState(prev => ({staged: prev.staged.indexOf(act.id) >= 0 ? prev.staged : prev.staged.concat([act.id])}));
+        this.toast("Staged — added to this week's change set");
+      },
+      snoozeAct: () => { this.setState(prev => ({statusOverride: Object.assign({}, prev.statusOverride, {[act.id]:"Snoozed"})})); this.toast("Snoozed for 30 days"); },
+      dismissAct: () => { this.setState(prev => ({statusOverride: Object.assign({}, prev.statusOverride, {[act.id]:"Dismissed"})})); this.toast("Dismissed — we'll stop surfacing this"); },
+
+      blockerOpen: unmapped > 0,
+      goMapping: this.go("mapping"), goActions: this.go("actions"), goData: this.go("data"), goBudget: this.go("budget"), goCampaigns: this.go("campaigns"),
+
+      movers: [
+        {label:"Spend", value:"$612", delta:"+8.2%", deltaColor:"color:#6E6A5C", spark: spark([40,44,39,52,48,58,61])},
+        {label:"Conversions", value:"24.5", delta:"+14.0%", deltaColor:"color:#16713F", spark: spark([18,17,20,19,22,21,24])},
+        {label:"CPA", value:"$24.98", delta:"−5.1%", deltaColor:"color:#16713F", spark: spark([28,29,27,28,26,25,25])},
+        {label:"Zero-conv spend", value:"$487", delta:"+21.4%", deltaColor:"color:#B3311B", spark: spark([30,33,31,38,40,44,49])}
+      ],
+      health: [
+        {label:"Search terms report", value:"3 Aug", dot:"width:7px;height:7px;border-radius:50%;background:#16713F"},
+        {label:"Keyword report", value:"3 Aug", dot:"width:7px;height:7px;border-radius:50%;background:#16713F"},
+        {label:"Quality Score coverage", value:"12%", dot:"width:7px;height:7px;border-radius:50%;background:#C9911F"},
+        {label:"Placement report", value:"22 Jul", dot:"width:7px;height:7px;border-radius:50%;background:#C9911F"},
+        {label:"Campaign mapping", value: mapped + " / 16", dot:"width:7px;height:7px;border-radius:50%;background:" + (unmapped > 0 ? "#B3311B" : "#16713F")}
+      ],
+
+      campKpis: [
+        {label:"Spend", value:"$2,377", delta:"+4.1%", deltaColor:"color:#6E6A5C"},
+        {label:"Conversions", value:"92.0", delta:"+9.5%", deltaColor:"color:#16713F"},
+        {label:"CPA", value:"$25.83", delta:"−4.9%", deltaColor:"color:#16713F"},
+        {label:"CVR", value:"3.78%", delta:"+0.4pp", deltaColor:"color:#16713F"},
+        {label:"Below bidding floor", value:"6 of 8", delta:"$1,298", deltaColor:"color:#B3311B"}
+      ],
+      campRows: [
+        {name:"Tier A - NYC Metro Core", type:"Search", cost:"$1,047", pct:100, conv:"23.5", cpa:"$44.57", cvr:"3.84%", delta:"—", deltaColor:"color:#66645A", flag:""},
+        {name:"Tier B - Neighboring", type:"Search", cost:"$525", pct:50, conv:"13.0", cpa:"$40.39", cvr:"4.21%", delta:"—", deltaColor:"color:#66645A", flag:"Below floor"},
+        {name:"pMax (test)", type:"Performance Max", cost:"$281", pct:27, conv:"13.0", cpa:"$21.54", cvr:"3.76%", delta:"+117%", deltaColor:"color:#16713F", flag:"Below floor"},
+        {name:"pMax Candles (Legacy)", type:"Performance Max", cost:"$281", pct:27, conv:"9.0", cpa:"$31.19", cvr:"1.10%", delta:"−63%", deltaColor:"color:#B3311B", flag:"Below floor"},
+        {name:"Tier C - Southern Expansion", type:"Search", cost:"$211", pct:20, conv:"10.5", cpa:"$20.05", cvr:"6.60%", delta:"—", deltaColor:"color:#66645A", flag:"Below floor"},
+        {name:"250th - Patriotic Prayer Cards", type:"Shopping", cost:"$25", pct:3, conv:"1.0", cpa:"$24.80", cvr:"2.38%", delta:"—", deltaColor:"color:#66645A", flag:"Below floor"},
+        {name:"Brand Defense", type:"Search", cost:"$8", pct:1, conv:"22.0", cpa:"$0.36", cvr:"14.67%", delta:"—", deltaColor:"color:#66645A", flag:""},
+        {name:"Conquest - Competitors", type:"Search", cost:"$0", pct:0, conv:"0.0", cpa:"—", cvr:"—", delta:"—", deltaColor:"color:#66645A", flag:"No delivery"}
+      ].map(r => Object.assign({}, r, {
+        barStyle: "height:100%;border-radius:3px;background:" + (r.flag === "Below floor" ? "#C9911F" : "#4A4940") + ";width:" + r.pct + "%",
+        flagStyle: r.flag ? "background:#FDF3DF;color:#8A5806;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer" : "display:none",
+        goAction: () => this.setState({screen:"action", actionId:"a1"})
+      })),
+
+      intentBars: [
+        {label:"Relevant", terms:"5,737", spend:"$1,437", pct:"65.0%", w:100, c:"#2E4B2F"},
+        {label:"Needs review", terms:"5,326", spend:"$666", pct:"30.1%", w:46, c:"#8A5806"},
+        {label:"Competitor", terms:"260", spend:"$111", pct:"5.0%", w:8, c:"#2440E8"},
+        {label:"Irrelevant", terms:"9", spend:"$1", pct:"0.0%", w:1, c:"#B3311B"}
+      ].map(b => Object.assign({}, b, {barStyle:"height:100%;border-radius:4px;background:" + b.c + ";width:" + b.w + "%"})),
+
+      gradeRows: [
+        {grade:"A — Top", terms:"1", spend:"$17", conv:"4", cpa:"$4.13", c:"#16713F", bg:"#E6F2EA"},
+        {grade:"B — Good", terms:"1", spend:"$1", conv:"2", cpa:"$0.59", c:"#16713F", bg:"#E6F2EA"},
+        {grade:"C — Average", terms:"4", spend:"$25", conv:"4", cpa:"$6.28", c:"#8A5806", bg:"#FDF3DF"},
+        {grade:"D — Below avg", terms:"5", spend:"$30", conv:"4", cpa:"$6.72", c:"#8A5806", bg:"#FDF3DF"},
+        {grade:"F — No conversions", terms:"45", spend:"$281", conv:"4", cpa:"$70.26", c:"#B3311B", bg:"#FBE9E4"},
+        {grade:"Low volume", terms:"11,276", spend:"$1,858", conv:"30", cpa:"$61.93", c:"#6E6A5C", bg:"#F0EEE7"}
+      ].map(g => Object.assign({}, g, {pill:"background:" + g.bg + ";color:" + g.c + ";border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;white-space:nowrap"})),
+      goShield: () => this.setState({screen:"action", actionId:"a2"}),
+
+      kwRows: [
+        {kw:"church goods", ag:"Tier A · Church Goods", match:"Phrase", qs:"4", weak:"Expected CTR", cost:"$1,158", conv:"35.6", cpa:"$32.49", low:true},
+        {kw:"church goods", ag:"Tier B · Church Goods", match:"Phrase", qs:"—", weak:"Not reported", cost:"$459", conv:"18.5", cpa:"$24.82"},
+        {kw:"church goods", ag:"Tier C · Goods Broad", match:"Phrase", qs:"5", weak:"Expected CTR", cost:"$200", conv:"6.5", cpa:"$30.78", low:true},
+        {kw:"religious stores", ag:"Tier A · Stores", match:"Broad", qs:"—", weak:"Not reported", cost:"$526", conv:"100.5", cpa:"$5.23"},
+        {kw:"church supply company", ag:"Tier A · Supply Co", match:"Phrase", qs:"—", weak:"Not reported", cost:"$446", conv:"7.0", cpa:"$63.78"},
+        {kw:"church supplies", ag:"Tier A · Supplies", match:"Broad", qs:"—", weak:"Not reported", cost:"$360", conv:"76.0", cpa:"$4.73"},
+        {kw:"church supply company", ag:"Tier B · Supply Co", match:"Phrase", qs:"—", weak:"Not reported", cost:"$326", conv:"4.5", cpa:"$72.41"},
+        {kw:"church supplies", ag:"Tier B · Supplies", match:"Phrase", qs:"8", weak:"None", cost:"$106", conv:"0.0", cpa:"—"},
+        {kw:"catholic supply store", ag:"Tier A · Catholic", match:"Broad", qs:"—", weak:"Not reported", cost:"$99", conv:"3.0", cpa:"$32.84"},
+        {kw:"liturgical supplies", ag:"Tier C · Liturgical", match:"Phrase", qs:"—", weak:"Not reported", cost:"$79", conv:"1.0", cpa:"$78.52"},
+        {kw:"catholic church goods", ag:"Tier A · Catholic", match:"Phrase", qs:"6", weak:"Landing page", cost:"$76", conv:"2.0", cpa:"$37.92"},
+        {kw:"catholic church goods", ag:"Tier B · Catholic", match:"Phrase", qs:"5", weak:"Expected CTR", cost:"$75", conv:"1.0", cpa:"$75.34", low:true}
+      ].map(r => Object.assign({}, r, {qsColor: r.low ? "color:#B3311B;font-weight:600" : (r.qs === "—" ? "color:#B5B2A5" : "")})),
+
+      allocRows: [
+        {name:"Non-brand · NYC Metro · Religious goods", current:"$18,400", proposed:"$23,900", pct:100, delta:"+30%", dc:"#16713F", tcpa:"$26 → $24", estConv:"+6.2", cc:"#16713F", why:"Steepest marginal return"},
+        {name:"Non-brand · Neighboring · Religious goods", current:"$9,600", proposed:"$11,300", pct:47, delta:"+18%", dc:"#16713F", tcpa:"$28 → $27", estConv:"+2.4", cc:"#16713F", why:"Below IS saturation"},
+        {name:"Brand · All · Defense", current:"$1,200", proposed:"$1,200", pct:5, delta:"0%", dc:"#6E6A5C", tcpa:"hold", estConv:"—", cc:"color:#66645A", why:"Already at 96% IS"},
+        {name:"Non-brand · Southern · Candles", current:"$7,800", proposed:"$5,500", pct:23, delta:"−30%", dc:"#B3311B", tcpa:"$31 → $31", estConv:"−1.1", cc:"#B3311B", why:"Flat past $5.5k"},
+        {name:"PMax · All · Candles (legacy)", current:"$6,400", proposed:"$4,500", pct:19, delta:"−30%", dc:"#B3311B", tcpa:"$31 → $28", estConv:"+1.8", cc:"#16713F", why:"Spend diluted by placement tail"},
+        {name:"Shopping · All · Prayer cards", current:"$4,600", proposed:"$1,600", pct:7, delta:"−65%", dc:"#B3311B", tcpa:"$25 → $22", estConv:"+2.1", cc:"#16713F", why:"Seasonal window closed"}
+      ].map(r => Object.assign({}, r, {
+        barStyle:"height:100%;border-radius:3px;background:#4A4940;width:" + r.pct + "%",
+        deltaColor:"color:" + r.dc,
+        convColor: r.cc.indexOf("color") === 0 ? r.cc : "color:" + r.cc
+      })),
+      approveAlloc: () => this.toast("6 budget moves staged into this week's change set"),
+
+      mapDone: mapped,
+      acceptAllLabel: "Accept " + (suggestable === 1 ? "the 1 suggestion" : "all " + suggestable + " suggestions"),
+      acceptAllStyle: suggestable > 0
+        ? "flex:0 0 auto;border:0;background:#2440E8;color:#fff;border-radius:7px;padding:9px 16px;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap"
+        : "display:none",
+      blockerHead: "Budget allocation is blocked — " + unmapped + (unmapped === 1 ? " campaign is unmapped" : " campaigns are unmapped"),
+      blockerBody: suggestable > 0
+        ? suggestable + " of the " + unmapped + " unmapped " + (unmapped === 1 ? "campaigns" : "campaigns") + " " + (suggestable === 1 ? "has" : "have") + " a suggested mapping from the naming convention. Accepting " + (suggestable === 1 ? "it" : "them") + " takes about a minute."
+        : "The remaining " + unmapped + (unmapped === 1 ? " campaign has" : " campaigns have") + " no recognisable naming pattern and need a manual mapping.",
+      mapBarStyle: "height:100%;border-radius:3px;background:#2440E8;width:" + Math.round((mapped/16)*100) + "%",
+      mapRows: [
+        {name:"Search | Non-Brand | Tier A - NYC Metro Core", brand:"Non-Brand", region:"NYC Metro", category:"Religious goods", done:true},
+        {name:"Search | Non-Brand | Tier B - Neighboring", brand:"Non-Brand", region:"Neighboring", category:"Religious goods", done:true},
+        {name:"Search | Brand Defense", brand:"Brand", region:"All", category:"Defense", done:true},
+        {name:"250th - Patriotic Prayer Cards - Shopping", brand:"Non-Brand", region:"All", category:"Prayer cards", id:"m1"},
+        {name:"Chiarelli's St. Killian's Candles", brand:"Brand", region:"All", category:"Candles", id:"m2"},
+        {name:"Communion", brand:"Non-Brand", region:"All", category:"Communion", id:"m3"},
+        {name:"PMax: Local store visits and promotions-Local-4", brand:"Non-Brand", region:"NYC Metro", category:"Store visits", id:"m4"},
+        {name:"pMax (Holiday)", brand:"Non-Brand", region:"All", category:"Seasonal", id:"m5"},
+        {name:"pMax (nativity only)", brand:"Non-Brand", region:"All", category:"Seasonal", id:"m6"},
+        {name:"Search | Non-Brand | Tier C - Southern Expansion", brand:"Non-Brand", region:"Southern", category:"Religious goods", done:true},
+        {name:"Search | Conquest - Competitors", brand:"Non-Brand", region:"All", category:"Conquest", done:true},
+        {name:"Religious Goods_religious_goods_store", brand:"Non-Brand", region:"All", category:"Religious goods", done:true},
+        {name:"pMax (Frank)", brand:"—", region:"—", category:"—", none:true},
+        {name:"pMax (test)", brand:"—", region:"—", category:"—", none:true},
+        {name:"pMax Candles (Legacy)", brand:"—", region:"—", category:"—", none:true},
+        {name:"pMax (annual pubs)", brand:"—", region:"—", category:"—", none:true}
+      ].map(m => {
+        const accepted = m.done || s.accepted.indexOf(m.id) >= 0;
+        return Object.assign({}, m, {
+          cellStyle: "flex:1;font-size:12.5px;border:1px solid " + (accepted ? "#DDD9CE" : (m.none ? "#E4C4BC" : "#C7D2FA")) + ";background:" + (accepted ? "#fff" : (m.none ? "#FDF1EE" : "#F4F6FF")) + ";border-radius:6px;padding:5px 9px;color:" + (m.none ? "#B3311B" : "#14150F"),
+          tagStyle: accepted
+            ? "font-size:11px;color:#16713F;font-weight:600"
+            : (m.none ? "font-size:11px;color:#B3311B;font-weight:600" : "font-size:11px;color:#2440E8;font-weight:600;cursor:pointer;border:1px solid #C7D2FA;border-radius:5px;padding:3px 8px;background:#F4F6FF"),
+          tag: accepted ? "Mapped" : (m.none ? "Manual" : "Accept"),
+          accept: () => { if (!accepted && !m.none) this.setState(prev => ({accepted: prev.accepted.indexOf(m.id) >= 0 ? prev.accepted : prev.accepted.concat([m.id])})); }
+        });
+      }),
+      acceptAll: () => { this.setState({accepted:["m1","m2","m3","m4","m5","m6"]}); this.toast("6 suggestions accepted — 4 still need a manual mapping"); },
+
+      dataRows: [
+        {report:"Campaign performance", rows:"1,824", through:"3 Aug", fresh:"Current", ok:1, unlocks:"Campaigns, budget pacing"},
+        {report:"Search terms", rows:"11,332", through:"3 Aug", fresh:"Current", ok:1, unlocks:"Intent grades, negative shield"},
+        {report:"Keywords", rows:"1,847", through:"3 Aug", fresh:"Current", ok:1, unlocks:"Keyword deep dive"},
+        {report:"Quality Score detail", rows:"221", through:"3 Aug", fresh:"12% coverage", ok:2, unlocks:"QS components — partial"},
+        {report:"PMax placements", rows:"65,819", through:"22 Jul", fresh:"13 days old", ok:2, unlocks:"Placement exclusions"},
+        {report:"Geo performance", rows:"942", through:"3 Aug", fresh:"Current", ok:1, unlocks:"Regional allocation"},
+        {report:"Auction insights", rows:"64", through:"—", fresh:"Missing", ok:3, unlocks:"Competitive pressure — locked"}
+      ].map(d => Object.assign({}, d, {
+        freshStyle: d.ok === 1
+          ? "background:#E6F2EA;color:#16713F;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600"
+          : (d.ok === 2 ? "background:#FDF3DF;color:#8A5806;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600"
+                        : "background:#FBE9E4;color:#B3311B;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600")
+      })),
+
+      ledgerKpis: [
+        {label:"Changes applied", value:"27", sub:"last 6 months", color:""},
+        {label:"Waste removed", value:"$8,412", sub:"annualised run-rate", color:"color:#16713F"},
+        {label:"Prediction accuracy", value:"71%", sub:"within ±20% of forecast", color:""},
+        {label:"Reverted", value:"3", sub:"outcome failed verification", color:"color:#B3311B"}
+      ],
+      ledgerRows: [
+        {date:"3 Jul", change:"Merged Tier B into Tier A", by:"S. Kaur", pred:"−$525 waste", actual:"−$611", ac:"#16713F", verdict:"Beat forecast", v:1},
+        {date:"28 Jun", change:"Negative shield tier 1 (account)", by:"S. Kaur", pred:"−$380/mo", actual:"−$402", ac:"#16713F", verdict:"On forecast", v:1},
+        {date:"19 Jun", change:"tCPA $28 → $24 on NYC Metro", by:"D. Reyes", pred:"+4.1 conv", actual:"+1.2", ac:"#8A5806", verdict:"Under forecast", v:2},
+        {date:"11 Jun", change:"Paused 84 QS 1–2 keywords", by:"D. Reyes", pred:"−$45/mo", actual:"−$38", ac:"#16713F", verdict:"On forecast", v:1},
+        {date:"2 Jun", change:"Broad match expansion, Tier C", by:"S. Kaur", pred:"+6.0 conv", actual:"−2.4", ac:"#B3311B", verdict:"Reverted", v:3},
+        {date:"24 May", change:"Split brand and non-brand targets", by:"C. Iyer", pred:"+2.8 conv", actual:"+3.9", ac:"#16713F", verdict:"Beat forecast", v:1}
+      ].map(l => Object.assign({}, l, {
+        actualColor:"color:" + l.ac,
+        verdictStyle: l.v === 1 ? "background:#E6F2EA;color:#16713F;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600"
+          : (l.v === 2 ? "background:#FDF3DF;color:#8A5806;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600"
+                       : "background:#FBE9E4;color:#B3311B;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600")
+      })),
+
+      shareKpis: [
+        {label:"Spend", value:"$2,377", delta:"+4.1% vs Jun", color:"color:#6E6A5C"},
+        {label:"Conversions", value:"92", delta:"+9.5% vs Jun", color:"color:#16713F"},
+        {label:"Cost per conversion", value:"$24.98", delta:"−4.9% vs Jun", color:"color:#16713F"},
+        {label:"Wasted spend removed", value:"$402", delta:"this month", color:"color:#6E6A5C"}
+      ],
+      shareItems: [
+        {date:"3 Jul", title:"Consolidated the Neighboring campaign into NYC Metro Core", body:"Running them separately kept both below the volume Google needs to bid well. Combined, they now clear that threshold.", result:"−$611"},
+        {date:"28 Jun", title:"Added a negative keyword shield", body:"Blocked searches that have never produced a sale — wholesale enquiries, free-item searches and out-of-area queries.", result:"−$402/mo"},
+        {date:"11 Jun", title:"Paused 84 low-quality keywords", body:"These terms carried a price penalty in Google's auction. The budget moved to keywords with a stronger track record.", result:"−$38/mo"}
+      ],
+
+      drawer, drawerOpen: !!d, closeDrawer: () => this.setState({drawer:null}),
+      paletteOpen: s.palette, openPalette: () => this.setState({palette:true, q:""}),
+      closePalette: () => this.setState({palette:false}),
+      stop: (e) => e.stopPropagation(),
+      q: s.q, setQ: (e) => this.setState({q: e.target.value}),
+      paletteResults,
+      toast: s.toast, toastOn: !!s.toast
+    };
+  }
+}
+
+</script>
+</body>
+</html>
