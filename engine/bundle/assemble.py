@@ -1236,7 +1236,7 @@ def _ads_section(engine, client_id, config=None, keep=None, date_from=None, date
 
     def _grade_cohort(cohort, ctr_bench):
         ctr_g, ctr_meta = cohort_grader(
-            cohort, rate=lambda a: a["ctr"], weight=lambda a: a["impr"],
+            cohort, rate=lambda a: a["ctr"],   # simple median (unweighted) for CTR
             in_scope=lambda a: a["impr"] >= 100,
             static_fn=lambda a: _grade_ad(a["ctr"], a["impr"], a["branded"]),
             bands=GRADE_BANDS, mode=mode, benchmark=ctr_bench)

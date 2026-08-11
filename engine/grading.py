@@ -27,9 +27,21 @@ MIN_COHORT = 5          # fewer gradeable entities than this → fall back to st
 ZERO_CONV_CLICKS = 20   # ≥ this many clicks with 0 conversions → forced floor grade
 
 
+def median(values):
+    """Plain median of `values`. None if empty. Used where each entity should count once
+    (CTR: weighting by impressions lets a few high-impression campaigns drag the anchor down
+    and inflate everyone else to A)."""
+    vs = sorted(v for v in values if v is not None)
+    if not vs:
+        return None
+    n = len(vs)
+    return vs[n // 2] if n % 2 else (vs[n // 2 - 1] + vs[n // 2]) / 2.0
+
+
 def wmedian(pairs):
     """Volume-weighted median of (value, weight) pairs (weight ≤ 0 ignored). None if empty.
-    Weighting by clicks/impressions means a high-traffic entity anchors more than a tiny one."""
+    Weighting by clicks means a high-traffic entity anchors more than a tiny one — the right
+    "typical" for CVR, where the business norm is 'where half the traffic converts'."""
     vw = sorted((v, w) for v, w in pairs if w and w > 0)
     if not vw:
         return None
@@ -53,24 +65,31 @@ def grade_by_ratio(value, anchor, bands):
     return bands[-1][1]
 
 
-def cohort_grader(rows, *, rate, weight, in_scope, static_fn, bands,
+def cohort_grader(rows, *, rate, in_scope, static_fn, bands, weight=None,
                   mode="relative", benchmark=None, zero_conv=None, min_cohort=MIN_COHORT):
     """Return `(grade_of, meta)`.
 
     `grade_of(row) -> label` is a drop-in replacement for the static grader: it applies the
     same volume gate (delegating to `static_fn` when a row is out of scope, so the Low
-    Volume / "—" label is preserved), then grades the row relative to the cohort anchor
-    (volume-weighted median of in-scope rows) or a manual `benchmark`.
+    Volume / "—" label is preserved), then grades the row relative to the cohort anchor or a
+    manual `benchmark`. The anchor is the volume-weighted median when `weight` is given (CVR),
+    else a plain median (CTR — so a few high-impression campaigns can't drag it down and
+    inflate everyone to A).
 
     Falls back to `static_fn` entirely when: mode == 'static'; the cohort has fewer than
     `min_cohort` gradeable rows; or the anchor is zero/unknown. `meta` reports the anchor and
-    the A/C thresholds for the UI caption. `rate`/`weight`/`in_scope`/`zero_conv` are callables
+    the A/C thresholds for the UI caption. `rate`/`in_scope`/`weight`/`zero_conv` are callables
     on a row; `static_fn(row) -> label`."""
     if mode == "static":
         return static_fn, {"mode": "static", "anchor": None}
     scoped = [r for r in rows if in_scope(r)]
     is_bench = bool(benchmark and benchmark > 0)
-    anchor = benchmark if is_bench else wmedian([(rate(r), weight(r)) for r in scoped])
+    if is_bench:
+        anchor = benchmark
+    elif weight is None:
+        anchor = median([rate(r) for r in scoped])
+    else:
+        anchor = wmedian([(rate(r), weight(r)) for r in scoped])
     if not anchor or anchor <= 0 or (not is_bench and len(scoped) < min_cohort):
         return static_fn, {"mode": "static", "anchor": None,
                            "reason": "small_cohort" if scoped else "no_data"}

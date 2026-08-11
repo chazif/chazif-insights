@@ -4,15 +4,15 @@ guardrails (volume gate, zero-conversion floor, small-cohort + static fallback,
 manual benchmark override)."""
 import pytest
 
-from engine.grading import (wmedian, grade_by_ratio, cohort_grader, GRADE_BANDS, SCORE_BANDS)
+from engine.grading import (median, wmedian, grade_by_ratio, cohort_grader, GRADE_BANDS, SCORE_BANDS)
 
 
-def test_wmedian_weighted():
-    assert wmedian([]) is None
-    assert wmedian([(0.05, 0)]) is None                 # zero weight ignored -> empty
-    # heavy weight on 0.10 pulls the median up vs a plain median of [.02,.10,.12]
-    assert wmedian([(0.02, 1), (0.10, 100), (0.12, 1)]) == 0.10
-    assert wmedian([(0.04, 10), (0.06, 10)]) in (0.04, 0.06)
+def test_median_and_wmedian():
+    assert median([]) is None and wmedian([]) is None
+    assert median([0.02, 0.05, 0.12]) == 0.05                    # plain: each counts once
+    assert median([0.04, 0.06]) == 0.05                          # even count -> average of middle two
+    assert wmedian([(0.05, 0)]) is None                          # zero weight ignored -> empty
+    assert wmedian([(0.02, 1), (0.10, 100), (0.12, 1)]) == 0.10  # heavy weight pulls it up
 
 
 def test_grade_by_ratio_bands():
@@ -34,10 +34,20 @@ def _rows(*triples):
 STATIC = lambda r: "STATIC"   # sentinel so we can see when the fallback fires
 
 
-def _grader(rows, **kw):
-    return cohort_grader(
-        rows, rate=lambda r: r["cvr"], weight=lambda r: r["clicks"],
-        in_scope=lambda r: r["clicks"] >= 5, static_fn=STATIC, bands=GRADE_BANDS, **kw)
+def _grader(rows, weight_on=True, **kw):
+    extra = {"weight": (lambda r: r["clicks"])} if weight_on else {}
+    return cohort_grader(rows, rate=lambda r: r["cvr"], in_scope=lambda r: r["clicks"] >= 5,
+                         static_fn=STATIC, bands=GRADE_BANDS, **extra, **kw)
+
+
+def test_simple_median_avoids_big_entity_inflation():
+    # one dominant low-rate entity + four higher-rate small ones.
+    rows = _rows((0.01, 10000, 100), (0.04, 100, 4), (0.05, 100, 5), (0.05, 100, 5), (0.06, 100, 6))
+    wg, _ = _grader(rows, weight_on=True)                 # weighted: anchor dragged to ~0.01
+    sg, smeta = _grader(rows, weight_on=False)            # simple: median of the five rates
+    assert smeta["anchor"] == 0.05
+    assert wg(rows[1])[0] == "A"                          # 0.04 vs a tiny weighted anchor -> A (inflated)
+    assert sg(rows[1])[0] in ("C", "D")                  # 0.04 vs 0.05 median -> around/below norm
 
 
 def test_relative_spread_on_low_cvr_account():
