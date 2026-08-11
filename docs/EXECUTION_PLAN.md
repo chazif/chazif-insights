@@ -133,8 +133,9 @@ keyword-shaped views. Module hides entirely for accounts with no Shopping/PMax c
 1. **Shopping Overview** — spend / conv / CPA / ROAS (conv_value exists in raw_rows) for
    campaigns mapped Shopping/PMax; share of account; trend; per-campaign table.
 2. **Products Sold** — top sellers by units/value from `products_sold`; sold-product mix.
-3. **Shopping Search Terms** — the search-terms views filtered to shopping campaigns (waste and
-   negative-keyword triage works for Shopping queries exactly like Search).
+3. **Global "Type" filter** (Search / Shopping / PMax / Display), powered by the mapping
+   engine's `camp_type` — NO separate Shopping Search Terms view: the existing Search Terms
+   module + this filter covers shopping queries without redundancy (user decision).
 
 **Phase S2 — needs the Products report (new `products_performance` report type):**
 4. **Product Performance** — per item: cost, clicks, conv, value, ROAS; **zombies** (spend, no
@@ -146,11 +147,49 @@ keyword-shaped views. Module hides entirely for accounts with no Shopping/PMax c
    the dynamic-grading design wants — for Shopping, the grading anchor can be Google's own
    benchmark instead of the account median.
 
-**Phase S3 — needs Merchant Center diagnostics (new `mc_diagnostics` report type):**
-7. **Feed Health** — approved / disapproved / limited counts; issues ranked by items affected and
-   **spend at risk** (join issue items to product spend); disapproval trend across uploads.
-   Honest scope: without a Merchant Center export this view shows an unlock note, like KW-Region
-   did — we never fake feed data from ads data.
+**Phase S3 — PARKED (user decision): Merchant Center diagnostics.** Full Feed Health needs the
+Merchant Center export (separate login) — revisit later. Interim: if the Products report export
+includes Google Ads' **Product status** column, S2 gets a feed-coverage-lite widget (ready-to-serve
+vs not) for free — clearly labeled as Google-Ads-surfaced status, not full MC diagnostics.
+
+### Google Ads export spec (S2) — exact reports + columns, pulled BY DAY
+
+**Report A — "Products" (required; new report type `products_performance`).**
+Google Ads → Insights & reports → Report editor → predefined "Shopping – Product" (add columns)
+or a custom table on the Product basis. CSV, date range = as far back as available, **segmented
+by Day**. Name like the rest of the set, e.g. `AE - 16 Products (Daily).csv`.
+
+| Column (Google Ads name) | Required? | Why |
+|---|---|---|
+| Day | **Required** | daily grain (pacing/date filters/merge-by-window) |
+| Campaign | **Required** | scoping via mapping; type attribution |
+| Item ID | **Required** | THE join key (↔ products_sold, ↔ future MC) |
+| Product title | **Required** | display |
+| Impressions | **Required** | volume gates, CTR |
+| Clicks | **Required** | CTR/CVR |
+| Cost | **Required** | spend, zombies, Pareto |
+| Conversions | **Required** | CVR/CPA |
+| Conversion value | **Required** | ROAS |
+| Product type (level 1; +2/3 if offered) | Recommended | category dimension for products |
+| Benchmark product click-through rate | Recommended | benchmark-gap view; grading anchor |
+| Benchmark product max. CPC | Recommended | benchmark-gap view |
+| Ad group | Optional | drill-down |
+| Product brand | Optional | multi-brand feeds |
+| Custom label 0–4 | Optional (if client uses them) | client's own segmentation |
+| Product status | Optional (if offered) | feed-coverage-lite |
+| Click share | Optional | shopping share-of-voice |
+
+Caveat: products with zero impressions in the range don't appear in this report — "selling but
+not advertised" comes from the products_sold join, not from this file.
+
+**Report B — existing "Products Sold" export: add the Day segment.** Keep its current columns;
+adding Day gives the sales side the same daily grain (and merge-by-window compatibility).
+
+**Report C — "Product groups" (optional, later).** Campaign, Ad group, Listing group (path), Day
++ Impr/Clicks/Cost/Conv/Conv value (+ benchmark cols). Unlocks the bid-structure view and
+"Everything else" leakage analysis. Not needed for S2 core.
+
+Only pull these for accounts that actually run Shopping/PMax (the mapping knows).
 
 ### Integration points (why this slots in cleanly)
 - **Mapping engine** is the backbone: `camp_type` decides module visibility and scoping; the
