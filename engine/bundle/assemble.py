@@ -420,10 +420,75 @@ def _budget_reconciliation(engine, client_id, cm, config, dateless=False):
     return recon
 
 
+def _pacing_daily(engine, client_id, config, keep=None):
+    """Daily budget pacing for the latest month with day-level campaign data: cumulative
+    spend vs a flat daily-budget target, plus a run-rate month-end projection. None when
+    there's no monthly budget or no day-segmented campaign data (the view then keeps its
+    monthly-only behaviour).
+
+    Pacing is measured against the last day that HAS data (`data_through`), never the
+    calendar date — so a stale upload can't fake an "underpacing" alarm. v1 uses a flat
+    daily budget (monthly / days-in-month); weekday weighting is a follow-up."""
+    keep = keep or (lambda d: True)
+    budget = _effective_budget(config)
+    if not budget:
+        return None
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT date_norm, cost, row FROM raw_rows WHERE client_id=:c "
+            "AND report_type='campaign_performance' AND date_norm IS NOT NULL"),
+            {"c": client_id}).all()
+    daily = defaultdict(float)
+    for dn, cost, row in rows:
+        d = _as_date(dn)
+        if d is None or not keep(_asdict(row)):
+            continue
+        daily[d] += _num(cost)
+    if not daily:
+        return None
+
+    last = max(daily)
+    y, mo = last.year, last.month
+    dim = calendar.monthrange(y, mo)[1]
+    daily_budget = budget / dim
+    month_days = sorted(d for d in daily if d.year == y and d.month == mo)
+    if not month_days:
+        return None
+
+    cum, days = 0.0, []
+    for dd in month_days:
+        cum += daily[dd]
+        target = daily_budget * dd.day
+        days.append({"date": dd.isoformat(), "spend": round(daily[dd], 2),
+                     "cum_spend": round(cum, 2), "cum_target": round(target, 2),
+                     "pace_pct": round(cum / target, 4) if target else None,
+                     "status": _budget_status(target, cum)})
+
+    elapsed = month_days[-1].day               # day number of the last day with data
+    mtd_target = daily_budget * elapsed
+    projection = cum / elapsed * dim if elapsed else 0.0   # linear run-rate to month end
+    proj_pct = projection / budget if budget else None
+    return {
+        "month": f"{MABBR[mo-1]} {y}", "ym": f"{y}-{mo:02d}",
+        "monthly_budget": round(budget, 2), "daily_budget": round(daily_budget, 2),
+        "days_in_month": dim, "data_through": month_days[-1].isoformat(),
+        "days_with_data": len(month_days),
+        "mtd_spend": round(cum, 2), "mtd_target": round(mtd_target, 2),
+        "pace_pct": round(cum / mtd_target, 4) if mtd_target else None,
+        "status": _budget_status(mtd_target, cum),
+        "days": days,
+        "projection": {"spend": round(projection, 2), "variance": round(projection - budget, 2),
+                       "pct": round(proj_pct, 4) if proj_pct is not None else None,
+                       "status": _budget_status(budget, projection)},
+        "months_available": [f"{MABBR[m-1]} {yy}"
+                             for (yy, m) in sorted({(d.year, d.month) for d in daily}, reverse=True)],
+    }
+
+
 def _budget(engine, client_id, cm, config, keep=None, dateless=False):
-    """Monthly spend vs a configured monthly budget. Intra-month (daily) pacing needs
-    day-segmented exports; this reports monthly adherence and latest-month variance.
-    A dateless export is reported as a single current-month bucket."""
+    """Monthly spend vs a configured monthly budget, plus (when day-segmented data exists)
+    intra-month daily pacing under `daily`. A dateless export is reported as a single
+    current-month bucket."""
     keep = keep or (lambda d: True)
     budget = _effective_budget(config)
     with engine.connect() as c:
@@ -454,7 +519,8 @@ def _budget(engine, client_id, cm, config, keep=None, dateless=False):
         p = latest["pct"]
         status = "over" if p > 1.05 else "under" if p < 0.9 else "on-track"
     return {"monthly_budget": round(budget, 2) if budget else None,
-            "months": months, "latest": latest, "status": status}
+            "months": months, "latest": latest, "status": status,
+            "daily": _pacing_daily(engine, client_id, config, keep)}
 
 
 QS_BUCKETS = [("Poor (1-3)", 1, 3, "#dc2626"), ("Below Average (4-5)", 4, 5, "#f59e0b"),

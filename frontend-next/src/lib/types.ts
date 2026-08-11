@@ -469,11 +469,36 @@ export interface PacingMonth {
   variance: number | null;
   pct: number | null;
 }
+export interface PacingDay {
+  date: string;
+  spend: number;
+  cum_spend: number;
+  cum_target: number;
+  pace_pct: number | null;
+  status: string;
+}
+export interface PacingDaily {
+  month: string;
+  ym: string;
+  monthly_budget: number;
+  daily_budget: number;
+  days_in_month: number;
+  data_through: string;
+  days_with_data: number;
+  mtd_spend: number;
+  mtd_target: number;
+  pace_pct: number | null;
+  status: string;
+  days: PacingDay[];
+  projection: { spend: number; variance: number; pct: number | null; status: string };
+  months_available: string[];
+}
 export interface BudgetPacing {
   monthly_budget: number | null;
   months: PacingMonth[];
   latest: PacingMonth | null;
   status: string | null;
+  daily?: PacingDaily | null;
 }
 
 // ---- Findings + Recommendations (Today / Brief) ----

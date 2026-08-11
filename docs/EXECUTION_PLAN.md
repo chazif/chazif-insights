@@ -10,7 +10,14 @@ degrades gracefully for clients whose data can't support it ("cater any client")
 
 ---
 
-## Item 1 — Daily Pacing  `status: planned`
+## Item 1 — Daily Pacing  `status: SHIPPED (redesign)`
+
+v1 shipped: `_pacing_daily` in assemble.py → `budget_pacing.daily`; Pacing screen shows the
+daily view (MTD + projection StatStrip, cumulative-vs-target chart, day-by-day table) when
+day-level data + a budget exist, else the monthly-only view. Pacing measured vs `data_through`
+(last day with data), not calendar-today. Tests: `tests/test_pacing_daily.py` (5). Follow-ups
+still open: weekday-weighted target, month selector (months_available already returned),
+per-category daily pacing, projection→Actions alert.
 
 **Goal:** the Pacing view answers "are we on pace *right now*?" day by day — not just after the
 month closes. Critical for larger clients; harmless for small ones.
