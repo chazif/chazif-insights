@@ -224,6 +224,12 @@ export function ContextBar({ view, clientId = "" }: { view?: ResolvedView; clien
             <Label>Campaign</Label>
             <Select value={g("campaign")} onChange={(v) => set("campaign", v, "all")} options={fm.campaigns ?? []} />
           </div>
+          {(fm.types?.length ?? 0) > 1 && (
+            <div className="flex items-center gap-1.5">
+              <Label>Type</Label>
+              <Select value={g("type")} onChange={(v) => set("type", v, "all")} options={fm.types ?? []} />
+            </div>
+          )}
           <div className="flex items-center gap-1.5">
             <Label>Region</Label>
             <Select value={g("region")} onChange={(v) => set("region", v, "all")} options={fm.regions ?? []} />

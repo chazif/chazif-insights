@@ -54,6 +54,7 @@ export function getBundle(clientId: string, params: import("./types").BundlePara
   if (params.region && params.region !== "all") sp.set("region", params.region);
   if (params.category && params.category !== "all") sp.set("category", params.category);
   if (params.brand && params.brand !== "all") sp.set("brand", params.brand);
+  if (params.type && params.type !== "all") sp.set("type", params.type);
   if (params.compare && params.compare !== "yoy") sp.set("compare", params.compare);
   return get<import("./types").Bundle>(`/api/bundle?${sp.toString()}`);
 }

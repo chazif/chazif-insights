@@ -53,6 +53,13 @@ export const NAV: JobDef[] = [
       },
       { title: "Campaign", views: [v("campaign-performance", "Campaign Performance", ["Segment", "Dates", "vs"], { built: true })] },
       {
+        title: "Shopping",
+        views: [
+          v("shopping-overview", "Shopping Overview", ["Dates", "vs"], { built: true }),
+          v("products-sold", "Products Sold", ["Dates"], { built: true }),
+        ],
+      },
+      {
         title: "Keyword",
         views: [
           v("keyword-deep-dive", "Keyword Deep Dive", ["Campaign", "Dates"], { built: true }),

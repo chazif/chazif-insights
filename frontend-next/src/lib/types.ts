@@ -9,6 +9,7 @@ export interface BundleParams {
   region?: string;    // exact region, else "all"
   category?: string;  // exact category, else "all"
   brand?: string;     // exact brand, else "all"
+  type?: string;      // campaign type (Search/Shopping/PMax), else "all"
   compare?: string;   // yoy | mom | custom
 }
 
@@ -43,7 +44,7 @@ export interface BundleMeta {
   name: string;
   periods?: { current?: string; prior?: string };
   compare?: { mode?: string; label?: string };
-  filters_meta?: { campaigns?: string[]; regions?: string[]; categories?: string[]; brands?: string[] };
+  filters_meta?: { campaigns?: string[]; regions?: string[]; categories?: string[]; brands?: string[]; types?: string[] };
   mapping?: { pending: number; total: number } | null; // central mapping review state
   [k: string]: unknown;
 }
@@ -740,6 +741,40 @@ export interface FitResult {
   fit?: { params: unknown; diagnostics: FitDiagnostics };
 }
 
+// ---- Shopping module (S1) ----
+export interface ShoppingCampaignRow {
+  campaign: string;
+  type: string;
+  cost: number;
+  conv: number;
+  conv_value: number;
+  cpa: number;
+  roas: number;
+}
+export interface ProductSoldRow {
+  product: string;
+  conv: number;
+  conv_value: number;
+  units: number;
+}
+export interface ShoppingSection {
+  has_shopping: boolean;
+  overview: {
+    month: string;
+    rows: ShoppingCampaignRow[];
+    totals: { cost: number; conv: number; conv_value: number; cpa: number; roas: number };
+    account_cost: number;
+    share: number;
+    trend: TrendPoint[];
+  };
+  products?: {
+    rows: ProductSoldRow[];
+    total_products: number;
+    has_units: boolean;
+    totals: { conv: number; conv_value: number; units: number };
+  } | null;
+}
+
 export interface Bundle {
   meta: BundleMeta;
   campaigns?: CampaignsSection | null;
@@ -750,6 +785,7 @@ export interface Bundle {
   landing_pages_section?: LandingPagesSection | null;
   nb_categories_section?: NbCategoriesSection | null;
   regions_section?: RegionsSection | null;
+  shopping_section?: ShoppingSection | null;
   keyword_section?: KeywordSection | null;
   quality_score?: QualityScoreSection | null;
   qs_breakdown_section?: QsBreakdownSection | null;

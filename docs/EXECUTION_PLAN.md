@@ -145,6 +145,12 @@ keyword-shaped views. Module hides entirely for accounts with no Shopping/PMax c
 
 ### Views (new "Shopping" category under Diagnose)
 
+**Phase S1 — `status: SHIPPED (redesign)`.** Shopping Overview (per-campaign spend/conv/CPA/ROAS
+for Shopping+PMax via mapping camp_type, account share, trend), Products Sold (top products from
+products_sold — units/conv/value, degrades gracefully when value/conv aren't tracked), and the
+global **Type** filter (Search/Shopping/PMax). New "Shopping" nav category under Diagnose; module
+hides for accounts with no Shopping/PMax. `shopping_section` in the bundle.
+
 **Phase S1 — buildable today, no new exports:**
 1. **Shopping Overview** — spend / conv / CPA / ROAS (conv_value exists in raw_rows) for
    campaigns mapped Shopping/PMax; share of account; trend; per-campaign table.

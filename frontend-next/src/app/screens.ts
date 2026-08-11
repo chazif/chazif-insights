@@ -1,5 +1,7 @@
 import type { ComponentType } from "react";
 import { CampaignPerformance } from "../screens/CampaignPerformance";
+import { ShoppingOverview } from "../screens/ShoppingOverview";
+import { ProductsSold } from "../screens/ProductsSold";
 import { SearchTermsIntent } from "../screens/SearchTermsIntent";
 import { GeoPerformance } from "../screens/GeoPerformance";
 import { Overview } from "../screens/Overview";
@@ -40,6 +42,8 @@ export const SCREENS: Record<string, ComponentType> = {
   "nb-categories": NonBrandCategories,
   regions: Regions,
   "campaign-performance": CampaignPerformance,
+  "shopping-overview": ShoppingOverview,
+  "products-sold": ProductsSold,
   "keyword-deep-dive": KeywordDeepDive,
   "quality-score": QualityScore,
   "quality-score-components": QualityScoreComponents,

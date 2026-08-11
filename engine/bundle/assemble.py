@@ -2069,8 +2069,10 @@ def _products_sold(engine, client_id, keep=None):
         a = agg[title]; a[0] += _num(conv); a[1] += _num(val); a[2] += units
     if not agg:
         return None
+    # rank by revenue, then units, then conversions — so accounts that track units but not
+    # conversion value (common) still get a meaningful ordering.
     out = [{"product": p, "conv": round(cv, 1), "conv_value": round(v, 2), "units": round(u, 1)}
-           for p, (cv, v, u) in sorted(agg.items(), key=lambda kv: (-kv[1][1], -kv[1][0]))][:75]
+           for p, (cv, v, u) in sorted(agg.items(), key=lambda kv: (-kv[1][1], -kv[1][2], -kv[1][0]))][:75]
     tot = [sum(x) for x in zip(*[[r["conv"], r["conv_value"], r["units"]] for r in out])]
     return {"rows": out, "total_products": len(agg), "has_units": any(r["units"] for r in out),
             "totals": {"conv": round(tot[0], 1), "conv_value": round(tot[1], 2), "units": round(tot[2], 1)}}
