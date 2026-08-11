@@ -124,7 +124,7 @@ tests incl. a skewed account like chiarelli's; update `docs/GRADING_LOGIC.md` to
 
 ---
 
-## Item 3 — Shopping Module  `status: planned`
+## Item 3 — Shopping Module  `status: S1 SHIPPED; S2/S3 blocked on new exports`
 
 **Goal:** Shopping (and PMax-feed) campaigns are a category of their own — products instead of
 keywords, a feed instead of ad copy. Give them a holistic module instead of forcing them through
