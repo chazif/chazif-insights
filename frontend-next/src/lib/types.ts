@@ -94,6 +94,7 @@ export interface SearchTermsSection {
   source: string;
   intent_segments: IntentSegment[];
   grades: GradeRow[];
+  grades_grading?: GradingMeta;
   relevant_terms: RelevantTerm[];
   competitor_terms: CompetitorTerm[];
   flagged_terms: FlaggedTerm[];
@@ -373,6 +374,7 @@ export interface AdScale {
   has_region: boolean;
   pairing: AdPairing;
   stats: { total: number; aligned: number; fix_lp: number; fix_ad: number; low_vol: number; aligned_pct: number };
+  grading?: { ctr: GradingMeta; lp: GradingMeta };
 }
 export interface AdsSection {
   count: number;
@@ -406,9 +408,22 @@ export interface LpCategoryGrid {
   total: number;
   stats: { landing_pages: number; spend: number; clicks: number; conversions: number; weighted_cvr: number; avg_cats: number };
 }
+// Account-relative grading provenance for the UI caption (engine/grading.py).
+export interface GradingMeta {
+  mode: "relative" | "benchmark" | "static";
+  anchor: number | null;
+  a_min?: number;
+  c_lo?: number;
+  c_hi?: number;
+  n?: number;
+  labels?: string[];
+  reason?: string;
+}
+
 export interface LandingPagesSection {
   count: number;
   performance?: LpRow[];
+  performance_grading?: GradingMeta | null;
   category_grid?: LpCategoryGrid | null;
 }
 
@@ -605,6 +620,8 @@ export interface ClientConfig {
   seasonality: { label: string; months: string[] }[];
   notes: string;
   budget_lines: BudgetLine[];
+  grading_mode?: "relative" | "static";
+  benchmarks?: { ctr_nonbrand: number | null; ctr_brand: number | null; lp_cvr: number | null; term_cvr: number | null };
 }
 export interface CampaignMapping {
   campaign: string;

@@ -29,6 +29,45 @@ impressions or clicks to trust the number.
 
 ---
 
+## 0. How grades are decided now — account-relative (the default)
+
+Grades default to **account-relative** (`engine/grading.py`). Instead of comparing each entity to
+a fixed industry number, we compare it to **the norm for this account** — because the account's own
+data already reflects its industry, its intent mix, and the current season. This is what stops an
+account whose CVR genuinely runs 0–16% from grading as a wall of "Below Average".
+
+1. **Cohort — compare like with like.** Ads are graded within their branded vs non-branded cohort;
+   landing pages against all pages; search terms against all non-brand terms.
+2. **Anchor = the cohort's volume-weighted median** of the metric (CTR or CVR) — weighted so a
+   high-traffic entity counts more than a tiny one. That median *is* "average for this account".
+3. **Bands are ratios of the anchor:**
+
+   | Grade | Meaning | Band |
+   |---|---|---|
+   | A | well above your norm | ≥ 1.5× median |
+   | B | above | 1.15× – 1.5× |
+   | C | **around your norm** | 0.85× – 1.15× |
+   | D | below | 0.5× – 0.85× |
+   | F | far below | < 0.5× |
+
+   So most of your spend clusters around **C = normal for this account**, and A / F flag genuine
+   outliers worth acting on. (Landing-page **Score** maps the same ratios onto Excellent / Strong /
+   Average / Below Avg.)
+4. **Guardrails keep it honest:** the volume gates below still apply (Low Volume / "—"); zero
+   conversions on ≥ 20 clicks is forced to the bottom grade; and if a cohort has **fewer than 5**
+   gradeable entities (or a zero median) it **falls back to the fixed bands** in §1–§3 — so small
+   accounts never get nonsense grades.
+5. **Manual industry benchmark (optional).** In Business Context → Grading you can set an expected
+   CTR/CVR; when set, it replaces the account median as the anchor (this is how a known industry
+   number enters). You can also switch a client to **Static** mode to force the fixed bands.
+6. **Every graded view says what it used** — e.g. *"Graded vs your account median CVR 5.2% · A ≥
+   7.8%"* — so the grade is never a black box.
+
+**The tables in §1–§3 below are the fixed "static" bands** — now the fallback (small cohorts /
+static mode), and the starting point for understanding the metrics.
+
+---
+
 ## 1. CTR grade (Ad Copy tab) — is the ad copy good?
 
 Graded on **CTR**. Higher CTR = the headline/description is pulling people in.

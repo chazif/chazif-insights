@@ -202,8 +202,8 @@ def update_config(client_id, payload, engine=None):
     clean = sanitize(payload or {})
     stored = dict(existing)
     for k, v in clean.items():
-        if k == "thresholds" and isinstance(existing.get("thresholds"), dict):
-            th = dict(existing["thresholds"]); th.update(v); stored["thresholds"] = th
+        if k in ("thresholds", "benchmarks") and isinstance(existing.get(k), dict):
+            merged_d = dict(existing[k]); merged_d.update(v); stored[k] = merged_d
         else:
             stored[k] = v
     with engine.begin() as c:

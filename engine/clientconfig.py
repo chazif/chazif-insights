@@ -23,6 +23,11 @@ DEFAULT_CONFIG = {
     "waste_exclusions": [],         # term substrings never flagged as waste
     "seasonality": [],              # [{"label": "...", "months": ["May"]}] — context, suppression later
     "notes": "",
+    # grading (engine/grading.py): "relative" grades each entity vs its own cohort's median
+    # (default); "static" keeps the old absolute bands. Optional manual benchmarks override
+    # the cohort median as the grading anchor (fractions, e.g. 0.06 = 6%); None -> use median.
+    "grading_mode": "relative",     # relative | static
+    "benchmarks": {"ctr_nonbrand": None, "ctr_brand": None, "lp_cvr": None, "term_cvr": None},
     # dimensional monthly budgets (from an uploaded budget file); each line:
     # {"brand": .., "region": .., "category": .., "monthly": <float>} — dims may be None
     "budget_lines": [],
@@ -37,6 +42,8 @@ def merged(raw):
     for k, v in raw.items():
         if k == "thresholds" and isinstance(v, dict):
             cfg["thresholds"].update({tk: tv for tk, tv in v.items() if tv is not None})
+        elif k == "benchmarks" and isinstance(v, dict):
+            cfg["benchmarks"].update(v)          # None clears a benchmark (revert to median)
         elif k in cfg:
             cfg[k] = v
     return cfg
@@ -70,6 +77,18 @@ def sanitize(raw):
         out["seasonality"] = raw["seasonality"]
     if "notes" in raw:
         out["notes"] = str(raw["notes"])[:4000]
+    if raw.get("grading_mode") in ("relative", "static"):
+        out["grading_mode"] = raw["grading_mode"]
+    if isinstance(raw.get("benchmarks"), dict):
+        bm = {}
+        for bk in DEFAULT_CONFIG["benchmarks"]:
+            if bk in raw["benchmarks"]:
+                v = raw["benchmarks"][bk]
+                try:
+                    bm[bk] = float(v) if v not in (None, "") else None
+                except (TypeError, ValueError):
+                    bm[bk] = None
+        out["benchmarks"] = bm
     if isinstance(raw.get("budget_lines"), list):
         lines = []
         for r in raw["budget_lines"]:

@@ -6,6 +6,7 @@ import { Panel } from "../components/ui/Panel";
 import { BarList } from "../components/ui/BarList";
 import { DataTable, type Column } from "../components/ui/DataTable";
 import { Pill } from "../components/ui/Pill";
+import { GradingNote } from "../components/ui/GradingNote";
 import { Loading, ErrorState, Empty } from "../components/ui/States";
 
 type Tone = "pos" | "warn" | "neg" | "neutral";
@@ -58,6 +59,7 @@ export function SearchTermsIntent() {
 
         <Panel title="Performance grades" sub="by conversion rate">
           <DataTable rows={s.grades} columns={gradeCols} rowKey={(r) => r.grade} totalsLabel="All non-brand" exportName={`search-term-grades-${clientId}`} />
+          <GradingNote className="mt-2" meta={s.grades_grading} metric="CVR" />
         </Panel>
       </div>
 

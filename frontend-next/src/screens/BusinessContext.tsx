@@ -20,6 +20,13 @@ const THRESHOLDS: { key: string; label: string }[] = [
   { key: "qs_floor", label: "QS danger-zone ceiling" },
   { key: "monthly_budget", label: "Monthly budget ($)" },
 ];
+type BmKey = "ctr_nonbrand" | "ctr_brand" | "lp_cvr" | "term_cvr";
+const BENCHMARKS: { key: BmKey; label: string }[] = [
+  { key: "ctr_nonbrand", label: "Non-brand CTR" },
+  { key: "ctr_brand", label: "Brand CTR" },
+  { key: "lp_cvr", label: "Landing-page CVR" },
+  { key: "term_cvr", label: "Search-term CVR" },
+];
 
 function ConfigForm({ clientId, initial }: { clientId: string; initial: ClientConfig }) {
   const qc = useQueryClient();
@@ -30,10 +37,17 @@ function ConfigForm({ clientId, initial }: { clientId: string; initial: ClientCo
     Object.fromEntries(THRESHOLDS.map((t) => [t.key, initial.thresholds?.[t.key as keyof typeof initial.thresholds] ?? ""].map(String) as [string, string]))
   );
   const [notes, setNotes] = useState(initial.notes ?? "");
+  const [mode, setMode] = useState<"relative" | "static">(initial.grading_mode ?? "relative");
+  const [bm, setBm] = useState<Record<BmKey, string>>(
+    Object.fromEntries(BENCHMARKS.map((b) => {
+      const v = initial.benchmarks?.[b.key];
+      return [b.key, v == null ? "" : String(Math.round(v * 1000) / 10)]; // fraction → percent
+    })) as Record<BmKey, string>
+  );
 
   const save = useMutation({
     mutationFn: () => {
-      const patch: Partial<ClientConfig> = { notes };
+      const patch: Partial<ClientConfig> = { notes, grading_mode: mode };
       for (const f of LIST_FIELDS) {
         patch[f.key] = lists[f.key].split(/[\n,]/).map((s) => s.trim()).filter(Boolean) as never;
       }
@@ -43,6 +57,12 @@ function ConfigForm({ clientId, initial }: { clientId: string; initial: ClientCo
         t[x.key] = v === "" ? null : Number(v);
       }
       patch.thresholds = t as never;
+      const benchmarks: Record<string, number | null> = {};
+      for (const b of BENCHMARKS) {
+        const v = bm[b.key].trim();
+        benchmarks[b.key] = v === "" ? null : Number(v) / 100; // percent → fraction
+      }
+      patch.benchmarks = benchmarks as never;
       return updateConfig(clientId, patch);
     },
     onSuccess: () => {
@@ -92,6 +112,39 @@ function ConfigForm({ clientId, initial }: { clientId: string; initial: ClientCo
                 className="w-28 rounded-[6px] border border-border px-2 py-1 text-right font-mono text-[12.5px] outline-none focus:border-accent" />
             </label>
           ))}
+        </div>
+      </Panel>
+
+      <Panel title="Grading" sub="How CTR / CVR grades are decided across the app" className="mt-4">
+        <div className="flex items-center gap-3 text-[12.5px]">
+          <span className="text-text-secondary">Mode</span>
+          <div className="flex overflow-hidden rounded-[6px] border border-border-strong">
+            {(["relative", "static"] as const).map((m, i) => (
+              <button key={m} onClick={() => setMode(m)}
+                className={`px-2.5 py-1 text-[12px] capitalize ${i > 0 ? "border-l border-border-strong" : ""} ${mode === m ? "bg-ink font-medium text-accent" : "bg-surface hover:bg-row-hover"}`}>
+                {m}
+              </button>
+            ))}
+          </div>
+          <span className="text-[11.5px] text-text-muted">
+            {mode === "relative" ? "Graded vs this account's own median (falls back to fixed bands for small cohorts)." : "Fixed absolute bands for every account."}
+          </span>
+        </div>
+        <div className="mt-3">
+          <div className="mb-1.5 text-[11.5px] text-text-muted">Manual benchmarks (%) — optional; a set value overrides the account median as the grading anchor. Leave blank to use the median.</div>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-3 max-[600px]:grid-cols-1">
+            {BENCHMARKS.map((b) => (
+              <label key={b.key} className="flex items-center justify-between gap-3 text-[12.5px]">
+                <span className="text-text-secondary">{b.label}</span>
+                <div className="flex items-center gap-1">
+                  <input type="number" step="0.1" value={bm[b.key]} placeholder="auto"
+                    onChange={(e) => setBm((s) => ({ ...s, [b.key]: e.target.value }))}
+                    className="w-24 rounded-[6px] border border-border px-2 py-1 text-right font-mono text-[12.5px] outline-none focus:border-accent" />
+                  <span className="text-text-muted">%</span>
+                </div>
+              </label>
+            ))}
+          </div>
         </div>
       </Panel>
     </div>

@@ -7,6 +7,7 @@ import { StatStrip } from "../components/ui/StatStrip";
 import { DataTable, type Column } from "../components/ui/DataTable";
 import { Pill } from "../components/ui/Pill";
 import { FilterInput } from "../components/ui/FilterInput";
+import { GradingNote } from "../components/ui/GradingNote";
 import { Loading, ErrorState, Empty } from "../components/ui/States";
 import { scoreTone, shortUrl } from "../lib/grades";
 
@@ -54,6 +55,7 @@ export function LpPerformance() {
         </div>
       </div>
       <DataTable rows={filtered} columns={cols} rowKey={(r, i) => r.url + "|" + i} totalsLabel="Total" exportName={`lp-performance-${clientId}`} />
+      <GradingNote className="mt-2" meta={data?.landing_pages_section?.performance_grading} metric="CVR" />
     </div>
   );
 }

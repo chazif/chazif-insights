@@ -10,6 +10,7 @@ import { BarList } from "../components/ui/BarList";
 import { Pill } from "../components/ui/Pill";
 import { DataTable, type Column } from "../components/ui/DataTable";
 import { FilterInput } from "../components/ui/FilterInput";
+import { GradingNote } from "../components/ui/GradingNote";
 import { Loading, ErrorState, Empty } from "../components/ui/States";
 
 function ScaleView({ scale, clientId, tag }: { scale: AdScale; clientId: string; tag: string }) {
@@ -58,6 +59,12 @@ function ScaleView({ scale, clientId, tag }: { scale: AdScale; clientId: string;
         <div className="ml-auto"><FilterInput value={q} onChange={setQ} placeholder="Filter headline…" /></div>
       </div>
       <DataTable rows={rows} columns={cols} rowKey={(r, i) => r.headline + "|" + i} totalsLabel="Total (shown)" exportName={`ad-copy-${tag}-${clientId}`} />
+      {scale.grading && (
+        <div className="mt-2 space-y-0.5">
+          <GradingNote meta={scale.grading.ctr} metric="CTR grade" />
+          <GradingNote meta={scale.grading.lp} metric="LP grade CVR" />
+        </div>
+      )}
     </>
   );
 }

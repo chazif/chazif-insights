@@ -77,7 +77,16 @@ For a selected month (default = the month of the latest dated row):
 
 ---
 
-## Item 2 — Dynamic (account-relative) Grading  `status: designed, awaiting go`
+## Item 2 — Dynamic (account-relative) Grading  `status: SHIPPED (redesign)`
+
+Shipped: `engine/grading.py` (weighted-median anchor, ratio bands, guardrails); wired into all four
+surfaces (LP Score, Ad Copy CTR + LP grades, search-term grades) with per-cohort anchors and static
+fallback; `grading_mode` + `benchmarks` config (Business Context → Grading UI: mode toggle + 4
+benchmark inputs); GradingNote caption on every graded view; `docs/GRADING_LOGIC.md` updated.
+Tests: `tests/test_grading.py` (7). Both decisions accepted: C = "normal for this account";
+relative default with per-client static escape hatch. Original design retained below.
+
+### Original design
 
 **Problem:** grades use hard-coded absolute bands (e.g. LP "Average" = 20–30% CVR). Chiarelli's
 pages run 0–16% → everything reads "Below Avg", which kills the triage value. Absolute bands

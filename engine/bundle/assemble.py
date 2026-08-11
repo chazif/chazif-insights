@@ -18,6 +18,13 @@ from ..analyze.analyzers import run_analyzers, _asdict, _num
 from ..warehouse import bq
 from ..mapping import (Resolver as _MapResolver, resolver as _build_resolver,
                        pending_counts as _mapping_pending)
+from ..grading import (cohort_grader, GRADE_BANDS, SCORE_BANDS, ZERO_CONV_CLICKS)
+
+
+def _grading_cfg(config):
+    """(mode, benchmarks-dict) from client config, defaulting to relative + no benchmarks."""
+    config = config or {}
+    return (config.get("grading_mode") or "relative").lower(), (config.get("benchmarks") or {})
 
 
 def _run_sections(tasks, parallel):
@@ -1218,12 +1225,34 @@ def _ads_section(engine, client_id, config=None, keep=None, date_from=None, date
                     "category": categorize(ag + " " + headline),
                     "clicks": round(clicks), "impr": round(impr), "cost": round(cost, 2), "conv": round(cv, 1),
                     "ctr": round(ctr, 4), "cpc": round(cost / clicks, 2) if clicks else 0,
-                    "cvr": round(cv / clicks, 4) if clicks else 0,
-                    "grade": _grade_ad(ctr, impr, branded),
-                    "lp_grade": _grade_lp(cv / clicks if clicks else 0, impr, clicks)})
+                    "cvr": round(cv / clicks, 4) if clicks else 0})
     if not ads:
         return None
     ads.sort(key=lambda x: (-x["cost"], x["ad_group"], x["headline"]))   # stable tie-break for the top-100 cutoff
+
+    # Grade CTR (ad copy) + CVR (landing page) relative to each branded/non-branded cohort's
+    # own median, static-band fallback for small cohorts / static mode. See engine/grading.py.
+    mode, bm = _grading_cfg(config)
+
+    def _grade_cohort(cohort, ctr_bench):
+        ctr_g, ctr_meta = cohort_grader(
+            cohort, rate=lambda a: a["ctr"], weight=lambda a: a["impr"],
+            in_scope=lambda a: a["impr"] >= 100,
+            static_fn=lambda a: _grade_ad(a["ctr"], a["impr"], a["branded"]),
+            bands=GRADE_BANDS, mode=mode, benchmark=ctr_bench)
+        lp_g, lp_meta = cohort_grader(
+            cohort, rate=lambda a: a["cvr"], weight=lambda a: a["clicks"],
+            in_scope=lambda a: a["impr"] >= 100 and a["clicks"] >= 5,
+            static_fn=lambda a: _grade_lp(a["cvr"], a["impr"], a["clicks"]),
+            bands=GRADE_BANDS, mode=mode, benchmark=bm.get("lp_cvr"),
+            zero_conv=lambda a: a["conv"] == 0 and a["clicks"] >= ZERO_CONV_CLICKS)
+        for a in cohort:
+            a["grade"] = ctr_g(a)
+            a["lp_grade"] = lp_g(a)
+        return {"ctr": ctr_meta, "lp": lp_meta}
+
+    grading_meta = {False: _grade_cohort([a for a in ads if not a["branded"]], bm.get("ctr_nonbrand")),
+                    True: _grade_cohort([a for a in ads if a["branded"]], bm.get("ctr_brand"))}
 
     def group_data(subset):
         gc, gi, gcl, gs, gcv = Counter(), Counter(), Counter(), Counter(), Counter()
@@ -1271,12 +1300,16 @@ def _ads_section(engine, client_id, config=None, keep=None, date_from=None, date
                             "grand_ads": n, "grand_spend": round(sum(a["cost"] for a in subset), 2)},
                 "stats": stats}
 
-    nb = [a for a in ads if not a["branded"]]
-    br = [a for a in ads if a["branded"]]
+    nb_out = group_data([a for a in ads if not a["branded"]]) or None
+    br_out = group_data([a for a in ads if a["branded"]]) or None
+    if nb_out and nb_out["count"]:
+        nb_out["grading"] = grading_meta[False]
+    if br_out and br_out["count"]:
+        br_out["grading"] = grading_meta[True]
     return {"count": len(ads), "ads": ads[:100],
             "ad_copy": {"thresholds": AD_THRESH_TEXT,
-                        "nonbranded": group_data(nb) if nb else None,
-                        "branded": group_data(br) if br else None}}
+                        "nonbranded": nb_out if nb_out and nb_out["count"] else None,
+                        "branded": br_out if br_out and br_out["count"] else None}}
 
 
 def _lp_categories(lps, product_categories):
@@ -1428,9 +1461,11 @@ def _lp_score(cvr, clicks):
     return "Below Avg"
 
 
-def _lp_performance(engine, client_id, keep=None, date_from=None, date_to=None):
-    """Per landing-page cost/clicks/conv/CVR/CPA + quality score, from ads grouped by
-    final URL (the ads report is the only source that carries LP-level conversions)."""
+def _lp_performance(engine, client_id, config=None, keep=None, date_from=None, date_to=None):
+    """Per landing-page cost/clicks/conv/CVR/CPA + quality Score, from ads grouped by
+    final URL (the ads report is the only source that carries LP-level conversions). The
+    Score is graded relative to this account's own landing-page CVR distribution (static
+    bands as fallback). Returns {rows, grading} or None."""
     keep = keep or (lambda d: True)
     rc, rp = _range_sql(date_from, date_to)
     with engine.connect() as c:
@@ -1454,9 +1489,16 @@ def _lp_performance(engine, client_id, keep=None, date_from=None, date_to=None):
     for url, (cost, clicks, conv) in sorted(agg.items(), key=lambda kv: -kv[1][0])[:50]:
         cvr = conv / clicks if clicks else 0
         out.append({"url": url, "cost": round(cost, 2), "clicks": round(clicks), "conv": round(conv, 1),
-                    "cvr": round(cvr, 4), "cpa": round(cost / conv, 2) if conv else None,
-                    "score": _lp_score(cvr, clicks)})
-    return out
+                    "cvr": round(cvr, 4), "cpa": round(cost / conv, 2) if conv else None})
+    mode, bm = _grading_cfg(config)
+    score_of, meta = cohort_grader(
+        out, rate=lambda r: r["cvr"], weight=lambda r: r["clicks"],
+        in_scope=lambda r: r["clicks"] >= 5, static_fn=lambda r: _lp_score(r["cvr"], r["clicks"]),
+        bands=SCORE_BANDS, mode=mode, benchmark=bm.get("lp_cvr"),
+        zero_conv=lambda r: r["conv"] == 0 and r["clicks"] >= ZERO_CONV_CLICKS)
+    for r in out:
+        r["score"] = score_of(r)
+    return {"rows": out, "grading": meta}
 
 
 def _lp_category_grid(engine, client_id, config, keep=None, date_from=None, date_to=None):
@@ -1603,8 +1645,16 @@ def _search_terms_section(engine, client_id, config, keep=None, date_from=None, 
     terms = list(agg.values())
     if not terms:
         return None
+    # Grade terms by conversion rate relative to this account's non-brand term cohort
+    # (static bands fallback for small cohorts / static mode). See engine/grading.py.
+    _gmode, _gbm = _grading_cfg(config)
+    _term_grade, _term_grading = cohort_grader(
+        terms, rate=lambda t: (t["conv"] / t["clicks"] if t["clicks"] else 0), weight=lambda t: t["clicks"],
+        in_scope=lambda t: t["clicks"] >= 5, static_fn=_grade_term,
+        bands=GRADE_BANDS, mode=_gmode, benchmark=_gbm.get("term_cvr"),
+        zero_conv=lambda t: t["conv"] == 0 and t["clicks"] >= ZERO_CONV_CLICKS)
     for t in terms:
-        t["grade"] = _grade_term(t)
+        t["grade"] = _term_grade(t)
 
     top = sorted(terms, key=lambda x: -x["cost"])[:60]
     context = {"product_categories": config.get("product_categories", []),
@@ -1763,6 +1813,7 @@ def _search_terms_section(engine, client_id, config, keep=None, date_from=None, 
         "flagged_terms": flagged_terms,
         "flagged_total": len(flag_sorted),
         "grades": grades,
+        "grades_grading": _term_grading,
         "grade_method": [{"grade": g, "threshold": th, "interpretation": desc} for (g, th, desc) in ST_GRADE_METHOD],
         "grade_summary": grade_summary,
         "intent_summary": intent_summary,
@@ -2163,7 +2214,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         "st": lambda: _search_terms_section(engine, client_id, config, keep, d_from, d_to),
         "ads": lambda: _ads_section(engine, client_id, config, keep, d_from, d_to),
         "lps": lambda: _landing_pages(engine, client_id, config, keep, d_from, d_to),
-        "lp_perf": lambda: _lp_performance(engine, client_id, keep, d_from, d_to),
+        "lp_perf": lambda: _lp_performance(engine, client_id, config, keep, d_from, d_to),
         "lp_category_grid": lambda: _lp_category_grid(engine, client_id, config, keep, d_from, d_to),
         "nb_cats": (lambda: _nb_categories(engine, client_id, cm, config, keep, compare, res)) if cm else _none,
         "regions": (lambda: _regions(engine, client_id, cm, config, keep, compare, res)) if cm else _none,
@@ -2202,11 +2253,13 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
                                  if (filters or {}).get(k) not in (None, "", "all")]
     ads = R["ads"]
     lps = R["lps"]
-    lp_perf = R["lp_perf"]
-    if lps is None and lp_perf:
-        lps = {"count": len(lp_perf), "rows": [], "category_grid": None}
+    lp_perf = R["lp_perf"]                       # {"rows":[...], "grading":{...}} or None
+    lp_rows = lp_perf["rows"] if lp_perf else None
+    if lps is None and lp_rows:
+        lps = {"count": len(lp_rows), "rows": [], "category_grid": None}
     if lps is not None:
-        lps["performance"] = lp_perf
+        lps["performance"] = lp_rows
+        lps["performance_grading"] = lp_perf["grading"] if lp_perf else None
         lps["category_grid"] = R["lp_category_grid"]
     nb_cats = R["nb_cats"]
     regions = R["regions"]
