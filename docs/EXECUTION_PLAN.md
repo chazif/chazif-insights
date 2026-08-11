@@ -108,6 +108,69 @@ tests incl. a skewed account like chiarelli's; update `docs/GRADING_LOGIC.md` to
 
 ---
 
+## Item 3 — Shopping Module  `status: planned`
+
+**Goal:** Shopping (and PMax-feed) campaigns are a category of their own — products instead of
+keywords, a feed instead of ad copy. Give them a holistic module instead of forcing them through
+keyword-shaped views. Module hides entirely for accounts with no Shopping/PMax campaigns
+(mapping-driven), so lead-gen clients never see it.
+
+### Data audit — what we have vs what we need
+
+| Source | Status | What it gives |
+|---|---|---|
+| campaign_performance + **central mapping** (`camp_type` Shopping/PMax) | **Have** | Which campaigns are Shopping/PMax → module scoping, spend/conv/value rollups |
+| `products_sold` report (item_id_sold, product_title_sold) | **Have** (ingested) | SALES side: which products actually sold (units/value) |
+| `search_terms` | **Have** | Shopping campaigns' queries (filter by campaign via mapping) |
+| `pmax_placements`, `auction_insights` | **Have** | PMax serving surfaces; Shopping competitor share |
+| **Products report** (Google Ads → Products tab export) | **Need — new report type** | ADVERTISING side per item ID: impr/clicks/cost/conv/conv-value, product title/brand/type/custom labels, and Shopping **benchmark CTR / benchmark max CPC** columns |
+| **Product Groups / listing groups** report | Need (optional) | Bid structure, "Everything else" catch-all buckets |
+| **Merchant Center feed diagnostics** export | **Need — new report type** | TRUE feed health: disapprovals, warnings, item-level issues. This lives in Merchant Center, not Google Ads — no Google Ads export can provide it. |
+
+### Views (new "Shopping" category under Diagnose)
+
+**Phase S1 — buildable today, no new exports:**
+1. **Shopping Overview** — spend / conv / CPA / ROAS (conv_value exists in raw_rows) for
+   campaigns mapped Shopping/PMax; share of account; trend; per-campaign table.
+2. **Products Sold** — top sellers by units/value from `products_sold`; sold-product mix.
+3. **Shopping Search Terms** — the search-terms views filtered to shopping campaigns (waste and
+   negative-keyword triage works for Shopping queries exactly like Search).
+
+**Phase S2 — needs the Products report (new `products_performance` report type):**
+4. **Product Performance** — per item: cost, clicks, conv, value, ROAS; **zombies** (spend, no
+   sales) and **heroes**; Pareto concentration ("top 20 products = X% of spend/revenue").
+5. **Advertised vs Sold** — join Products ↔ products_sold on item ID: spending-but-not-selling
+   (cut) and selling-but-underfunded (scale) — the highest-value shopping analysis.
+6. **Benchmark gap** — Google's Shopping benchmark CTR/CPC columns vs ours per product/type.
+   **Note the synergy with Item 2:** these benchmark columns are exactly the "industry average"
+   the dynamic-grading design wants — for Shopping, the grading anchor can be Google's own
+   benchmark instead of the account median.
+
+**Phase S3 — needs Merchant Center diagnostics (new `mc_diagnostics` report type):**
+7. **Feed Health** — approved / disapproved / limited counts; issues ranked by items affected and
+   **spend at risk** (join issue items to product spend); disapproval trend across uploads.
+   Honest scope: without a Merchant Center export this view shows an unlock note, like KW-Region
+   did — we never fake feed data from ads data.
+
+### Integration points (why this slots in cleanly)
+- **Mapping engine** is the backbone: `camp_type` decides module visibility and scoping; the
+  auto-mapper already tags Shopping/PMax from campaign names.
+- **Dynamic grading** (Item 2): products grade in their own cohort (vs account product median, or
+  vs Google benchmark when present) — never against Search keywords.
+- **Analyzers → Actions:** new shopping findings (zombie spend over threshold, disapproved
+  top-seller, benchmark-CTR gap) become recommendations with `action_key` → Actions queue.
+- **Ingestion:** new report types ride the existing parser/detect pattern + merge-by-window (once
+  merged); EXPECTED_REPORTS coverage counts them only for accounts that have Shopping campaigns,
+  so lead-gen clients' Data Inventory doesn't nag about irrelevant reports.
+
+### Open decisions
+1. Which client exports the Products report first (drives S2 column reality — Google's export
+   columns vary by what's picked in the UI; we build the parser against a real file).
+2. Merchant Center access: who pulls the diagnostics export per client, and how often (it's a
+   separate login from Google Ads).
+
+---
+
 ## Backlog (known, not yet scheduled)
 
 | Item | Notes |
@@ -128,7 +191,10 @@ tests incl. a skewed account like chiarelli's; update `docs/GRADING_LOGIC.md` to
 1. **Daily Pacing** — self-contained, data already supports it, no open design questions.
 2. **Dynamic Grading** — bigger blast radius (4 surfaces + config + docs); start after the two
    open decisions are confirmed.
-3. Backlog items as prioritized by user (suggested next: clear-filters-on-switch as a quick win,
+3. **Shopping Phase S1** — buildable from existing data, independent of 1–2 (can be pulled
+   earlier if priorities shift). S2 starts once a client's Products report is exported; S3 once a
+   Merchant Center diagnostics file exists.
+4. Backlog items as prioritized by user (suggested next: clear-filters-on-switch as a quick win,
    then simulator UI to make Budget Allocation fully runnable).
 
 Each item ships in the established loop: build → `tsc`/`pytest`/`npm run build` → commit/push to
