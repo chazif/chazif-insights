@@ -232,6 +232,21 @@ Only pull these for accounts that actually run Shopping/PMax (the mapping knows)
 
 ---
 
+## Item 4 — Google Ads API auto-pull  `status: planned (plan doc approved-pending)`
+
+Full plain-language plan: **docs/ADS_API_INTEGRATION_PLAN.docx**. Summary: nightly worker pulls
+each report via GAQL (rolling ~35-day window for conversion-lag restatements), normalizes rows to
+the CSV parser's shape, writes through merge-by-window ingestion — everything downstream (mapping
+sync, QS freeze, bundle, views) unchanged; CSV upload stays as fallback (Auction Insights is not
+in the API). BigQuery NOT required (API path rides the existing `bq.active()` seam, so it survives
+a future cutover unchanged; Google's Ads→BQ Transfer product deliberately not chosen). Also
+unlocks Shopping S2 via `shopping_performance_view` with no client exports. **Phase 0 blockers:**
+merge the ingestion PR into `main`; user supplies OAuth credentials into Railway env vars (secrets
+never in chat/code/git). Decisions asked of user: green-light PR merge; confirm clients under the
+token's MCC; Chiarelli's as pilot.
+
+---
+
 ## Backlog (known, not yet scheduled)
 
 | Item | Notes |
