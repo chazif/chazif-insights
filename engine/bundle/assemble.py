@@ -440,11 +440,17 @@ def _pacing_daily(engine, client_id, config, keep=None):
     budget = _effective_budget(config)
     if not budget:
         return None
+    # Prefer the account-level daily-spend export (the "Pacing" report) when present — it's
+    # the exact per-day account total and covers accounts that lack day-level campaign data;
+    # otherwise fall back to summing campaign_performance by day.
     with engine.connect() as c:
         rows = c.execute(text(
             "SELECT date_norm, cost, row FROM raw_rows WHERE client_id=:c "
-            "AND report_type='campaign_performance' AND date_norm IS NOT NULL"),
-            {"c": client_id}).all()
+            "AND report_type='account_spend' AND date_norm IS NOT NULL"), {"c": client_id}).all()
+        if not rows:
+            rows = c.execute(text(
+                "SELECT date_norm, cost, row FROM raw_rows WHERE client_id=:c "
+                "AND report_type='campaign_performance' AND date_norm IS NOT NULL"), {"c": client_id}).all()
     daily = defaultdict(float)
     for dn, cost, row in rows:
         d = _as_date(dn)

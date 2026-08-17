@@ -9,6 +9,15 @@ from sqlalchemy import create_engine, insert
 
 from engine.ingest.store import metadata as store_md, raw_rows, uploads
 from engine.bundle.assemble import _pacing_daily
+from engine.ingest.parser import detect_report
+
+
+def test_detect_account_spend_report():
+    # MCC account-level daily spend ("Pacing" export) — date + account + cost, no campaign.
+    assert detect_report(["day", "account_name", "customer_id", "currency_code", "cost"]) == "account_spend"
+    # still distinct from campaign_performance
+    assert detect_report(["day", "campaign", "campaign_type", "cost"]) == "campaign_performance"
+    assert detect_report(["day", "currency_code"]) is None   # no cost/account -> not account_spend
 
 
 @pytest.fixture()
@@ -69,6 +78,26 @@ def test_latest_month_wins_and_months_available(engine):
     out = _pacing_daily(engine, "acme", CFG)
     assert out["month"] == "Aug 2026" and out["days_with_data"] == 3
     assert out["months_available"][0] == "Aug 2026" and "Jul 2026" in out["months_available"]
+
+
+def _seed_account_spend(engine, client_id, day_costs):
+    with engine.begin() as c:
+        up = c.execute(insert(uploads).values(
+            client_id=client_id, report_type="account_spend", row_count=len(day_costs),
+            uploaded_at=datetime.datetime.now())).inserted_primary_key[0]
+        for d, cost in day_costs.items():
+            c.execute(insert(raw_rows).values(
+                client_id=client_id, upload_id=up, report_type="account_spend",
+                entity="Acme", cost=cost, date_norm=d, row={}))
+
+
+def test_pacing_prefers_account_spend_over_campaign(engine):
+    # campaign_performance has July; the account_spend "Pacing" export has newer August data.
+    _seed(engine, "acme", {datetime.date(2026, 7, d): 100.0 for d in range(1, 11)})
+    _seed_account_spend(engine, "acme", {datetime.date(2026, 8, d): 200.0 for d in range(1, 6)})
+    out = _pacing_daily(engine, "acme", CFG)
+    assert out["month"] == "Aug 2026" and out["data_through"] == "2026-08-05"
+    assert out["days"][0]["spend"] == 200.0 and out["mtd_spend"] == 1000.0
 
 
 def test_no_budget_or_no_daily_returns_none(engine):

@@ -36,6 +36,7 @@ ENTITY_COL = {
     "geographic": "state_matched",
     "audiences": "audience_segment",
     "products_sold": "product_title_sold",
+    "account_spend": "account_name",
     "distance_from_location": "distance_from_location_assets",
     "auction_insights": "display_url_domain",
     "schedule_dow_hod": None,
@@ -256,6 +257,11 @@ def detect_report(header_slugs):
     # Budget Intelligence "Campaign - Raw" export shape) — same report type
     if "campaign" in cols and "ad_group" not in cols and (cols & set(SHARE_SLUGS)):
         return "campaign_performance"
+    # MCC account-level daily-spend / "Pacing" export: a date + cost tagged by account,
+    # with no campaign / ad-group / keyword breakdown. Feeds daily pacing.
+    if "cost" in cols and (cols & (set(ACCOUNT_ID_SLUGS) | set(ACCOUNT_NAME_SLUGS))) \
+            and not (cols & {"campaign", "ad_group", "search_keyword", "search_term"}):
+        return "account_spend"
     return None
 
 
