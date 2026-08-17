@@ -675,6 +675,40 @@ export interface JobStatus {
   error?: string;
 }
 
+// ---- MCC (manager account) bulk upload ----
+export interface MccAccount {
+  key: string;
+  customer_id: string | null;
+  account_name: string | null;
+  rows: number;
+  reports: Record<string, number>;
+  client_id: string | null; // matched existing client, else null
+  status: "matched" | "new";
+  suggested_slug: string;
+}
+export interface MccPreview {
+  accounts: MccAccount[];
+  files: { file: string; report_type: string; has_account: boolean; rows: number }[];
+  unknown_files: string[];
+  batch_id: string;
+}
+export interface MccCommitEntry {
+  client_id?: string;
+  create?: boolean;
+  name?: string;
+  slug?: string;
+  customer_id?: string | null;
+}
+export interface MccCommitResult {
+  ingested: { client_id: string; report_type: string; rows: number; file: string }[];
+  skipped: { key: string; report_type: string; rows: number }[];
+}
+export interface MccStatus {
+  status: "processing" | "done" | "error";
+  result?: MccCommitResult;
+  error?: string;
+}
+
 // ---- Budget Intelligence: allocation ----
 export interface CurvesStatus {
   active: boolean;

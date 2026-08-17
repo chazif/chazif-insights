@@ -101,6 +101,30 @@ export async function uploadFiles(clientId: string, period: string, files: File[
 
 export const getUploadStatus = (jobId: string) => get<JobStatus>(`/api/upload/status/${jobId}`);
 
+// ---- MCC (manager account) bulk upload ----
+import type { MccPreview, MccCommitEntry, MccStatus } from "./types";
+
+async function multipart<T>(path: string, files: File[]): Promise<T> {
+  const fd = new FormData();
+  for (const f of files) fd.append("files", f);
+  const r = await fetch(path, { method: "POST", body: fd });
+  if (!r.ok) {
+    let detail = `HTTP ${r.status}`;
+    try {
+      detail = (await r.json())?.detail ?? detail;
+    } catch {
+      /* non-JSON */
+    }
+    throw new Error(detail);
+  }
+  return r.json() as Promise<T>;
+}
+
+export const mccPreview = (files: File[]) => multipart<MccPreview>("/api/upload/mcc/preview", files);
+export const mccCommit = (batchId: string, mapping: Record<string, MccCommitEntry>) =>
+  send<{ job_id: string; status: string }>("/api/upload/mcc/commit", "POST", { batch_id: batchId, mapping });
+export const getMccStatus = (jobId: string) => get<MccStatus>(`/api/upload/status/${jobId}`);
+
 // ---- budget intelligence: allocation ----
 import type { CurvesStatus, AllocRun, AllocResult, RunInput, SnapshotPoint, FitResult } from "./types";
 

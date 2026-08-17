@@ -253,7 +253,7 @@ token's MCC; Chiarelli's as pilot.
 |---|---|
 | Ingestion merge-by-window → `main` | Built + tested on `fix/ingest-merge-by-window`; PR to `main` awaiting user review/merge. After merge, also bring into `redesign` so both apps merge-on-upload. |
 | Simulator / curve-fitting UI | Budget Allocation is gated on fitted response curves; no UI exists to add simulator points. Unlocks end-to-end allocation runs. |
-| MCC bulk-account upload flow | Preview/commit endpoints exist; redesign UI not built (single-client upload IS built). |
+| ~~MCC bulk-account upload flow~~ | DONE — Upload Data has a This-client / MCC toggle; MCC mode previews accounts, maps each to an existing/new client, ingests. |
 | Prove · Client View | Last unbuilt nav view; confirm intended content first. |
 | Clear filters on client switch | A campaign/region filter from client A persists onto client B (shows empty data until reset). Small fix in ClientSwitcher/AppShell. |
 | Analyzer explicit `key=` args | Decision-system action identity currently falls back to module+title (stable today); explicit keys harden it. |
