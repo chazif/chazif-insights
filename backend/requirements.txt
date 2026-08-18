@@ -6,6 +6,7 @@ psycopg[binary]>=3.1
 anthropic>=0.40   # search-term relevance LLM (used only when ANTHROPIC_API_KEY is set)
 openpyxl>=3.1     # parse .xlsx budget-file uploads (CSV needs no extra deps)
 scipy>=1.11       # budget-intel curve fitting (imported lazily; only the fit endpoint needs it)
+google-ads>=25.1              # Google Ads API auto-pull (imported lazily; only nightly sync needs it)
 google-cloud-bigquery>=3.20   # analytics warehouse (used only when GCP_PROJECT/BQ_DATASET are set)
 sqlalchemy-bigquery>=1.11      # SQLAlchemy dialect for routing analytics reads to BigQuery
 google-cloud-bigquery-storage>=2.24   # fast (Arrow) result downloads for BigQuery reads

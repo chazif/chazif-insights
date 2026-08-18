@@ -291,6 +291,54 @@ def mcc_commit(body: dict, background: BackgroundTasks):
     return {"job_id": job_id, "status": "processing"}
 
 
+# ---- Google Ads API auto-pull -------------------------------------------
+@app.get("/api/adsapi/status")
+def adsapi_status():
+    """Whether the API sync is configured (which env vars are still missing — NAMES only,
+    never values) and which clients are syncable (have a google_customer_id)."""
+    from engine.adsapi import client as adsapi_client
+    clients = service.list_clients(engine=_engine)
+    return {
+        "configured": adsapi_client.credentials_configured(),
+        "missing_env": adsapi_client.missing_credentials(),
+        "clients": [{"client_id": c["client_id"], "name": c["name"],
+                     "customer_id": c.get("google_customer_id"),
+                     "syncable": bool(c.get("google_customer_id"))} for c in clients],
+    }
+
+
+@app.post("/api/adsapi/sync")
+def adsapi_sync(body: dict, background: BackgroundTasks):
+    """Kick a background pull for one client (body {"client_id": ...}) or all clients.
+    Returns a job_id to poll at /api/adsapi/sync/status/{job_id}."""
+    from engine.adsapi import client as adsapi_client, sync as adsapi_sync_mod
+    missing = adsapi_client.missing_credentials()
+    if missing:
+        raise HTTPException(400, "Google Ads API not configured; set env vars: " + ", ".join(missing))
+    client_id = (body or {}).get("client_id")
+    job_id = uuid.uuid4().hex[:12]
+    _JOBS[job_id] = {"status": "processing"}
+
+    def _pull_then_map():
+        if client_id:
+            result = adsapi_sync_mod.sync_one(_engine, client_id)
+            _sync_mappings(client_id)
+        else:
+            result = adsapi_sync_mod.sync_all(_engine)
+            _sync_mappings(*[s.get("client_id") for s in result.get("synced", [])])
+        return result
+    background.add_task(_run_job, job_id, _pull_then_map)
+    return {"job_id": job_id, "status": "processing"}
+
+
+@app.get("/api/adsapi/sync/status/{job_id}")
+def adsapi_sync_status(job_id: str):
+    j = _JOBS.get(job_id)
+    if not j:
+        raise HTTPException(404, "unknown or expired job")
+    return j
+
+
 @app.get("/api/inventory")
 def inventory(client: str = Query(...)):
     _safe_seg(client)
