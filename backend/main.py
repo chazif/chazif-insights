@@ -434,7 +434,7 @@ async def adsapi_validate_fields():
                 c = {"field": p, "exists": info is not None,
                      "selectable": bool(info and info["selectable"])}
                 if info:
-                    c["kind"] = "metric" if info["metric"] else "segment" if info["segment"] else "attribute"
+                    c["category"] = info["category"]
                     c["data_type"] = info["data_type"]
                 checks.append(c)
             problems = [c for c in checks if not c["exists"] or not c["selectable"]]

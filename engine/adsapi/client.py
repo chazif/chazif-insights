@@ -106,10 +106,10 @@ class GoogleAdsApiClient:
         exists and is selectable. No account or data needed; validates metric field names too."""
         svc = self._client.get_service("GoogleAdsFieldService")
         quoted = ",".join("'%s'" % n for n in field_names)
-        q = f"SELECT name, selectable, metric, segment, data_type WHERE name IN ({quoted})"
+        q = f"SELECT name, selectable, category, data_type WHERE name IN ({quoted})"
         found = {}
         for f in svc.search_google_ads_fields(query=q):
-            found[f.name] = {"selectable": bool(f.selectable), "metric": bool(f.metric),
-                             "segment": bool(f.segment),
+            found[f.name] = {"selectable": bool(f.selectable),
+                             "category": getattr(f.category, "name", str(f.category)),
                              "data_type": getattr(f.data_type, "name", str(f.data_type))}
         return found
