@@ -361,6 +361,25 @@ async def adsapi_preview(client: str = Query(...), report: str = Query("core")):
     return await run_in_threadpool(adsapi_sync_mod.preview_one, _engine, client, specs=specs)
 
 
+@app.get("/api/adsapi/accessible")
+async def adsapi_accessible():
+    """Diagnostic: which customer ids can these credentials reach, and what login-customer-id
+    (MCC) is configured. Read-only, no login-customer-id needed. Helps debug permission errors."""
+    from engine.adsapi import client as adsapi_client
+    missing = adsapi_client.missing_credentials()
+    if missing:
+        raise HTTPException(400, "Google Ads API not configured; set env vars: " + ", ".join(missing))
+
+    def _run():
+        try:
+            api = adsapi_client.GoogleAdsApiClient.from_env()
+            return {"login_customer_id": api.login_customer_id(),
+                    "accessible_customers": api.list_accessible_customers()}
+        except Exception as e:                       # never leak a secret value
+            return {"error": f"{type(e).__name__}: {e}"}
+    return await run_in_threadpool(_run)
+
+
 @app.get("/api/inventory")
 def inventory(client: str = Query(...)):
     _safe_seg(client)

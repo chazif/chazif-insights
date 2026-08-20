@@ -89,3 +89,14 @@ class GoogleAdsApiClient:
         for batch in service.search_stream(customer_id=_digits(customer_id), query=query):
             for row in batch.results:
                 yield _flatten(row, paths)
+
+    def list_accessible_customers(self):
+        """Customer ids the authenticated OAuth user can reach directly (usually the
+        manager accounts). A diagnostic for permission issues — needs no login-customer-id."""
+        svc = self._client.get_service("CustomerService")
+        resp = svc.list_accessible_customers()
+        return [rn.split("/")[-1] for rn in resp.resource_names]
+
+    def login_customer_id(self):
+        """The login-customer-id (MCC) currently configured on the client, or None."""
+        return getattr(self._client, "login_customer_id", None)
