@@ -339,26 +339,58 @@ def adsapi_sync_status(job_id: str):
     return j
 
 
-@app.get("/api/adsapi/preview")
-async def adsapi_preview(client: str = Query(...), report: str = Query("core")):
-    """Dry-run parity check: pull from the Google Ads API and return row counts + metric
-    totals WITHOUT writing anything to the database. `report` = a single report_type, "core"
-    (campaign_performance + account_spend — fast, best for a first parity check), or "all"."""
-    from engine.adsapi import client as adsapi_client, sync as adsapi_sync_mod
+def _resolve_specs(report):
     from engine.adsapi.reports import DEFAULT_SPECS, SPECS_BY_TYPE
+    if report == "all":
+        return DEFAULT_SPECS
+    if report == "core":
+        return [SPECS_BY_TYPE["campaign_performance"], SPECS_BY_TYPE["account_spend"]]
+    if report in SPECS_BY_TYPE:
+        return [SPECS_BY_TYPE[report]]
+    raise HTTPException(400, f"unknown report '{report}'; use one of: core, all, " + ", ".join(SPECS_BY_TYPE))
+
+
+@app.get("/api/adsapi/preview")
+async def adsapi_preview(client: str = Query(None), report: str = Query("core"),
+                         customer_id: str = Query(None)):
+    """Dry-run parity check: pull from the Google Ads API and return row counts + metric
+    totals WITHOUT writing anything to the database. Pass `client` (a client_id) OR
+    `customer_id` (an ad-hoc customer id, bypassing the client table). `report` = a single
+    report_type, "core" (campaign_performance + account_spend), or "all"."""
+    from engine.adsapi import client as adsapi_client, sync as adsapi_sync_mod
     missing = adsapi_client.missing_credentials()
     if missing:
         raise HTTPException(400, "Google Ads API not configured; set env vars: " + ", ".join(missing))
-    if report == "all":
-        specs = DEFAULT_SPECS
-    elif report == "core":
-        specs = [SPECS_BY_TYPE["campaign_performance"], SPECS_BY_TYPE["account_spend"]]
-    elif report in SPECS_BY_TYPE:
-        specs = [SPECS_BY_TYPE[report]]
-    else:
-        raise HTTPException(400, f"unknown report '{report}'; use one of: core, all, "
-                            + ", ".join(SPECS_BY_TYPE))
+    specs = _resolve_specs(report)
+    if customer_id:
+        adhoc = {"client_id": f"adhoc:{customer_id}", "google_customer_id": customer_id}
+        return await run_in_threadpool(adsapi_sync_mod.preview_client, adhoc, specs=specs)
+    if not client:
+        raise HTTPException(400, "pass either client=<client_id> or customer_id=<digits>")
     return await run_in_threadpool(adsapi_sync_mod.preview_one, _engine, client, specs=specs)
+
+
+@app.get("/api/adsapi/validate")
+async def adsapi_validate(customer_id: str = Query(None), report: str = Query("all")):
+    """Metric-free probe that confirms the live API accepts every report's resource + field
+    names. Runs against `customer_id` (defaults to the configured login-customer-id / MCC, the
+    account we know is reachable). Writes nothing. Metric fields aren't exercised here."""
+    from engine.adsapi import client as adsapi_client, sync as adsapi_sync_mod
+    missing = adsapi_client.missing_credentials()
+    if missing:
+        raise HTTPException(400, "Google Ads API not configured; set env vars: " + ", ".join(missing))
+    specs = _resolve_specs(report)
+
+    def _run():
+        try:
+            api = adsapi_client.GoogleAdsApiClient.from_env()
+            cid = customer_id or api.login_customer_id()
+            out = adsapi_sync_mod.validate_queries(cid, specs=specs, api=api)
+            out["customer_id"] = cid
+            return out
+        except Exception as e:
+            return {"error": f"{type(e).__name__}: {e}"}
+    return await run_in_threadpool(_run)
 
 
 @app.get("/api/adsapi/accessible")

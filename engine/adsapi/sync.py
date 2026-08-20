@@ -115,3 +115,34 @@ def preview_one(engine, client_id, **kw):
     if not client:
         return {"client_id": client_id, "error": "unknown client"}
     return preview_client(client, **kw)
+
+
+def _metric_free_query(spec, start, end, limit=1):
+    """A query with the metric columns removed (+ LIMIT) — validates that the resource and the
+    ENTITY/segment field names are accepted by the live API. Works even on a manager account,
+    which rejects metric requests, so it's usable when only the MCC is reachable."""
+    fields = [p for (p, _slug, _kind) in spec.fields if not p.startswith("metrics.")]
+    q = f"SELECT {', '.join(fields)} FROM {spec.resource}"
+    if spec.dated:
+        q += f" WHERE segments.date BETWEEN '{start:%Y-%m-%d}' AND '{end:%Y-%m-%d}'"
+    return q + f" LIMIT {limit}"
+
+
+def validate_queries(customer_id, *, specs=DEFAULT_SPECS, today=None, api=None):
+    """Run a metric-free probe of every report's query against `customer_id` to confirm the API
+    accepts each resource + non-metric field name. Metric fields aren't exercised here (a manager
+    account rejects metrics) — those get checked once a data-bearing account is reachable."""
+    start, end = pull_window(today)
+    api = api or GoogleAdsApiClient.from_env()
+    checks = []
+    for spec in specs:
+        try:
+            rows = list(api.stream(customer_id, _metric_free_query(spec, start, end)))
+            checks.append({"report_type": spec.report_type, "resource": spec.resource,
+                           "ok": True, "rows_seen": len(rows)})
+        except Exception as e:
+            checks.append({"report_type": spec.report_type, "resource": spec.resource,
+                           "ok": False, "error": f"{type(e).__name__}: {e}"})
+    return {"window": [start.isoformat(), end.isoformat()],
+            "note": "metric fields not exercised here (needs a non-manager account with data)",
+            "checks": checks}
