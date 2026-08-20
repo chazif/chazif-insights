@@ -149,3 +149,13 @@ DEFAULT_SPECS = [
 ]
 
 SPECS_BY_TYPE = {s.report_type: s for s in DEFAULT_SPECS}
+
+
+def all_field_paths():
+    """Every distinct GAQL field path across all specs, in first-seen order."""
+    seen = []
+    for spec in DEFAULT_SPECS:
+        for p in spec.paths():
+            if p not in seen:
+                seen.append(p)
+    return seen

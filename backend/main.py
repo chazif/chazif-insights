@@ -412,6 +412,39 @@ async def adsapi_accessible():
     return await run_in_threadpool(_run)
 
 
+@app.get("/api/adsapi/validate-fields")
+async def adsapi_validate_fields():
+    """Audit EVERY field name in the code (metrics included) against Google's schema via
+    GoogleAdsFieldService. No account/data needed. Reports any field that doesn't exist or
+    isn't selectable — the definitive check that our GAQL columns are all real."""
+    from engine.adsapi import client as adsapi_client
+    from engine.adsapi.reports import all_field_paths
+    missing = adsapi_client.missing_credentials()
+    if missing:
+        raise HTTPException(400, "Google Ads API not configured; set env vars: " + ", ".join(missing))
+
+    def _run():
+        try:
+            api = adsapi_client.GoogleAdsApiClient.from_env()
+            paths = all_field_paths()
+            found = api.validate_fields(paths)
+            checks = []
+            for p in paths:
+                info = found.get(p)
+                c = {"field": p, "exists": info is not None,
+                     "selectable": bool(info and info["selectable"])}
+                if info:
+                    c["kind"] = "metric" if info["metric"] else "segment" if info["segment"] else "attribute"
+                    c["data_type"] = info["data_type"]
+                checks.append(c)
+            problems = [c for c in checks if not c["exists"] or not c["selectable"]]
+            return {"total_fields": len(paths), "all_ok": not problems,
+                    "problems": problems, "checks": checks}
+        except Exception as e:
+            return {"error": f"{type(e).__name__}: {e}"}
+    return await run_in_threadpool(_run)
+
+
 @app.get("/api/inventory")
 def inventory(client: str = Query(...)):
     _safe_seg(client)

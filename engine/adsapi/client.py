@@ -100,3 +100,16 @@ class GoogleAdsApiClient:
     def login_customer_id(self):
         """The login-customer-id (MCC) currently configured on the client, or None."""
         return getattr(self._client, "login_customer_id", None)
+
+    def validate_fields(self, field_names):
+        """Look each field up in Google's schema (GoogleAdsFieldService) — confirms the name
+        exists and is selectable. No account or data needed; validates metric field names too."""
+        svc = self._client.get_service("GoogleAdsFieldService")
+        quoted = ",".join("'%s'" % n for n in field_names)
+        q = f"SELECT name, selectable, metric, segment, data_type WHERE name IN ({quoted})"
+        found = {}
+        for f in svc.search_google_ads_fields(query=q):
+            found[f.name] = {"selectable": bool(f.selectable), "metric": bool(f.metric),
+                             "segment": bool(f.segment),
+                             "data_type": getattr(f.data_type, "name", str(f.data_type))}
+        return found
