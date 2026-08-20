@@ -71,3 +71,47 @@ def sync_one(engine, client_id, **kw):
     if not client:
         return {"client_id": client_id, "error": "unknown client"}
     return sync_client(engine, client, **kw)
+
+
+# --- dry run / parity check: pull + summarize, but WRITE NOTHING -------------------------
+_TOTAL_SLUGS = ("clicks", "impr", "cost", "conversions", "conv_value")
+
+
+def preview_client(client, *, specs=DEFAULT_SPECS, today=None, api=None, sample=2):
+    """Pull each report for the window and return row counts + metric totals (and a couple of
+    sample rows) WITHOUT touching the database. Used to confirm the API connection and check
+    parity against Google before we trust the pipeline — safe to run against a production env."""
+    cid = client.get("google_customer_id")
+    if not cid:
+        return {"client_id": client.get("client_id"), "skipped": "no google_customer_id", "reports": []}
+    start, end = pull_window(today)
+    api = api or GoogleAdsApiClient.from_env()
+    reports = []
+    for spec in specs:
+        try:
+            n, totals, samples = 0, {k: 0.0 for k in _TOTAL_SLUGS}, []
+            for raw in api.stream(cid, build_query(spec, start, end)):
+                row = convert_row(spec, raw)
+                n += 1
+                for k in _TOTAL_SLUGS:
+                    v = row.get(k)
+                    if v is not None:
+                        try:
+                            totals[k] += float(v)
+                        except (TypeError, ValueError):
+                            pass
+                if len(samples) < sample:
+                    samples.append(row)
+            reports.append({"report_type": spec.report_type, "rows": n,
+                            "totals": {k: round(v, 2) for k, v in totals.items()}, "sample": samples})
+        except Exception as e:                        # keep going; never leak a credential
+            reports.append({"report_type": spec.report_type, "error": f"{type(e).__name__}: {e}"})
+    return {"client_id": client["client_id"], "customer_id": cid,
+            "window": [start.isoformat(), end.isoformat()], "wrote_to_db": False, "reports": reports}
+
+
+def preview_one(engine, client_id, **kw):
+    client = get_client(engine, client_id)
+    if not client:
+        return {"client_id": client_id, "error": "unknown client"}
+    return preview_client(client, **kw)

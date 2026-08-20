@@ -339,6 +339,28 @@ def adsapi_sync_status(job_id: str):
     return j
 
 
+@app.get("/api/adsapi/preview")
+async def adsapi_preview(client: str = Query(...), report: str = Query("core")):
+    """Dry-run parity check: pull from the Google Ads API and return row counts + metric
+    totals WITHOUT writing anything to the database. `report` = a single report_type, "core"
+    (campaign_performance + account_spend — fast, best for a first parity check), or "all"."""
+    from engine.adsapi import client as adsapi_client, sync as adsapi_sync_mod
+    from engine.adsapi.reports import DEFAULT_SPECS, SPECS_BY_TYPE
+    missing = adsapi_client.missing_credentials()
+    if missing:
+        raise HTTPException(400, "Google Ads API not configured; set env vars: " + ", ".join(missing))
+    if report == "all":
+        specs = DEFAULT_SPECS
+    elif report == "core":
+        specs = [SPECS_BY_TYPE["campaign_performance"], SPECS_BY_TYPE["account_spend"]]
+    elif report in SPECS_BY_TYPE:
+        specs = [SPECS_BY_TYPE[report]]
+    else:
+        raise HTTPException(400, f"unknown report '{report}'; use one of: core, all, "
+                            + ", ".join(SPECS_BY_TYPE))
+    return await run_in_threadpool(adsapi_sync_mod.preview_one, _engine, client, specs=specs)
+
+
 @app.get("/api/inventory")
 def inventory(client: str = Query(...)):
     _safe_seg(client)
