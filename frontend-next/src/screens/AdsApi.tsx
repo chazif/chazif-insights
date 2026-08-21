@@ -86,6 +86,9 @@ function ClientRow({ c }: { c: AdsApiClientStatus }) {
           <div className="font-mono text-[11px] text-text-muted">{c.customer_id ?? "no customer id"}</div>
         </div>
         {c.syncable ? <Pill tone="pos">syncable</Pill> : <Pill tone="warn">no customer id</Pill>}
+        <span className="text-[11px] text-text-muted">
+          {c.last_synced ? `synced ${new Date(c.last_synced).toLocaleDateString()}` : "never synced"}
+        </span>
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => previewM.mutate()}

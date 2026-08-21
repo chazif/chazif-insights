@@ -87,6 +87,7 @@ export interface AdsApiClientStatus {
   name: string;
   customer_id?: string | null;
   syncable: boolean;
+  last_synced?: string | null;
 }
 export interface AdsApiStatus {
   configured: boolean;

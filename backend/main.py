@@ -299,15 +299,25 @@ def mcc_commit(body: dict, background: BackgroundTasks):
 @app.get("/api/adsapi/status")
 def adsapi_status():
     """Whether the API sync is configured (which env vars are still missing — NAMES only,
-    never values) and which clients are syncable (have a google_customer_id)."""
+    never values), which clients are syncable (have a google_customer_id), and when each was
+    last pulled from the API (freshness)."""
     from engine.adsapi import client as adsapi_client
+    from sqlalchemy import select, func
+    from engine.ingest.store import uploads
     clients = service.list_clients(engine=_engine)
+    # latest API-sourced upload per client (source_file is stamped "adsapi:<report>")
+    with _engine.connect() as c:
+        last_synced = dict(c.execute(
+            select(uploads.c.client_id, func.max(uploads.c.uploaded_at))
+            .where(uploads.c.source_file.like("adsapi:%")).group_by(uploads.c.client_id)).all())
     return {
         "configured": adsapi_client.credentials_configured(),
         "missing_env": adsapi_client.missing_credentials(),
         "clients": [{"client_id": c["client_id"], "name": c["name"],
                      "customer_id": c.get("google_customer_id"),
-                     "syncable": bool(c.get("google_customer_id"))} for c in clients],
+                     "syncable": bool(c.get("google_customer_id")),
+                     "last_synced": (str(last_synced[c["client_id"]])
+                                     if last_synced.get(c["client_id"]) else None)} for c in clients],
     }
 
 
