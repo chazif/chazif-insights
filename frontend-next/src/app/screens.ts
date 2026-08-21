@@ -31,6 +31,7 @@ import { CampaignMapping } from "../screens/CampaignMapping";
 import { Clients } from "../screens/Clients";
 import { DataInventory } from "../screens/DataInventory";
 import { UploadData } from "../screens/UploadData";
+import { AdsApi } from "../screens/AdsApi";
 
 // slug → screen component. Real screens register here as they're built; every slug not
 // present falls back to the Placeholder.
@@ -68,5 +69,6 @@ export const SCREENS: Record<string, ComponentType> = {
   "campaign-mapping": CampaignMapping,
   "data-inventory": DataInventory,
   "upload-data": UploadData,
+  "ads-api": AdsApi,
   clients: Clients,
 };

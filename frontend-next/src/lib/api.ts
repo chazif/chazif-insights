@@ -81,6 +81,47 @@ import type { ClientConfig, MappingsResponse, CampaignMapping, Inventory, JobSta
 export const getInventory = (clientId: string) =>
   get<Inventory>(`/api/inventory?client=${encodeURIComponent(clientId)}`);
 
+// ---- Google Ads API auto-pull ----
+export interface AdsApiClientStatus {
+  client_id: string;
+  name: string;
+  customer_id?: string | null;
+  syncable: boolean;
+}
+export interface AdsApiStatus {
+  configured: boolean;
+  missing_env: string[];
+  clients: AdsApiClientStatus[];
+}
+export interface AdsApiReportResult {
+  report_type: string;
+  rows?: number;
+  totals?: Record<string, number>;
+  error?: string;
+}
+export interface AdsApiSyncResult {
+  client_id?: string;
+  customer_id?: string;
+  window?: string[];
+  wrote_to_db?: boolean;
+  skipped?: string;
+  error?: string;
+  reports?: AdsApiReportResult[];
+  synced?: AdsApiSyncResult[];
+}
+export interface AdsApiJob {
+  status: "processing" | "done" | "error";
+  result?: AdsApiSyncResult;
+  error?: string;
+}
+
+export const getAdsApiStatus = () => get<AdsApiStatus>("/api/adsapi/status");
+export const syncAdsApi = (clientId?: string) =>
+  send<{ job_id: string; status: string }>("/api/adsapi/sync", "POST", clientId ? { client_id: clientId } : {});
+export const getAdsApiJob = (jobId: string) => get<AdsApiJob>(`/api/adsapi/sync/status/${jobId}`);
+export const previewAdsApi = (clientId: string, report = "core") =>
+  get<AdsApiSyncResult>(`/api/adsapi/preview?client=${encodeURIComponent(clientId)}&report=${report}`);
+
 export async function uploadFiles(clientId: string, period: string, files: File[]): Promise<{ job_id: string; status: string }> {
   const fd = new FormData();
   fd.append("client", clientId);
