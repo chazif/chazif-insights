@@ -89,14 +89,14 @@ def sync_one(engine, client_id, **kw):
 _TOTAL_SLUGS = ("clicks", "impr", "cost", "conversions", "conv_value")
 
 
-def preview_client(client, *, specs=DEFAULT_SPECS, today=None, api=None, sample=2):
+def preview_client(client, *, specs=DEFAULT_SPECS, today=None, window=None, api=None, sample=2):
     """Pull each report for the window and return row counts + metric totals (and a couple of
-    sample rows) WITHOUT touching the database. Used to confirm the API connection and check
-    parity against Google before we trust the pipeline — safe to run against a production env."""
+    sample rows) WITHOUT touching the database. `window` (start, end) overrides the default
+    rolling window — used to probe an account's history. Safe to run against a production env."""
     cid = client.get("google_customer_id")
     if not cid:
         return {"client_id": client.get("client_id"), "skipped": "no google_customer_id", "reports": []}
-    start, end = pull_window(today)
+    start, end = window if window else pull_window(today)
     api = api or GoogleAdsApiClient.from_env()
     reports = []
     for spec in specs:

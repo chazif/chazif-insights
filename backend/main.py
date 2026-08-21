@@ -397,22 +397,31 @@ def _resolve_specs(report):
 
 @app.get("/api/adsapi/preview")
 async def adsapi_preview(client: str = Query(None), report: str = Query("core"),
-                         customer_id: str = Query(None)):
+                         customer_id: str = Query(None),
+                         date_from: str = Query(None, alias="from"), date_to: str = Query(None, alias="to")):
     """Dry-run parity check: pull from the Google Ads API and return row counts + metric
     totals WITHOUT writing anything to the database. Pass `client` (a client_id) OR
     `customer_id` (an ad-hoc customer id, bypassing the client table). `report` = a single
-    report_type, "core" (campaign_performance + account_spend), or "all"."""
+    report_type, "core" (campaign_performance + account_spend), or "all". Optional from/to
+    (YYYY-MM-DD) override the rolling window — e.g. to probe a closed account's history."""
+    import datetime as _dt
     from engine.adsapi import client as adsapi_client, sync as adsapi_sync_mod
     missing = adsapi_client.missing_credentials()
     if missing:
         raise HTTPException(400, "Google Ads API not configured; set env vars: " + ", ".join(missing))
     specs = _resolve_specs(report)
+    window = None
+    if date_from or date_to:
+        try:
+            window = (_dt.date.fromisoformat(date_from), _dt.date.fromisoformat(date_to))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "from and to must both be YYYY-MM-DD")
     if customer_id:
         adhoc = {"client_id": f"adhoc:{customer_id}", "google_customer_id": customer_id}
-        return await run_in_threadpool(adsapi_sync_mod.preview_client, adhoc, specs=specs)
+        return await run_in_threadpool(lambda: adsapi_sync_mod.preview_client(adhoc, specs=specs, window=window))
     if not client:
         raise HTTPException(400, "pass either client=<client_id> or customer_id=<digits>")
-    return await run_in_threadpool(adsapi_sync_mod.preview_one, _engine, client, specs=specs)
+    return await run_in_threadpool(lambda: adsapi_sync_mod.preview_one(_engine, client, specs=specs, window=window))
 
 
 @app.get("/api/adsapi/validate")
