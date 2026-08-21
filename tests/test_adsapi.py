@@ -122,6 +122,21 @@ def test_flatten_and_enum_name():
                     "metrics.cost_micros": 2_500_000, "segments.date": "2026-08-09"}
 
 
+def test_coerce_protoplus_enum_is_int_subclass():
+    # proto-plus enums subclass int but carry .name — _coerce must return the NAME, not the int.
+    class FakeEnum(int):
+        def __new__(cls, val, nm):
+            o = int.__new__(cls, val); o._nm = nm; return o
+        @property
+        def name(self):
+            return self._nm
+    assert api_client._coerce(FakeEnum(8, "SUNDAY")) == "SUNDAY"
+    assert api_client._coerce(5) == 5 and api_client._coerce("x") == "x"
+    # end-to-end: a day-of-week enum flows through to a title-cased day name
+    from engine.adsapi.reports import _conv
+    assert _conv("enum_title", api_client._coerce(FakeEnum(8, "SUNDAY"))) == "Sunday"
+
+
 def test_paths_from_query():
     q = build_query(SPECS_BY_TYPE["ad_group_performance"], datetime.date(2026, 8, 1), datetime.date(2026, 9, 1))
     assert api_client._paths_from_query(q)[:2] == ["campaign.name", "ad_group.name"]

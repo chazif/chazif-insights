@@ -48,12 +48,18 @@ def _asset_text(x):
 
 def _coerce(v):
     """API field value -> JSON-ish primitive. Enums -> their name (SEARCH); repeated fields
-    (RSA headlines/descriptions, final URLs) -> a list of primitives (asset .text extracted)."""
-    if v is None or isinstance(v, (str, int, float, bool)):
-        return v
-    name = getattr(v, "name", None)     # proto-plus enum (has .name, not a sequence)
+    (RSA headlines/descriptions, final URLs) -> a list of primitives (asset .text extracted).
+
+    Enum check MUST come before the int check: proto-plus enums subclass int, so testing
+    isinstance(int) first would return the raw enum number (e.g. day-of-week 8) instead of
+    its name (SUNDAY). Real day-of-week data surfaced this."""
+    if v is None:
+        return None
+    name = getattr(v, "name", None)     # proto-plus enum (int subclass) -> name, checked FIRST
     if name is not None:
         return name
+    if isinstance(v, (str, int, float, bool)):
+        return v
     if hasattr(v, "__iter__") and not isinstance(v, (str, bytes)):   # repeated field
         try:
             return [_asset_text(x) for x in v]
