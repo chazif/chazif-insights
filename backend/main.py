@@ -301,7 +301,9 @@ def adsapi_status():
     """Whether the API sync is configured (which env vars are still missing — NAMES only,
     never values), which clients are syncable (have a google_customer_id), and when each was
     last pulled from the API (freshness)."""
+    import datetime as _dt
     from engine.adsapi import client as adsapi_client
+    from engine.adsapi.schedule import next_cron_run
     from sqlalchemy import select, func
     from engine.ingest.store import uploads
     clients = service.list_clients(engine=_engine)
@@ -310,9 +312,17 @@ def adsapi_status():
         last_synced = dict(c.execute(
             select(uploads.c.client_id, func.max(uploads.c.uploaded_at))
             .where(uploads.c.source_file.like("adsapi:%")).group_by(uploads.c.client_id)).all())
+    # Automatic-sync schedule: mirror the Railway cron by setting ADSAPI_CRON_SCHEDULE to the
+    # same expression. next_sync is computed in UTC for the UI countdown.
+    schedule = os.environ.get("ADSAPI_CRON_SCHEDULE")
+    nxt = next_cron_run(schedule, _dt.datetime.utcnow()) if schedule else None
+    all_last = [v for v in last_synced.values() if v]
     return {
         "configured": adsapi_client.credentials_configured(),
         "missing_env": adsapi_client.missing_credentials(),
+        "schedule": schedule,
+        "next_sync": (nxt.replace(microsecond=0).isoformat() + "Z") if nxt else None,
+        "last_sync": (str(max(all_last)) if all_last else None),
         "clients": [{"client_id": c["client_id"], "name": c["name"],
                      "customer_id": c.get("google_customer_id"),
                      "syncable": bool(c.get("google_customer_id")),

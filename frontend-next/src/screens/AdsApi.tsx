@@ -12,6 +12,48 @@ import { Loading, ErrorState } from "../components/ui/States";
 const pretty = (slug: string) => slug.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 const btn = "rounded-[7px] px-3 py-1.5 text-[12.5px] font-medium disabled:opacity-50";
 
+function useCountdown(target?: string | null) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!target) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [target]);
+  if (!target) return null;
+  const ms = new Date(target).getTime() - now;
+  if (ms <= 0) return "running now…";
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${m}m ${sec}s` : `${m}m ${sec}s`;
+}
+
+function AutomaticSync({ schedule, nextSync, lastSync }: { schedule?: string | null; nextSync?: string | null; lastSync?: string | null }) {
+  const countdown = useCountdown(nextSync);
+  return (
+    <Panel title="Automatic sync" sub={schedule ? "Runs on a schedule (Railway cron)" : "Not scheduled yet"} className="mt-6">
+      {schedule ? (
+        <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-text-muted">Next automatic sync</div>
+            <div className="text-[22px] font-semibold tabular-nums text-ink">{countdown ?? "—"}</div>
+            {nextSync && <div className="text-[11px] text-text-muted">{new Date(nextSync).toLocaleString()} · schedule {schedule}</div>}
+          </div>
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-text-muted">Last sync</div>
+            <div className="text-[15px] font-medium">{lastSync ? new Date(lastSync).toLocaleString() : "never"}</div>
+          </div>
+        </div>
+      ) : (
+        <p className="text-[12.5px] text-text-tertiary">
+          A Railway cron is running the pull, but the app doesn’t know its schedule yet. Set the
+          <span className="mx-1 rounded bg-rule px-1 font-mono text-[11.5px]">ADSAPI_CRON_SCHEDULE</span>
+          environment variable to the same cron expression you set in Railway (e.g. <span className="font-mono">0 6 * * *</span>) to show the countdown here.
+        </p>
+      )}
+    </Panel>
+  );
+}
+
 function Reports({ reports }: { reports?: AdsApiReportResult[] }) {
   if (!reports?.length) return null;
   return (
@@ -158,6 +200,8 @@ export function AdsApi() {
           </div>
         )}
       </Panel>
+
+      <AutomaticSync schedule={data.schedule} nextSync={data.next_sync} lastSync={data.last_sync} />
 
       <div className="mt-6 flex items-center gap-3">
         <h2 className="text-[16px] font-semibold">Clients</h2>

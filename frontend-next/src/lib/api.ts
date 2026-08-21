@@ -92,6 +92,9 @@ export interface AdsApiClientStatus {
 export interface AdsApiStatus {
   configured: boolean;
   missing_env: string[];
+  schedule?: string | null;
+  next_sync?: string | null;
+  last_sync?: string | null;
   clients: AdsApiClientStatus[];
 }
 export interface AdsApiReportResult {

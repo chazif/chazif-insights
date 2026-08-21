@@ -161,6 +161,20 @@ def test_sync_client_ingests_and_preserves_history(engine):
     assert aug == 111.0   # window rows were replaced with the restated values
 
 
+def test_next_cron_run():
+    from engine.adsapi.schedule import next_cron_run
+    now = datetime.datetime(2026, 8, 21, 10, 30)      # a Friday
+    # daily 06:00 -> next is tomorrow 06:00
+    assert next_cron_run("0 6 * * *", now) == datetime.datetime(2026, 8, 22, 6, 0)
+    # daily 18:00 -> later the same day
+    assert next_cron_run("0 18 * * *", now) == datetime.datetime(2026, 8, 21, 18, 0)
+    # every 15 minutes -> 10:45
+    assert next_cron_run("*/15 * * * *", now) == datetime.datetime(2026, 8, 21, 10, 45)
+    # Mondays 09:00 (cron dow 1) -> Mon 2026-08-24
+    assert next_cron_run("0 9 * * 1", now) == datetime.datetime(2026, 8, 24, 9, 0)
+    assert next_cron_run("bad", now) is None and next_cron_run("", now) is None
+
+
 def test_backfill_window():
     # a rolling year through today, aligned to the first of the month
     assert backfill_window(12, datetime.date(2026, 8, 21)) == (datetime.date(2025, 9, 1), datetime.date(2026, 8, 21))
