@@ -42,8 +42,26 @@ async function send<T>(path: string, method: "POST" | "PATCH" | "PUT", body: unk
   return r.json() as Promise<T>;
 }
 
+async function del<T>(path: string): Promise<T> {
+  const r = await fetch(path, { method: "DELETE", headers: { Accept: "application/json" } });
+  if (!r.ok) {
+    let detail = `HTTP ${r.status}`;
+    try {
+      detail = (await r.json())?.detail ?? detail;
+    } catch {
+      /* non-JSON */
+    }
+    throw new Error(detail);
+  }
+  return r.json() as Promise<T>;
+}
+
 export const getHealth = () => get<Health>("/api/health");
 export const getClients = () => get<Client[]>("/api/clients");
+export const addClient = (name: string, googleCustomerId?: string) =>
+  send<Client>("/api/clients", "POST", googleCustomerId ? { name, google_customer_id: googleCustomerId } : { name });
+export const deleteClient = (clientId: string) =>
+  del<{ deleted: string }>(`/api/clients/${encodeURIComponent(clientId)}`);
 
 export function getBundle(clientId: string, params: import("./types").BundleParams = {}) {
   const sp = new URLSearchParams({ client: clientId });

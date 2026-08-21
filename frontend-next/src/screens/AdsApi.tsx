@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  getAdsApiStatus, syncAdsApi, getAdsApiJob, previewAdsApi, backfillAdsApi,
+  getAdsApiStatus, syncAdsApi, getAdsApiJob, previewAdsApi, backfillAdsApi, addClient, deleteClient,
   type AdsApiClientStatus, type AdsApiReportResult, type AdsApiSyncResult,
 } from "../lib/api";
 import { num } from "../lib/format";
@@ -115,6 +115,7 @@ function ClientRow({ c }: { c: AdsApiClientStatus }) {
 
   const previewM = useMutation({ mutationFn: () => previewAdsApi(c.client_id, "core"), onSuccess: (r) => { setJobId(null); setPreview(r); } });
   const backfill = useMutation({ mutationFn: () => backfillAdsApi(c.client_id, 12), onSuccess: (r) => { setPreview(null); setJobId(r.job_id); } });
+  const remove = useMutation({ mutationFn: () => deleteClient(c.client_id), onSuccess: () => qc.invalidateQueries({ queryKey: ["adsapi-status"] }) });
 
   const syncing = sync.isPending || backfill.isPending || job.data?.status === "processing";
   const syncResult = done ? job.data?.result : undefined;
@@ -154,8 +155,17 @@ function ClientRow({ c }: { c: AdsApiClientStatus }) {
           >
             {syncing ? "Syncing…" : "Sync now"}
           </button>
+          <button
+            onClick={() => { if (window.confirm(`Remove ${c.name} and all its data from this project?`)) remove.mutate(); }}
+            disabled={remove.isPending || syncing}
+            className={`${btn} text-text-muted hover:text-negative`}
+            title="Remove this account from the project"
+          >
+            {remove.isPending ? "Removing…" : "Remove"}
+          </button>
         </div>
       </div>
+      {remove.isError && <div className="mt-2 text-[12px] text-negative">{(remove.error as Error).message}</div>}
 
       {sync.isError && <div className="mt-2 text-[12px] text-negative">{(sync.error as Error).message}</div>}
       {previewM.isError && <div className="mt-2 text-[12px] text-negative">{(previewM.error as Error).message}</div>}
@@ -163,6 +173,33 @@ function ClientRow({ c }: { c: AdsApiClientStatus }) {
       {syncResult && <ResultBlock res={syncResult} />}
       {preview && <ResultBlock res={preview} />}
     </div>
+  );
+}
+
+function AddAccount() {
+  const qc = useQueryClient();
+  const [name, setName] = useState("");
+  const [cid, setCid] = useState("");
+  const add = useMutation({
+    mutationFn: () => addClient(name.trim(), cid.replace(/\D/g, "") || undefined),
+    onSuccess: () => { setName(""); setCid(""); qc.invalidateQueries({ queryKey: ["adsapi-status"] }); },
+  });
+  const input = "rounded-[7px] border border-border-strong bg-transparent px-2.5 py-1.5 text-[12.5px] focus:border-ink focus:outline-none";
+  return (
+    <Panel title="Add an account" sub="Enter a Google Ads account you manage under your MCC" className="mt-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <input className={`${input} min-w-[200px] flex-1`} placeholder="Account name" value={name} onChange={(e) => setName(e.target.value)} />
+        <input className={`${input} w-[190px]`} placeholder="Customer ID (digits)" value={cid} onChange={(e) => setCid(e.target.value)} />
+        <button
+          onClick={() => add.mutate()}
+          disabled={!name.trim() || !cid.replace(/\D/g, "") || add.isPending}
+          className={`${btn} bg-ink text-white hover:opacity-90`}
+        >
+          {add.isPending ? "Adding…" : "Add account"}
+        </button>
+        {add.isError && <span className="text-[12px] text-negative">{(add.error as Error).message}</span>}
+      </div>
+    </Panel>
   );
 }
 
@@ -215,6 +252,8 @@ export function AdsApi() {
       </div>
       {syncAll.isError && <div className="mt-2 text-[12px] text-negative">{(syncAll.error as Error).message}</div>}
       {syncAll.data && <div className="mt-2 text-[12px] text-text-muted">Started background sync for all syncable clients.</div>}
+
+      <AddAccount />
 
       <div className="mt-3 space-y-2.5">
         {data.clients.map((c) => <ClientRow key={c.client_id} c={c} />)}

@@ -150,6 +150,16 @@ def clients_create(body: ClientCreate):
         raise HTTPException(409, str(e))
 
 
+@app.delete("/api/clients/{client_id}")
+def clients_delete(client_id: str):
+    """Permanently remove a client and all its data from this project's database."""
+    if service.get_client(_engine, client_id) is None:
+        raise HTTPException(404, f"unknown client '{client_id}'")
+    result = service.delete_client(client_id, engine=_engine)
+    _bundle_cache_clear()
+    return result
+
+
 @app.get("/api/clients/{client_id}/config")
 def client_config_get(client_id: str):
     cfg = service.get_config(client_id, engine=_engine)

@@ -3,8 +3,9 @@
 Plain functions so they're verifiable without a running server."""
 import datetime, re, os, glob
 from collections import defaultdict
-from sqlalchemy import select, func, insert, update
+from sqlalchemy import select, func, insert, update, inspect
 from .store import get_engine, init_db, clients, uploads, raw_rows, term_relevance
+from .store import metadata as _ingest_md
 from .parser import EXPECTED_REPORTS, parse_csv, account_cols, date_column, infer_date_order
 from .load import load_folder, replace_report, replace_report_bq
 from ..warehouse import bq
@@ -210,6 +211,31 @@ def update_config(client_id, payload, engine=None):
         c.execute(update(clients).where(clients.c.client_id == client_id).values(config=stored))
         c.execute(term_relevance.delete().where(term_relevance.c.client_id == client_id))
     return merged(stored)
+
+
+def delete_client(client_id, engine=None):
+    """Permanently remove a client and ALL its data across every store (ingest uploads/raw_rows/
+    QS history/term relevance, budget-intel, decisions). Child rows before parents (FK-safe);
+    tables absent from this DB are skipped. Returns the removed client_id."""
+    engine = engine or get_engine(); init_db(engine)
+    metadatas = [_ingest_md]
+    try:
+        from ..budget_intel import tables as _bi
+        metadatas.append(_bi.metadata)
+    except Exception:   # noqa: BLE001 — optional store
+        pass
+    try:
+        from ..decisions import tables as _dec
+        metadatas.append(_dec.metadata)
+    except Exception:   # noqa: BLE001
+        pass
+    with engine.begin() as c:
+        insp = inspect(c)
+        for md in metadatas:
+            for t in reversed(md.sorted_tables):        # children first (intra-store FKs)
+                if "client_id" in t.c and insp.has_table(t.name):
+                    c.execute(t.delete().where(t.c.client_id == client_id))
+    return {"deleted": client_id}
 
 
 def inventory(client_id, engine=None):
