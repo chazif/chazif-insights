@@ -13,7 +13,7 @@ from engine.ingest import service
 from engine.adsapi.window import pull_window
 from engine.adsapi.reports import convert_row, build_query, SPECS_BY_TYPE, _conv
 from engine.adsapi import client as api_client
-from engine.adsapi.sync import sync_client
+from engine.adsapi.sync import sync_client, backfill_window
 
 
 # --- window: first day of LAST month -> today -------------------------------------------
@@ -159,6 +159,29 @@ def test_sync_client_ingests_and_preserves_history(engine):
     with engine.connect() as c:
         aug = c.execute(select(raw_rows.c.cost).where(raw_rows.c.date_norm == datetime.date(2026, 8, 10))).scalar()
     assert aug == 111.0   # window rows were replaced with the restated values
+
+
+def test_backfill_window():
+    # a rolling year through today, aligned to the first of the month
+    assert backfill_window(12, datetime.date(2026, 8, 21)) == (datetime.date(2025, 9, 1), datetime.date(2026, 8, 21))
+    assert backfill_window(1, datetime.date(2026, 8, 21)) == (datetime.date(2026, 8, 1), datetime.date(2026, 8, 21))
+    # crosses the year boundary
+    assert backfill_window(6, datetime.date(2026, 2, 10)) == (datetime.date(2025, 9, 1), datetime.date(2026, 2, 10))
+
+
+def test_sync_client_window_override_backfills_history(engine):
+    # a backfill window pulls older months without disturbing the recent rolling window.
+    service.create_client("Acme", client_id="acme", engine=engine, google_customer_id="4631945864")
+    client = service.get_client(engine, "acme")
+    spec = SPECS_BY_TYPE["account_spend"]
+    api = FakeApi({"customer": _account_spend_rows({"2026-03-15": 50.0, "2026-05-20": 70.0})})
+    out = sync_client(engine, client, specs=[spec], window=(datetime.date(2026, 3, 1), datetime.date(2026, 5, 31)), api=api)
+    assert out["window"] == ["2026-03-01", "2026-05-31"]
+    assert out["reports"] == [{"report_type": "account_spend", "rows": 2}]
+    with engine.connect() as c:
+        got = sorted(str(d) for d in c.execute(
+            select(raw_rows.c.date_norm).where(raw_rows.c.report_type == "account_spend")).scalars())
+    assert got == ["2026-03-15", "2026-05-20"]
 
 
 def test_sync_client_skips_without_customer_id(engine):

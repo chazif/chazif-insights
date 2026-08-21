@@ -335,6 +335,37 @@ def adsapi_sync(body: dict, background: BackgroundTasks):
     return {"job_id": job_id, "status": "processing"}
 
 
+@app.post("/api/adsapi/backfill")
+def adsapi_backfill(body: dict, background: BackgroundTasks):
+    """Historical backfill: pull a longer window (body {"months": 12}) for one client
+    ({"client_id": ...}) or all. Merge-by-window fills in older history without disturbing the
+    recent rolling window. Returns a job_id to poll at /api/adsapi/sync/status/{job_id}."""
+    from engine.adsapi import client as adsapi_client, sync as adsapi_sync_mod
+    missing = adsapi_client.missing_credentials()
+    if missing:
+        raise HTTPException(400, "Google Ads API not configured; set env vars: " + ", ".join(missing))
+    client_id = (body or {}).get("client_id")
+    try:
+        months = max(1, min(36, int((body or {}).get("months", 12))))   # cap at 3 years
+    except (TypeError, ValueError):
+        raise HTTPException(400, "months must be an integer")
+    window = adsapi_sync_mod.backfill_window(months)
+    job_id = uuid.uuid4().hex[:12]
+    _JOBS[job_id] = {"status": "processing"}
+
+    def _backfill_then_map():
+        if client_id:
+            result = adsapi_sync_mod.sync_one(_engine, client_id, window=window)
+            _sync_mappings(client_id)
+        else:
+            result = adsapi_sync_mod.sync_all(_engine, window=window)
+            _sync_mappings(*[s.get("client_id") for s in result.get("synced", [])])
+        return result
+    background.add_task(_run_job, job_id, _backfill_then_map)
+    return {"job_id": job_id, "status": "processing", "months": months,
+            "window": [window[0].isoformat(), window[1].isoformat()]}
+
+
 @app.get("/api/adsapi/sync/status/{job_id}")
 def adsapi_sync_status(job_id: str):
     j = _JOBS.get(job_id)

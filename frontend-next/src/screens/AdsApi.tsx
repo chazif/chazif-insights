@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  getAdsApiStatus, syncAdsApi, getAdsApiJob, previewAdsApi,
+  getAdsApiStatus, syncAdsApi, getAdsApiJob, previewAdsApi, backfillAdsApi,
   type AdsApiClientStatus, type AdsApiReportResult, type AdsApiSyncResult,
 } from "../lib/api";
 import { num } from "../lib/format";
@@ -72,8 +72,9 @@ function ClientRow({ c }: { c: AdsApiClientStatus }) {
   }, [done, c.client_id, qc]);
 
   const previewM = useMutation({ mutationFn: () => previewAdsApi(c.client_id, "core"), onSuccess: (r) => { setJobId(null); setPreview(r); } });
+  const backfill = useMutation({ mutationFn: () => backfillAdsApi(c.client_id, 12), onSuccess: (r) => { setPreview(null); setJobId(r.job_id); } });
 
-  const syncing = sync.isPending || job.data?.status === "processing";
+  const syncing = sync.isPending || backfill.isPending || job.data?.status === "processing";
   const syncResult = done ? job.data?.result : undefined;
   const jobFailed = job.data?.status === "error";
 
@@ -92,6 +93,14 @@ function ClientRow({ c }: { c: AdsApiClientStatus }) {
             className={`${btn} border border-border-strong hover:border-ink`}
           >
             {previewM.isPending ? "Previewing…" : "Preview"}
+          </button>
+          <button
+            onClick={() => backfill.mutate()}
+            disabled={!c.syncable || syncing || previewM.isPending}
+            className={`${btn} border border-border-strong hover:border-ink`}
+            title="Pull the last 12 months of history"
+          >
+            Backfill 12mo
           </button>
           <button
             onClick={() => sync.mutate()}

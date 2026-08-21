@@ -22,13 +22,24 @@ def _window_raw(start, end):
     return f"{start.strftime('%B %d, %Y')} - {end.strftime('%B %d, %Y')}"
 
 
-def sync_client(engine, client, *, specs=DEFAULT_SPECS, today=None, api=None, now=None):
+def backfill_window(months, today=None):
+    """(start, end) covering the last `months` calendar months through today, aligned to the
+    first of the month. months=1 -> just this month; months=12 -> a rolling year. Ingested via
+    merge-by-window, so a backfill fills in older history without disturbing the recent window."""
+    today = today or datetime.date.today()
+    m0 = today.year * 12 + (today.month - 1)         # month index since year 0
+    back = m0 - (max(1, months) - 1)
+    return datetime.date(back // 12, back % 12 + 1, 1), today
+
+
+def sync_client(engine, client, *, specs=DEFAULT_SPECS, today=None, window=None, api=None, now=None):
     """Pull + ingest every report for one client. `client` is a dict with client_id and
-    google_customer_id (as list_clients/get_client return). Returns a per-report summary."""
+    google_customer_id (as list_clients/get_client return). `window` (start, end) overrides the
+    default rolling window — used for historical backfill. Returns a per-report summary."""
     cid = client.get("google_customer_id")
     if not cid:
         return {"client_id": client.get("client_id"), "skipped": "no google_customer_id", "reports": []}
-    start, end = pull_window(today)
+    start, end = window if window else pull_window(today)
     now = now or datetime.datetime.now(datetime.timezone.utc)
     window_raw = _window_raw(start, end)
     api = api or GoogleAdsApiClient.from_env()
@@ -49,19 +60,20 @@ def sync_client(engine, client, *, specs=DEFAULT_SPECS, today=None, api=None, no
             "window": [start.isoformat(), end.isoformat()], "reports": reports}
 
 
-def sync_all(engine=None, *, specs=DEFAULT_SPECS, today=None, api=None):
+def sync_all(engine=None, *, specs=DEFAULT_SPECS, today=None, window=None, api=None):
     """Sync every client that has a google_customer_id. One shared API client (the MCC login
-    account can query all child accounts). Clients without a customer id are reported skipped."""
+    account can query all child accounts). Clients without a customer id are reported skipped.
+    `window` (start, end) overrides the default rolling window for a historical backfill."""
     engine = engine or get_engine()
     init_db(engine)
     api = api or GoogleAdsApiClient.from_env()
-    start, end = pull_window(today)
+    start, end = window if window else pull_window(today)
     out = []
     for client in list_clients(engine):
         if not client.get("google_customer_id"):
             out.append({"client_id": client["client_id"], "skipped": "no google_customer_id"})
             continue
-        out.append(sync_client(engine, client, specs=specs, today=today, api=api))
+        out.append(sync_client(engine, client, specs=specs, today=today, window=window, api=api))
     return {"window": [start.isoformat(), end.isoformat()], "synced": out}
 
 

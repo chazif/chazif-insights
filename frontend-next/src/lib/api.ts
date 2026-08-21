@@ -121,6 +121,8 @@ export const syncAdsApi = (clientId?: string) =>
 export const getAdsApiJob = (jobId: string) => get<AdsApiJob>(`/api/adsapi/sync/status/${jobId}`);
 export const previewAdsApi = (clientId: string, report = "core") =>
   get<AdsApiSyncResult>(`/api/adsapi/preview?client=${encodeURIComponent(clientId)}&report=${report}`);
+export const backfillAdsApi = (clientId: string, months = 12) =>
+  send<{ job_id: string; status: string; months: number; window: string[] }>("/api/adsapi/backfill", "POST", { client_id: clientId, months });
 
 export async function uploadFiles(clientId: string, period: string, files: File[]): Promise<{ job_id: string; status: string }> {
   const fd = new FormData();
