@@ -18,16 +18,21 @@ resolution and are deferred to a later pass; they remain uploadable as CSV.
 
 
 class ReportSpec:
-    __slots__ = ("report_type", "resource", "fields", "dated")
+    __slots__ = ("report_type", "resource", "fields", "dated", "where")
 
-    def __init__(self, report_type, resource, fields, dated=True):
+    def __init__(self, report_type, resource, fields, dated=True, where=None):
         self.report_type = report_type
         self.resource = resource
         self.fields = fields          # list[(gaql_path, slug, kind)]
         self.dated = dated
+        self.where = where            # extra GAQL condition ANDed onto the date window
 
     def paths(self):
-        return [p for p, _slug, _kind in self.fields]
+        seen = []
+        for p, _slug, _kind in self.fields:
+            if p not in seen:
+                seen.append(p)
+        return seen
 
 
 # --- value coercion: API primitive (enums already flattened to their .name) -> parser string
@@ -64,15 +69,41 @@ def _conv(kind, v):
 
 
 def convert_row(spec, flat):
-    """API row (already flattened to {gaql_path: primitive}) -> parser-shaped slugged dict."""
-    return {slug: _conv(kind, flat.get(path)) for path, slug, kind in spec.fields}
+    """API row (already flattened to {gaql_path: primitive}) -> parser-shaped slugged dict.
+
+    Two list-aware kinds mirror how Google's UI exports repeated fields as numbered columns:
+    - "text_list": a repeated field (RSA headlines/descriptions) -> slug_1..slug_N
+    - "first_text": a repeated field where the CSV carried one value (final URLs) -> first item
+    """
+    out = {}
+    for path, slug, kind in spec.fields:
+        v = flat.get(path)
+        if kind == "text_list":
+            items = v if isinstance(v, (list, tuple)) else ([] if v in (None, "") else [v])
+            for i, item in enumerate(items, 1):
+                s = _conv("text", item)
+                if s is not None:
+                    out[f"{slug}_{i}"] = s
+            continue
+        if kind == "first_text":
+            if isinstance(v, (list, tuple)):
+                v = v[0] if v else None
+            out[slug] = _conv("text", v)
+            continue
+        out[slug] = _conv(kind, v)
+    return out
 
 
 def build_query(spec, start, end):
     """GAQL for one report over [start, end] (inclusive)."""
     q = f"SELECT {', '.join(spec.paths())} FROM {spec.resource}"
+    conds = []
     if spec.dated:
-        q += f" WHERE segments.date BETWEEN '{start:%Y-%m-%d}' AND '{end:%Y-%m-%d}'"
+        conds.append(f"segments.date BETWEEN '{start:%Y-%m-%d}' AND '{end:%Y-%m-%d}'")
+    if spec.where:
+        conds.append(spec.where)
+    if conds:
+        q += " WHERE " + " AND ".join(conds)
     return q
 
 
@@ -96,6 +127,8 @@ DEFAULT_SPECS = [
     ReportSpec("campaign_performance", "campaign", [
         ("campaign.name", "campaign", "text"),
         ("campaign.advertising_channel_type", "campaign_type", "channel"),
+        ("campaign.bidding_strategy_type", "bid_strategy_type", "enum_title"),
+        ("campaign.target_cpa.target_cpa_micros", "target_cpa", "micros"),
         *_CORE,
         ("metrics.search_impression_share", "search_impr_share", "share"),
         _DATE,
@@ -108,13 +141,21 @@ DEFAULT_SPECS = [
     ]),
     ReportSpec("search_terms", "search_term_view", [
         ("search_term_view.search_term", "search_term", "text"),
+        ("segments.search_term_match_type", "search_terms_match_type", "enum_title"),
         ("campaign.name", "campaign", "text"),
         ("ad_group.name", "ad_group", "text"),
         *_CORE,
         _DATE,
     ]),
+    # Ads: the Ad Copy + Ad↔LP views read every RSA headline/description as numbered columns,
+    # plus the final URL and ad type. The API returns headlines/descriptions as repeated assets,
+    # flattened here to headline_1..N / description_1..N (mirroring Google's own CSV export).
     ReportSpec("ads_performance", "ad_group_ad", [
         ("ad_group_ad.ad.name", "ad_name", "text"),
+        ("ad_group_ad.ad.type", "ad_type", "enum_title"),
+        ("ad_group_ad.ad.responsive_search_ad.headlines", "headline", "text_list"),
+        ("ad_group_ad.ad.responsive_search_ad.descriptions", "description", "text_list"),
+        ("ad_group_ad.ad.final_urls", "ad_final_url", "first_text"),
         ("campaign.name", "campaign", "text"),
         ("ad_group.name", "ad_group", "text"),
         *_CORE,
@@ -129,8 +170,46 @@ DEFAULT_SPECS = [
         ("segments.product_title", "product_title_sold", "text"),
         ("segments.product_item_id", "item_id_sold", "text"),
         *_CORE,
+        ("metrics.units_sold", "units_sold", "num"),
         _DATE,
     ]),
+    # Performance Max placements — impressions only (all Google exposes). Feeds has_pmax + list.
+    ReportSpec("pmax_placements", "performance_max_placement_view", [
+        ("performance_max_placement_view.display_name", "performance_max_placement", "text"),
+        ("performance_max_placement_view.placement_type", "placement_type", "enum_title"),
+        ("campaign.name", "campaign", "text"),
+        ("metrics.impressions", "impr", "int"),
+        _DATE,
+    ]),
+    # Audience performance (not consumed by a view yet — pulled for upcoming features).
+    ReportSpec("audiences", "ad_group_audience_view", [
+        ("ad_group_criterion.display_name", "audience_segment", "text"),
+        ("campaign.name", "campaign", "text"),
+        ("ad_group.name", "ad_group", "text"),
+        *_CORE,
+        _DATE,
+    ]),
+    # Distance from location assets (not consumed yet — pulled for future use).
+    ReportSpec("distance_from_location", "distance_view", [
+        ("distance_view.distance_bucket", "distance_from_location_assets", "enum_title"),
+        ("campaign.name", "campaign", "text"),
+        *_CORE,
+        _DATE,
+    ]),
+    # Portfolio bid strategies — a config snapshot (undated): name, type, tCPA/tROAS targets.
+    ReportSpec("bid_strategies", "bidding_strategy", [
+        ("bidding_strategy.name", "bid_strategy", "text"),
+        ("bidding_strategy.type", "bid_strategy_type", "enum_title"),
+        ("bidding_strategy.target_cpa.target_cpa_micros", "target_cpa", "micros"),
+        ("bidding_strategy.target_roas.target_roas", "target_roas", "num"),
+    ], dated=False),
+    # Ad-schedule performance by day-of-week × hour (undated — an all-time pattern snapshot).
+    ReportSpec("schedule_dow_hod", "campaign", [
+        ("campaign.name", "campaign", "text"),
+        ("segments.day_of_week", "day_of_the_week", "enum_title"),
+        ("segments.hour", "hour_of_the_day", "int"),
+        *_CORE,
+    ], dated=False),
     # Keyword report carrying Historical Quality Score — the loader freezes each day's QS
     # into qs_history (append-only). Enum labels map to the parser's hist_* QS slugs.
     ReportSpec("search_keyword_qs", "keyword_view", [

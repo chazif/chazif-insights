@@ -49,10 +49,13 @@ def sync_client(engine, client, *, specs=DEFAULT_SPECS, today=None, window=None,
     for spec in specs:
         try:
             rows = (convert_row(spec, r) for r in api.stream(cid, build_query(spec, start, end)))
+            # dated reports merge by window (per-row "date"); undated ones (schedule, bid
+            # strategies) carry no date -> snapshot-replace (latest wins).
+            date_col = "date" if spec.dated else None
             with engine.begin() as conn:
                 n = writer(conn, client["client_id"], spec.report_type, rows,
                            f"adsapi:{spec.report_type}", window_raw, start, end, now,
-                           date_col="date", order="mdy")
+                           date_col=date_col, order="mdy")
             reports.append({"report_type": spec.report_type, "rows": n})
         except Exception as e:                        # keep going; never leak a credential
             reports.append({"report_type": spec.report_type, "error": f"{type(e).__name__}: {e}"})

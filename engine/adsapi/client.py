@@ -35,12 +35,31 @@ def _digits(v):
     return re.sub(r"\D", "", str(v or ""))
 
 
+def _asset_text(x):
+    """One repeated-field element -> primitive: an AdTextAsset -> its .text; else coerce."""
+    if x is None or isinstance(x, (str, int, float, bool)):
+        return x
+    t = getattr(x, "text", None)        # AdTextAsset (RSA headline/description)
+    if t is not None:
+        return t
+    n = getattr(x, "name", None)        # enum
+    return n if n is not None else str(x)
+
+
 def _coerce(v):
-    """API field value -> JSON-ish primitive. Protobuf enums become their name (e.g. SEARCH)."""
+    """API field value -> JSON-ish primitive. Enums -> their name (SEARCH); repeated fields
+    (RSA headlines/descriptions, final URLs) -> a list of primitives (asset .text extracted)."""
     if v is None or isinstance(v, (str, int, float, bool)):
         return v
-    name = getattr(v, "name", None)     # proto-plus enum
-    return name if name is not None else str(v)
+    name = getattr(v, "name", None)     # proto-plus enum (has .name, not a sequence)
+    if name is not None:
+        return name
+    if hasattr(v, "__iter__") and not isinstance(v, (str, bytes)):   # repeated field
+        try:
+            return [_asset_text(x) for x in v]
+        except TypeError:
+            pass
+    return str(v)
 
 
 def _paths_from_query(query):

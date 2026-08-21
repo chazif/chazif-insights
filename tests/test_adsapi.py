@@ -61,6 +61,46 @@ def test_convert_row_campaign():
     assert row["search_impr_share"] == "62" and row["date"] == "2026-08-03"
 
 
+def test_convert_row_rsa_lists():
+    import types as _t
+    spec = SPECS_BY_TYPE["ads_performance"]
+    flat = {"ad_group_ad.ad.name": "RSA 1", "ad_group_ad.ad.type": "RESPONSIVE_SEARCH_AD",
+            "ad_group_ad.ad.responsive_search_ad.headlines": ["Buy Candles", "Free Shipping", "Shop Now"],
+            "ad_group_ad.ad.responsive_search_ad.descriptions": ["Great scents", "Fast delivery"],
+            "ad_group_ad.ad.final_urls": ["https://x.com/a", "https://x.com/b"],
+            "campaign.name": "C", "ad_group.name": "G", "metrics.clicks": 5, "segments.date": "2026-08-02"}
+    row = convert_row(spec, flat)
+    assert row["headline_1"] == "Buy Candles" and row["headline_3"] == "Shop Now" and "headline_4" not in row
+    assert row["description_1"] == "Great scents" and row["description_2"] == "Fast delivery"
+    assert row["ad_final_url"] == "https://x.com/a"          # first URL only
+    assert row["ad_type"] == "Responsive Search Ad" and row["ad_name"] == "RSA 1"
+
+    # client-side flatten extracts .text from AdTextAsset objects and keeps repeated strings
+    assets = [_t.SimpleNamespace(text="H1"), _t.SimpleNamespace(text="H2")]
+    row2 = _t.SimpleNamespace(ad_group_ad=_t.SimpleNamespace(ad=_t.SimpleNamespace(
+        responsive_search_ad=_t.SimpleNamespace(headlines=assets), final_urls=["u1", "u2"])))
+    flat2 = api_client._flatten(row2, ["ad_group_ad.ad.responsive_search_ad.headlines", "ad_group_ad.ad.final_urls"])
+    assert flat2["ad_group_ad.ad.responsive_search_ad.headlines"] == ["H1", "H2"]
+    assert flat2["ad_group_ad.ad.final_urls"] == ["u1", "u2"]
+
+
+def test_undated_spec_has_no_date_and_no_window():
+    spec = SPECS_BY_TYPE["bid_strategies"]
+    assert spec.dated is False
+    q = build_query(spec, datetime.date(2026, 8, 1), datetime.date(2026, 9, 1))
+    assert "segments.date" not in q and "WHERE" not in q
+    assert "schedule_dow_hod" in SPECS_BY_TYPE and SPECS_BY_TYPE["schedule_dow_hod"].dated is False
+
+
+def test_report_set_is_complete():
+    # every report the app consumes is pulled, except the two Google doesn't expose via API.
+    expected = {"account_spend", "campaign_performance", "ad_group_performance", "search_terms",
+                "ads_performance", "landing_pages", "products_sold", "search_keyword_qs",
+                "pmax_placements", "audiences", "distance_from_location", "bid_strategies",
+                "schedule_dow_hod"}
+    assert expected <= set(SPECS_BY_TYPE)
+
+
 def test_build_query_has_window_and_paths():
     spec = SPECS_BY_TYPE["account_spend"]
     q = build_query(spec, datetime.date(2026, 8, 1), datetime.date(2026, 9, 15))
