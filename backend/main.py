@@ -480,6 +480,28 @@ def cron_adsapi_sync(request: Request, background: BackgroundTasks):
     return {"status": "started", "job_id": job_id}
 
 
+@app.get("/api/adsapi/tree")
+async def adsapi_tree(manager_id: str = Query(None)):
+    """Enumerate every account under a manager (defaults to the configured login-customer-id),
+    marking managers vs leaf ad accounts. Leaves are the accounts we can pull metrics from."""
+    from engine.adsapi import client as adsapi_client
+    missing = adsapi_client.missing_credentials()
+    if missing:
+        raise HTTPException(400, "Google Ads API not configured; set env vars: " + ", ".join(missing))
+
+    def _run():
+        try:
+            api = adsapi_client.GoogleAdsApiClient.from_env()
+            mgr = manager_id or api.login_customer_id()
+            accounts = api.list_customer_tree(mgr)
+            leaves = [a for a in accounts if not a["manager"]]
+            return {"manager_id": mgr, "count": len(accounts),
+                    "leaf_accounts": leaves, "all_accounts": accounts}
+        except Exception as e:
+            return {"error": f"{type(e).__name__}: {e}"}
+    return await run_in_threadpool(_run)
+
+
 @app.get("/api/adsapi/validate-fields")
 async def adsapi_validate_fields():
     """Audit EVERY field name in the code (metrics included) against Google's schema via

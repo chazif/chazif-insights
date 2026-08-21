@@ -101,6 +101,23 @@ class GoogleAdsApiClient:
         """The login-customer-id (MCC) currently configured on the client, or None."""
         return getattr(self._client, "login_customer_id", None)
 
+    def list_customer_tree(self, manager_id):
+        """Every account in the hierarchy under `manager_id` (all levels). Marks managers vs
+        leaf ad accounts (customer_client.manager) — the leaves are what we can pull metrics from."""
+        svc = self._client.get_service("GoogleAdsService")
+        q = ("SELECT customer_client.id, customer_client.descriptive_name, customer_client.manager, "
+             "customer_client.level, customer_client.status, customer_client.currency_code "
+             "FROM customer_client")
+        out = []
+        for batch in svc.search_stream(customer_id=_digits(manager_id), query=q):
+            for row in batch.results:
+                cc = row.customer_client
+                out.append({"id": str(cc.id), "name": cc.descriptive_name,
+                            "manager": bool(cc.manager), "level": int(cc.level),
+                            "status": getattr(cc.status, "name", str(cc.status)),
+                            "currency": cc.currency_code})
+        return out
+
     def validate_fields(self, field_names):
         """Look each field up in Google's schema (GoogleAdsFieldService) — confirms the name
         exists and is selectable. No account or data needed; validates metric field names too."""
