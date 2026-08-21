@@ -232,18 +232,26 @@ Only pull these for accounts that actually run Shopping/PMax (the mapping knows)
 
 ---
 
-## Item 4 — Google Ads API auto-pull  `status: planned (plan doc approved-pending)`
+## Item 4 — Google Ads API auto-pull  `status: BUILT on feature/ads-api (own Railway env + isolated DB); parity pending one live account`
 
-Full plain-language plan: **docs/ADS_API_INTEGRATION_PLAN.docx**. Summary: nightly worker pulls
-each report via GAQL (rolling ~35-day window for conversion-lag restatements), normalizes rows to
-the CSV parser's shape, writes through merge-by-window ingestion — everything downstream (mapping
-sync, QS freeze, bundle, views) unchanged; CSV upload stays as fallback (Auction Insights is not
-in the API). BigQuery NOT required (API path rides the existing `bq.active()` seam, so it survives
-a future cutover unchanged; Google's Ads→BQ Transfer product deliberately not chosen). Also
-unlocks Shopping S2 via `shopping_performance_view` with no client exports. **Phase 0 blockers:**
-merge the ingestion PR into `main`; user supplies OAuth credentials into Railway env vars (secrets
-never in chat/code/git). Decisions asked of user: green-light PR merge; confirm clients under the
-token's MCC; Chiarelli's as pilot.
+Full plain-language plan: **docs/ADS_API_INTEGRATION_PLAN.docx**. Built on branch **`feature/ads-api`**
+(forked from redesign; carries merge-by-window) with its **own Railway env + isolated Postgres**, so
+production and redesign are untouched. Pulls each report via GAQL, normalizes to the CSV parser's shape,
+writes through merge-by-window ingestion — everything downstream unchanged; CSV upload stays as fallback
+(Auction Insights is not in the API). BigQuery off for this env (rides the `bq.active()` seam regardless).
+
+- **Window (changed from plan):** rolling **first day of last month → today** (not ~35 days).
+- **Shipped:** `engine/adsapi/` (window, reports/GAQL for 8 report types, client, sync); ingestion via
+  merge-by-window; endpoints `/api/adsapi/status` (+ per-client last_synced), `/preview` (zero-write),
+  `/validate` + `/validate-fields` (live schema audit — all 23 fields + 8 queries PASS), `/accessible`,
+  `/sync` + job poll, `/backfill` (1–36 mo), nightly `POST /api/cron/adsapi-sync` (X-Cron-Token) + CLI
+  `py -m engine.adsapi.sync`; **Setup → Google Ads API** React panel (status, Preview, Sync now,
+  Backfill 12mo, Sync all, freshness). Helper `scripts/get_refresh_token.py`; guide
+  `docs/ADS_API_SETUP_GUIDE.docx`. 13 adsapi tests green.
+- **BLOCKER (parity):** authenticated user only reaches MCC 4783696428, which doesn't manage the 3 client
+  accounts → live pull 403s. User deferred linking. Actual-numbers parity + Shopping S2 wait on ONE
+  reachable data account (link a real account under 4783696428, or a free test account) + Basic-access
+  token approval. Everything else is done and validated.
 
 ---
 
