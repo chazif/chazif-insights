@@ -7,6 +7,7 @@ Serves the static frontend, the per-client DATA bundle, and the admin API
 Run locally:  py -m uvicorn backend.main:app --reload --port 8000
 Railway:      Procfile -> uvicorn backend.main:app --host 0.0.0.0 --port $PORT
 """
+import os
 import time
 import uuid
 import zlib
@@ -131,6 +132,8 @@ def health():
 class ClientCreate(BaseModel):
     name: str
     client_id: Optional[str] = None
+    google_customer_id: Optional[str] = None      # Google Ads CID (digits) — enables API auto-pull
+    mcc_id: Optional[str] = None
 
 
 @app.get("/api/clients")
@@ -141,7 +144,8 @@ def clients_list():
 @app.post("/api/clients", status_code=201)
 def clients_create(body: ClientCreate):
     try:
-        return service.create_client(body.name, client_id=body.client_id, engine=_engine)
+        return service.create_client(body.name, client_id=body.client_id, engine=_engine,
+                                     google_customer_id=body.google_customer_id, mcc_id=body.mcc_id)
     except ValueError as e:
         raise HTTPException(409, str(e))
 
@@ -410,6 +414,29 @@ async def adsapi_accessible():
         except Exception as e:                       # never leak a secret value
             return {"error": f"{type(e).__name__}: {e}"}
     return await run_in_threadpool(_run)
+
+
+@app.post("/api/cron/adsapi-sync")
+def cron_adsapi_sync(request: Request, background: BackgroundTasks):
+    """Nightly automatic pull. Guarded by a shared secret: the caller must send
+    X-Cron-Token matching env ADSAPI_CRON_SECRET. Runs sync_all for every client with a
+    customer id, then re-syncs mappings. Point Railway's cron (or any scheduler) at this."""
+    from engine.adsapi import client as adsapi_client, sync as adsapi_sync_mod
+    secret = os.environ.get("ADSAPI_CRON_SECRET")
+    if not secret or request.headers.get("X-Cron-Token") != secret:
+        raise HTTPException(403, "forbidden")
+    missing = adsapi_client.missing_credentials()
+    if missing:
+        raise HTTPException(400, "Google Ads API not configured; set env vars: " + ", ".join(missing))
+    job_id = uuid.uuid4().hex[:12]
+    _JOBS[job_id] = {"status": "processing"}
+
+    def _pull_all():
+        result = adsapi_sync_mod.sync_all(_engine)
+        _sync_mappings(*[s.get("client_id") for s in result.get("synced", [])])
+        return result
+    background.add_task(_run_job, job_id, _pull_all)
+    return {"status": "started", "job_id": job_id}
 
 
 @app.get("/api/adsapi/validate-fields")

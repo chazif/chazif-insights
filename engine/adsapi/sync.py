@@ -146,3 +146,8 @@ def validate_queries(customer_id, *, specs=DEFAULT_SPECS, today=None, api=None):
     return {"window": [start.isoformat(), end.isoformat()],
             "note": "metric fields not exercised here (needs a non-manager account with data)",
             "checks": checks}
+
+
+if __name__ == "__main__":       # CLI entry for Railway's native cron: `py -m engine.adsapi.sync`
+    import json
+    print(json.dumps(sync_all(), indent=2, default=str))
