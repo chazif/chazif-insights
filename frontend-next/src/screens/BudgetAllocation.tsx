@@ -30,22 +30,44 @@ function ResultsTable({ rows }: { rows: AllocResult[] }) {
   const dim = (key: "brand" | "region" | "category", header: string): Column<AllocResult> => ({
     key, header, sort: (r) => r[key] ?? "", render: (r) => <span className={key === "brand" ? "font-medium" : "text-text-tertiary"}>{r[key] || "—"}</span>, csv: (r) => r[key] ?? "",
   });
+  const cpaCell = (v: number | null) => (v ? money(v, 2) : "—");
   const cols: Column<AllocResult>[] = [
     dim("brand", "Brand"), dim("region", "Region"), dim("category", "Category"),
     { key: "lw_spend", header: "LW spend", align: "right", sort: (r) => r.lw_spend, render: (r) => money(r.lw_spend), agg: { kind: "sum", get: (r) => r.lw_spend, fmt: (n) => money(n) }, csv: (r) => r.lw_spend },
     { key: "rec_spend", header: "Rec spend", align: "right", sort: (r) => r.rec_spend, render: (r) => <span className="font-medium">{money(r.rec_spend)}</span>, agg: { kind: "sum", get: (r) => r.rec_spend, fmt: (n) => money(n) }, csv: (r) => r.rec_spend },
     {
-      key: "delta", header: "Δ", align: "right", sort: (r) => deltaPct(r.lw_spend, r.rec_spend) ?? 0,
+      key: "delta", header: "Δ spend", align: "right", sort: (r) => deltaPct(r.lw_spend, r.rec_spend) ?? 0,
       render: (r) => { const d = deltaPct(r.lw_spend, r.rec_spend); return d == null ? <span className="text-text-disabled">—</span> : <span className={d > 0 ? "text-positive" : d < 0 ? "text-negative" : "text-text-muted"}>{signedPct(d)}</span>; },
       csv: (r) => deltaPct(r.lw_spend, r.rec_spend) ?? "",
     },
     { key: "lw_conv", header: "LW conv", align: "right", sort: (r) => r.lw_conv ?? 0, render: (r) => num(r.lw_conv ?? 0, 1), agg: { kind: "sum", get: (r) => r.lw_conv ?? 0, fmt: (n) => num(n, 1) }, csv: (r) => r.lw_conv ?? "" },
     { key: "exp_conv", header: "Exp conv", align: "right", sort: (r) => r.expected_conv ?? 0, render: (r) => <span className="font-medium">{num(r.expected_conv ?? 0, 1)}</span>, agg: { kind: "sum", get: (r) => r.expected_conv ?? 0, fmt: (n) => num(n, 1) }, csv: (r) => r.expected_conv ?? "" },
-    { key: "exp_cpa", header: "Exp CPA", align: "right", sort: (r) => r.expected_cpa ?? 0, render: (r) => (r.expected_cpa ? money(r.expected_cpa, 2) : "—"), agg: { kind: "rate", num: (r) => r.rec_spend, den: (r) => r.expected_conv ?? 0, fmt: (n) => money(n, 2) }, csv: (r) => r.expected_cpa ?? "" },
+    { key: "lw_cpa", header: "LW CPA", align: "right", sort: (r) => r.lw_cpa ?? 0, render: (r) => cpaCell(r.lw_cpa), agg: { kind: "rate", num: (r) => r.lw_spend, den: (r) => r.lw_conv ?? 0, fmt: (n) => money(n, 2) }, csv: (r) => r.lw_cpa ?? "" },
+    { key: "exp_cpa", header: "Exp CPA", align: "right", sort: (r) => r.expected_cpa ?? 0, render: (r) => cpaCell(r.expected_cpa), agg: { kind: "rate", num: (r) => r.rec_spend, den: (r) => r.expected_conv ?? 0, fmt: (n) => money(n, 2) }, csv: (r) => r.expected_cpa ?? "" },
+    { key: "lw_is", header: "LW IS", align: "right", sort: (r) => r.lw_is ?? 0, render: (r) => isFmt(r.lw_is), csv: (r) => r.lw_is ?? "" },
     { key: "exp_is", header: "Exp IS", align: "right", sort: (r) => r.expected_is ?? 0, render: (r) => isFmt(r.expected_is), csv: (r) => r.expected_is ?? "" },
+    { key: "tcpa_now", header: "tCPA now", align: "right", sort: (r) => r.tcpa_current ?? 0, render: (r) => cpaCell(r.tcpa_current), csv: (r) => r.tcpa_current ?? "" },
+    {
+      key: "tcpa_delta", header: "tCPA Δ", align: "right",
+      sort: (r) => (r.tcpa_recommended != null && r.tcpa_current != null ? r.tcpa_recommended - r.tcpa_current : 0),
+      render: (r) => {
+        if (r.tcpa_recommended == null || r.tcpa_current == null) return <span className="text-text-disabled">—</span>;
+        const d = r.tcpa_recommended - r.tcpa_current;
+        return <span className={d <= 0 ? "text-positive" : "text-negative"}>{(d >= 0 ? "+" : "") + money(d, 2)}</span>;
+      },
+      csv: (r) => (r.tcpa_recommended != null && r.tcpa_current != null ? r.tcpa_recommended - r.tcpa_current : ""),
+    },
+    { key: "gp", header: "Exp GP−spend", align: "right", sort: (r) => r.expected_adroi ?? 0, render: (r) => (r.expected_adroi == null ? "—" : money(r.expected_adroi)), agg: { kind: "sum", get: (r) => r.expected_adroi ?? 0, fmt: (n) => money(n) }, csv: (r) => r.expected_adroi ?? "" },
     { key: "opp", header: "Opp", align: "right", sort: (r) => r.opp_score ?? 0, render: (r) => (r.opp_score == null ? "—" : num(r.opp_score, 2)), csv: (r) => r.opp_score ?? "" },
   ];
-  return <DataTable rows={rows} columns={cols} rowKey={(r, i) => `${r.brand}|${r.region}|${r.category}|${i}`} totalsLabel="Total" exportName="allocation" />;
+  return (
+    <>
+      <DataTable rows={rows} columns={cols} rowKey={(r, i) => `${r.brand}|${r.region}|${r.category}|${i}`} totalsLabel="Total" exportName="allocation" />
+      <p className="mt-2 text-[11.5px] text-text-muted">
+        Expected values are curve estimates (constant cost-per-conversion assumption — treat large increases as optimistic). <b>tCPA Δ</b> = expected CPA − current tCPA: the bid-strategy target to change alongside the budget move. <b>Exp GP−spend</b> = expected gross profit minus recommended spend.
+      </p>
+    </>
+  );
 }
 
 export function BudgetAllocation() {
