@@ -186,17 +186,25 @@ def _cp_range_sums(c, client_id, keep, lo, hi):
     return cost, clicks, conv
 
 
-def _latest_complete_month(engine, client_id):
-    """From the export window_end, return the latest fully-covered month as
-    {year, month, ym, full, abbr}, or None. A window ending mid-month means that
-    month is partial, so we step back one."""
+def _latest_complete_month(engine, client_id, today=None):
+    """From the export window_end, return the latest month to anchor on as
+    {year, month, ym, full, abbr}, or None.
+
+    A window ending mid-month normally means that month is still partial, so we step
+    back one. The exception is the CURRENT calendar month: it is expected to be
+    month-to-date (you can never have its final days yet), so we show it as the latest
+    month rather than hiding it. A genuinely truncated PAST month is still stepped over.
+    Note: when the current month is anchored this way it is month-to-date, so YoY/MoM
+    comparisons weigh a partial month against a full prior period until the month ends."""
+    today = today or datetime.date.today()
     with engine.connect() as c:
         we = c.execute(select(func.max(uploads.c.window_end)).where(
             uploads.c.client_id == client_id)).scalar()
     if not we:
         return None
     y, m = we.year, we.month
-    if we.day < calendar.monthrange(y, m)[1]:
+    is_current_month = (y == today.year and m == today.month)
+    if we.day < calendar.monthrange(y, m)[1] and not is_current_month:
         m -= 1
         if m == 0:
             m, y = 12, y - 1
