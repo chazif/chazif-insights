@@ -96,6 +96,10 @@ export interface SearchTermsSection {
   intent_segments: IntentSegment[];
   grades: GradeRow[];
   grades_grading?: GradingMeta;
+  service_categories?: { category: string; spend: number }[];
+  competitor_breakdown?: { segment: string; spend: number }[];
+  grade_method?: { grade: string; threshold: string; interpretation: string }[];
+  filters_ignored?: string[];
   relevant_terms: RelevantTerm[];
   competitor_terms: CompetitorTerm[];
   flagged_terms: FlaggedTerm[];
