@@ -19,7 +19,11 @@ export function Overview() {
   if (!trend.length) return <Empty />;
 
   const tot = trend[trend.length - 1];
+  // Web Reservations / Phone Calls aren't in the TrendPoint type — the backend only emits
+  // them for clients that track call/reservation metrics; absent -> num() renders "—".
+  const totExtra = tot as unknown as Record<string, number | undefined>;
   const kpis = data?.kpis ?? [];
+  const findings = data?.findings ?? [];
   const cmp = data?.meta?.compare?.label ?? "YoY";
   const priorLabel = data?.meta?.periods?.prior ?? "Prior";
   const curLabel = data?.meta?.periods?.current ?? "Current";
@@ -48,20 +52,35 @@ export function Overview() {
     <div className="mx-auto max-w-[1180px] px-6 py-6">
       <StatStrip
         stats={[
-          { label: "Spend", value: money(tot.Spend), delta: delta(kget("Total Spend")) },
+          { label: "Spend", value: money(tot.Spend), delta: delta(kget("Total Spend")), highlight: true },
           { label: "Main Conversions", value: num(tot["Main Conv"], 0), delta: delta(kget("Main Conversions")) },
           { label: "CPA", value: money(tot.CPA, 2), delta: delta(kget("CPA (Main Conv)"), false) },
           { label: "CVR", value: pct(tot.CVR, 2), delta: delta(kget("CVR (Main Conv)")) },
+          { label: "Web Reservations", value: num(totExtra["Web Res"] as number, 0), delta: delta(kget("Web Reservations")) },
+          { label: "Phone Calls", value: num(totExtra["Phone Calls"] as number, 0), delta: delta(kget("Phone Calls")) },
         ]}
       />
       <div className="mt-6 grid grid-cols-[1.5fr_1fr] items-start gap-5">
-        <Panel title={`Spend & conversions — ${trend.length} months`}>
-          <TrendChart data={trend} />
+        <Panel title={`Spend & Conversions — ${trend.length} months`}>
+          <TrendChart data={trend} convStroke="#cfff04" convWidth={2.5} showDots spendArea />
         </Panel>
         <Panel title="KPI scorecard" sub={cmp}>
           <DataTable rows={kpis} columns={scoreCols} rowKey={(r) => r.Metric} exportName={`kpis-${clientId}`} />
         </Panel>
       </div>
+      {findings.length > 0 && (
+        <div className="mt-6">
+          <Panel title="Key findings">
+            <ul className="mt-1 list-disc space-y-2 pl-5 text-[13px] text-text-secondary">
+              {findings.slice(0, 6).map((f, i) => (
+                <li key={i}>
+                  {f.topic && <strong className="text-ink">{f.topic}:</strong>} {f.detail}
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        </div>
+      )}
     </div>
   );
 }
