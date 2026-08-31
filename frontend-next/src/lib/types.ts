@@ -281,11 +281,22 @@ export interface QsSavingsRow {
   pct_brand_spend: number;
   primary_gap: string;
 }
+export interface QsGridCell {
+  ectr: string;
+  lp_exp: string;
+  ad_rel: string;
+  cpc: number;
+  spend: number;
+  qs: number;
+  keywords: number;
+}
 export interface QsBreakdownSection {
   month: string;
   non_brand: boolean;
   avg_cpc: number;
   components: QsComponent[];
+  grid: QsGridCell[];
+  grid_meta: { ectr_spend_share: Record<string, number> };
   savings_by_brand: QsSavingsRow[];
   opt_keywords: { total: number; shown: number; categories: string[]; regions: string[]; has_region: boolean; rows: QsOptKeyword[] };
 }
