@@ -6,7 +6,8 @@ from collections import defaultdict
 from sqlalchemy import select, func, insert, update, inspect
 from .store import get_engine, init_db, clients, uploads, raw_rows, term_relevance
 from .store import metadata as _ingest_md
-from .parser import EXPECTED_REPORTS, parse_csv, account_cols, date_column, infer_date_order
+from .parser import (EXPECTED_REPORTS, account_cols, date_column, infer_date_order,
+                     read_csv_header, iter_csv_rows)
 from .load import load_folder, replace_report, replace_report_bq
 from ..warehouse import bq
 from ..clientconfig import sanitize, merged
@@ -93,25 +94,32 @@ def preview_mcc(folder, engine=None):
     accounts, files, unknown = {}, [], []
     for path in sorted(glob.glob(os.path.join(folder, "*.csv"))):
         name = os.path.basename(path)
-        parsed = parse_csv(path)
-        if not parsed or not parsed["report_type"]:
+        # Header-only read + streamed row counting: constant memory, so a 70 MB+ MCC
+        # export no longer OOMs the worker (which surfaced as an HTTP 502 on Preview).
+        head = read_csv_header(path)
+        if not head or not head["report_type"]:
             unknown.append(name); continue
-        rtype = parsed["report_type"]
-        cidc, namec = account_cols(parsed["columns"])
-        files.append({"file": name, "report_type": rtype, "has_account": bool(cidc or namec), "rows": len(parsed["rows"])})
+        rtype = head["report_type"]
+        cols = head["columns"]
+        cidc, namec = account_cols(cols)
+        nrows = 0
         if not (cidc or namec):                          # single-account file -> one bucket
             key = "__single__:" + name
             a = accounts.setdefault(key, {"customer_id": None, "account_name": None, "reports": {}, "rows": 0, "single_file": name})
-            a["reports"][rtype] = a["reports"].get(rtype, 0) + len(parsed["rows"]); a["rows"] += len(parsed["rows"])
-            continue
-        for row in parsed["rows"]:
-            cid = row.get(cidc) if cidc else None
-            nm = row.get(namec) if namec else None
-            key = _account_key(cid, nm)
-            a = accounts.setdefault(key, {"customer_id": cid, "account_name": nm, "reports": {}, "rows": 0})
-            if cid and not a["customer_id"]: a["customer_id"] = cid
-            if nm and not a["account_name"]: a["account_name"] = nm
-            a["reports"][rtype] = a["reports"].get(rtype, 0) + 1; a["rows"] += 1
+            for _ in iter_csv_rows(path, cols):
+                nrows += 1
+            a["reports"][rtype] = a["reports"].get(rtype, 0) + nrows; a["rows"] += nrows
+        else:
+            for row in iter_csv_rows(path, cols):
+                nrows += 1
+                cid = row.get(cidc) if cidc else None
+                nm = row.get(namec) if namec else None
+                key = _account_key(cid, nm)
+                a = accounts.setdefault(key, {"customer_id": cid, "account_name": nm, "reports": {}, "rows": 0})
+                if cid and not a["customer_id"]: a["customer_id"] = cid
+                if nm and not a["account_name"]: a["account_name"] = nm
+                a["reports"][rtype] = a["reports"].get(rtype, 0) + 1; a["rows"] += 1
+        files.append({"file": name, "report_type": rtype, "has_account": bool(cidc or namec), "rows": nrows})
     out = []
     for key, a in accounts.items():
         client_id = (cid_map.get(_norm_cid(a["customer_id"])) if a["customer_id"] else None) \
@@ -150,29 +158,53 @@ def commit_mcc(folder, mapping, engine=None):
     results, skipped = [], []
     for path in sorted(glob.glob(os.path.join(folder, "*.csv"))):
         name = os.path.basename(path)
-        parsed = parse_csv(path)
-        if not parsed or not parsed["report_type"]:
+        # Streamed ingest (constant memory): header-only read + per-account row streaming, so a
+        # large MCC export no longer materializes the whole file (which OOM-killed the worker).
+        # replace_report/replace_report_bq consume the row iterator lazily in chunks.
+        head = read_csv_header(path)
+        if not head or not head["report_type"]:
             continue
-        rtype = parsed["report_type"]
-        cidc, namec = account_cols(parsed["columns"])
-        date_col = date_column(parsed["columns"])
-        order = infer_date_order(r.get(date_col) for r in parsed["rows"]) if date_col else "mdy"
-        groups = defaultdict(list)
-        if not (cidc or namec):
-            groups["__single__:" + name] = parsed["rows"]
-        else:
-            for row in parsed["rows"]:
-                groups[_account_key(row.get(cidc) if cidc else None, row.get(namec) if namec else None)].append(row)
+        rtype = head["report_type"]
+        cols = head["columns"]
+        cidc, namec = account_cols(cols)
+        date_col = date_column(cols)
+        # Lazy, short-circuiting scan for D/M vs M/D — reads only until a date disambiguates.
+        order = infer_date_order(r.get(date_col) for r in iter_csv_rows(path, cols)) if date_col else "mdy"
         writer = replace_report_bq if bq.active() else replace_report
+
+        def rows_for(target_key):
+            """Stream just one account's rows (or the whole file for a single-account export)."""
+            for row in iter_csv_rows(path, cols):
+                if target_key is None or _account_key(
+                        row.get(cidc) if cidc else None, row.get(namec) if namec else None) == target_key:
+                    yield row
+
         with engine.begin() as conn:
-            for key, rows in groups.items():
+            if not (cidc or namec):                              # single-account file -> one group
+                key = "__single__:" + name
                 client_id = key_to_client.get(key)
                 if not client_id:
-                    skipped.append({"key": key, "report_type": rtype, "rows": len(rows)}); continue
-                writer(conn, client_id, rtype, rows, name,
-                       parsed["window_raw"], parsed["window_start"], parsed["window_end"], now,
-                       date_col=date_col, order=order)
-                results.append({"client_id": client_id, "report_type": rtype, "rows": len(rows), "file": name})
+                    skipped.append({"key": key, "report_type": rtype,
+                                    "rows": sum(1 for _ in iter_csv_rows(path, cols))})
+                    continue
+                n = writer(conn, client_id, rtype, rows_for(None), name,
+                           head["window_raw"], head["window_start"], head["window_end"], now,
+                           date_col=date_col, order=order)
+                results.append({"client_id": client_id, "report_type": rtype, "rows": n, "file": name})
+                continue
+            # Multi-account: cheap count pass gives every account key present (constant memory —
+            # counts only, no rows retained), then stream each account's rows into the writer.
+            counts = defaultdict(int)
+            for row in iter_csv_rows(path, cols):
+                counts[_account_key(row.get(cidc) if cidc else None, row.get(namec) if namec else None)] += 1
+            for key, cnt in counts.items():
+                client_id = key_to_client.get(key)
+                if not client_id:
+                    skipped.append({"key": key, "report_type": rtype, "rows": cnt}); continue
+                n = writer(conn, client_id, rtype, rows_for(key), name,
+                           head["window_raw"], head["window_start"], head["window_end"], now,
+                           date_col=date_col, order=order)
+                results.append({"client_id": client_id, "report_type": rtype, "rows": n, "file": name})
     return {"ingested": results, "skipped": skipped}
 
 

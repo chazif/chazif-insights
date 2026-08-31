@@ -347,3 +347,45 @@ def parse_csv(path):
     ws, we = parse_window(window_raw)
     return dict(report_type=rtype, columns=cols, rows=rows, window_raw=window_raw,
                 window_start=ws, window_end=we, numeric_cols=numeric)
+
+
+def read_csv_header(path):
+    """Cheap header-only read: parse just the 3-line preamble (title, date range,
+    column row) and return report_type/columns/window WITHOUT loading any data rows.
+    Constant memory regardless of file size. Returns None if the file is too short.
+
+    Use this + iter_csv_rows() instead of parse_csv() when you don't need the whole
+    file materialized (e.g. previewing/counting a large MCC export) — parse_csv reads
+    the entire file into a list of dicts and will OOM the worker on big exports."""
+    p = Path(path)
+    with open(p, encoding="utf-8-sig") as f:
+        f.readline()                      # line 0: report title
+        line1 = f.readline()              # line 1: date range
+        line2 = f.readline()              # line 2: column header
+        if not line2:
+            return None
+    window_raw = line1.strip().strip('"').split('",')[0].strip('"')
+    header = next(csv.reader([line2]))
+    while header and header[-1].strip() == "":
+        header.pop()
+    cols = dedupe([slug(h) for h in header])
+    ws, we = parse_window(window_raw)
+    return dict(report_type=detect_report(cols), columns=cols, window_raw=window_raw,
+                window_start=ws, window_end=we)
+
+
+def iter_csv_rows(path, cols):
+    """Stream the data rows (everything after the 3-line preamble) one dict at a time,
+    slug->cleaned value, keyed by `cols` (from read_csv_header). Constant memory: never
+    builds a list. Skips Total/blank rows exactly like parse_csv. Multi-line quoted
+    fields are handled because csv.reader consumes the file iterator directly."""
+    p = Path(path)
+    with open(p, encoding="utf-8-sig") as f:
+        f.readline(); f.readline(); f.readline()     # skip the 3-line preamble
+        for r in csv.reader(f):
+            if not r or is_total_row(r[0]):
+                continue
+            if all((c or "").strip() == "" for c in r):
+                continue
+            r = r[: len(cols)] + [None] * (len(cols) - len(r))
+            yield {c: clean(v) for c, v in zip(cols, r)}
