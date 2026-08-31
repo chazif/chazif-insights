@@ -1,5 +1,5 @@
 export interface StatCell {
-  label: string;
+  label: import("react").ReactNode;
   value: string;
   delta?: { text: string; good: boolean }; // green = better, not up
   sub?: string;
