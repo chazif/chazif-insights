@@ -64,7 +64,7 @@ export function CampaignPerformance() {
               label={{ value: "Cost ($)", angle: -90, position: "insideLeft", style: { fontSize: 11, fill: "#6b7280", fontFamily: "Instrument Sans" } }}
             />
             <Tooltip formatter={(v: number) => [money(v), "Cost"]} contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }} cursor={{ fill: "rgba(0,0,0,0.03)" }} />
-            <Bar dataKey="cost" name="Cost" fill="#cfff04" stroke="#1a1a1a" strokeWidth={1} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            <Bar dataKey="cost" name="Cost" fill="#1a1a1a" radius={[4, 4, 0, 0]} isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
       </Panel>

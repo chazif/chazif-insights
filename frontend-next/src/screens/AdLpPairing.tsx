@@ -5,18 +5,14 @@ import type { AdRow } from "../lib/types";
 import { money, num, pct } from "../lib/format";
 import { StatStrip } from "../components/ui/StatStrip";
 import { Panel } from "../components/ui/Panel";
+import { Pill } from "../components/ui/Pill";
+import { gradeTone } from "../lib/grades";
 import { DataTable, type Column } from "../components/ui/DataTable";
 import { Loading, ErrorState, Empty } from "../components/ui/States";
 
+// Grade pill via the shared React Pill (A/B green, C/D amber, F red, else grey).
 function GradePill({ g }: { g: string }) {
-  const c = (g[0] || "").toUpperCase();
-  const st =
-    c === "A" || c === "B" ? { background: "#dcfce7", color: "#166534" }
-    : c === "C" ? { background: "#fef3c7", color: "#92660a" }
-    : c === "D" ? { background: "#fce7ce", color: "#9a5b1e" }
-    : c === "F" ? { background: "#fee2e2", color: "#991b1b" }
-    : { background: "#eee", color: "#555" };
-  return <span className="inline-block whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10.5px] font-medium" style={st}>{g}</span>;
+  return <Pill tone={gradeTone(g)}>{g}</Pill>;
 }
 
 const short = (g: string) => g.split(" ")[0];
@@ -113,8 +109,8 @@ export function AdLpPairing() {
         stats={[
           { label: "Total ads", value: num(S.total) },
           { label: "Aligned · A/B ad + A/B LP", value: num(S.aligned), sub: `${pct(S.aligned_pct, 1)} of ads`, highlight: true },
-          { label: <>Good ad · weak LP <span className="ml-1 rounded-[4px] px-1 text-[9px] font-bold" style={{ background: "#fee2e2", color: "#991b1b" }}>FIX LP</span></>, value: num(S.fix_lp), sub: "A/B ad CTR → D/F LP CVR" },
-          { label: <>Weak ad · good LP <span className="ml-1 rounded-[4px] px-1 text-[9px] font-bold" style={{ background: "#fef3c7", color: "#92660a" }}>FIX AD</span></>, value: num(S.fix_ad), sub: "D/F ad CTR · A/B LP CVR" },
+          { label: <span className="inline-flex items-center gap-1.5">Good ad · weak LP <Pill tone="neg">FIX LP</Pill></span>, value: num(S.fix_lp), sub: "A/B ad CTR → D/F LP CVR" },
+          { label: <span className="inline-flex items-center gap-1.5">Weak ad · good LP <Pill tone="warn">FIX AD</Pill></span>, value: num(S.fix_ad), sub: "D/F ad CTR · A/B LP CVR" },
           { label: "Low Volume", value: num(S.low_vol), sub: "< 100 imp or < 5 clicks" },
         ]}
       />

@@ -52,7 +52,7 @@ export function Overview() {
     <div className="mx-auto max-w-[1180px] px-6 py-6">
       <StatStrip
         stats={[
-          { label: "Spend", value: money(tot.Spend), delta: delta(kget("Total Spend")), highlight: true },
+          { label: "Spend", value: money(tot.Spend), delta: delta(kget("Total Spend")) },
           { label: "Main Conversions", value: num(tot["Main Conv"], 0), delta: delta(kget("Main Conversions")) },
           { label: "CPA", value: money(tot.CPA, 2), delta: delta(kget("CPA (Main Conv)"), false) },
           { label: "CVR", value: pct(tot.CVR, 2), delta: delta(kget("CVR (Main Conv)")) },
@@ -62,7 +62,7 @@ export function Overview() {
       />
       <div className="mt-6 grid grid-cols-[1.5fr_1fr] items-start gap-5">
         <Panel title={`Spend & Conversions — ${trend.length} months`}>
-          <TrendChart data={trend} convStroke="#cfff04" convWidth={2.5} showDots spendArea />
+          <TrendChart data={trend} />
         </Panel>
         <Panel title="KPI scorecard" sub={cmp}>
           <DataTable rows={kpis} columns={scoreCols} rowKey={(r) => r.Metric} exportName={`kpis-${clientId}`} />

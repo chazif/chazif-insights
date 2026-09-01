@@ -10,8 +10,8 @@ import { Panel } from "../components/ui/Panel";
 import { DataTable, type Column } from "../components/ui/DataTable";
 import { Loading, ErrorState, Empty } from "../components/ui/States";
 
-// Category slice colours — lime leads, then a distinct qualitative ramp (mirrors the original app).
-const PALETTE = ["#cfff04", "#1a1a1a", "#6b7280", "#2563eb", "#059669", "#ea580c", "#7c3aed", "#dc2626", "#f59e0b"];
+// Category slice colours — neutral qualitative ramp (no lime; lime is reserved for interactive elements).
+const PALETTE = ["#1a1a1a", "#6b7280", "#b45309", "#2563eb", "#15803d", "#9333ea", "#0891b2", "#dc2626", "#ca8a04"];
 
 const chgCell = (v: number | null, betterUp = true) => {
   if (v == null) return <span className="text-text-disabled">—</span>;
@@ -121,7 +121,7 @@ export function NonBrandCategories() {
               <Tooltip formatter={(v: number, n: string) => [fmtVal(v), n]} contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }} cursor={{ fill: "rgba(0,0,0,0.03)" }} />
               <Legend wrapperStyle={{ fontSize: 12, fontFamily: "Instrument Sans" }} />
               <Bar dataKey="prior" name={sec.prior_label} fill="#9ca3af" radius={[4, 4, 0, 0]} isAnimationActive={false} />
-              <Bar dataKey="cur" name={sec.cur_label} fill="#cfff04" stroke="#1a1a1a" strokeWidth={1} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+              <Bar dataKey="cur" name={sec.cur_label} fill="#1a1a1a" radius={[4, 4, 0, 0]} isAnimationActive={false} />
             </BarChart>
           </ResponsiveContainer>
         </Panel>

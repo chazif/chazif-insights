@@ -4,17 +4,15 @@ import { useBundle } from "../hooks/useBundle";
 import type { QsGridCell } from "../lib/types";
 import { money, num, pct, signedPct } from "../lib/format";
 import { Panel } from "../components/ui/Panel";
+import { Pill } from "../components/ui/Pill";
+import { ratingTone } from "../lib/grades";
 import { Loading, ErrorState, Empty } from "../components/ui/States";
 
 const RATINGS = ["Above average", "Average", "Below average"];
 
+// Rating pill via the shared React Pill (Above → green, Below → red, Average → grey).
 function QsPill({ r }: { r: string }) {
-  const st =
-    r === "Above average" ? { background: "#dcfce7", color: "#166534" }
-    : r === "Below average" ? { background: "#fce7ce", color: "#9a5b1e" }
-    : r === "Average" ? { background: "#fef3c7", color: "#92660a" }
-    : { background: "#eee", color: "#666" };
-  return <span className="inline-block rounded-[4px] px-1.5 py-0.5 text-[10px] font-medium" style={st}>{r}</span>;
+  return <Pill tone={ratingTone(r)}>{r}</Pill>;
 }
 
 // green → yellow → red gradient (t in 0..1), matching the original heat map.
@@ -125,9 +123,9 @@ export function QualityScoreComponents() {
             <tbody>
               {sec.components.map((c) => (
                 <Fragment key={c.key}>
-                  <tr className="bg-ink text-white">
-                    <td colSpan={10} className="px-3 py-2 text-[11px] font-bold uppercase tracking-[0.04em]">
-                      <span className="mr-2 inline-block rounded-[4px] bg-accent px-1.5 font-extrabold text-ink">{c.num}</span>
+                  <tr className="bg-surface-alt">
+                    <td colSpan={10} className="border-y border-border px-3 py-2 text-[11px] font-bold uppercase tracking-[0.04em] text-text-secondary">
+                      <span className="mr-2 inline-block rounded-[4px] bg-rule px-1.5 font-extrabold text-text-secondary">{c.num}</span>
                       {c.label}
                     </td>
                   </tr>
@@ -176,9 +174,9 @@ export function QualityScoreComponents() {
             <table className="w-full border-separate border-spacing-0 text-[12.5px]">
               <thead>
                 <tr>
-                  <th className="bg-ink px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-white">Expected CTR</th>
-                  <th className="bg-ink px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.03em] text-white">LP Experience</th>
-                  <th className="bg-ink px-3 py-2 text-center text-[11px] font-semibold uppercase tracking-[0.03em] text-white" colSpan={3}>Ad Relevance →</th>
+                  <th className="bg-surface-alt px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.04em] text-text-muted">Expected CTR</th>
+                  <th className="bg-surface-alt px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.04em] text-text-muted">LP Experience</th>
+                  <th className="bg-surface-alt px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.04em] text-text-muted" colSpan={3}>Ad Relevance →</th>
                 </tr>
                 <tr>
                   <th className="border-b border-rule"></th>

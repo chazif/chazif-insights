@@ -4,18 +4,14 @@ import { useBundle } from "../hooks/useBundle";
 import type { AdRow, AdGradeRow } from "../lib/types";
 import { money, num, pct } from "../lib/format";
 import { Panel } from "../components/ui/Panel";
+import { Pill } from "../components/ui/Pill";
+import { gradeTone } from "../lib/grades";
 import { DataTable, type Column } from "../components/ui/DataTable";
 import { Loading, ErrorState, Empty } from "../components/ui/States";
 
+// Grade pill via the shared React Pill (A/B green, C/D amber, F red, else grey).
 function GradePill({ g }: { g: string }) {
-  const c = (g[0] || "").toUpperCase();
-  const st =
-    c === "A" || c === "B" ? { background: "#dcfce7", color: "#166534" }
-    : c === "C" ? { background: "#fef3c7", color: "#92660a" }
-    : c === "D" ? { background: "#fce7ce", color: "#9a5b1e" }
-    : c === "F" ? { background: "#fee2e2", color: "#991b1b" }
-    : { background: "#eee", color: "#555" };
-  return <span className="inline-block rounded-[4px] px-1.5 py-0.5 text-[10.5px] font-medium" style={st}>{g}</span>;
+  return <Pill tone={gradeTone(g)}>{g}</Pill>;
 }
 
 const selectCls = "rounded-[7px] border border-border-strong bg-surface px-2.5 py-1 text-[13px]";

@@ -86,7 +86,7 @@ export function MonthlyTrends() {
             <XAxis dataKey="Month" tick={{ fontSize: 11, fill: "#6b7280", fontFamily: "JetBrains Mono" }} tickLine={false} axisLine={{ stroke: "#e5e7eb" }} minTickGap={16} />
             <YAxis yAxisId="left" width={56} tick={{ fontSize: 11, fill: "#6b7280", fontFamily: "JetBrains Mono" }} tickLine={false} axisLine={false} tickFormatter={axisFmt(primary)} />
             {secondary && (
-              <YAxis yAxisId="right" orientation="right" width={52} tick={{ fontSize: 11, fill: "#2563eb", fontFamily: "JetBrains Mono" }} tickLine={false} axisLine={false} tickFormatter={axisFmt(secondary)} />
+              <YAxis yAxisId="right" orientation="right" width={52} tick={{ fontSize: 11, fill: "#b45309", fontFamily: "JetBrains Mono" }} tickLine={false} axisLine={false} tickFormatter={axisFmt(secondary)} />
             )}
             <Tooltip
               contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12, fontFamily: "Instrument Sans" }}
@@ -100,9 +100,9 @@ export function MonthlyTrends() {
               dataKey={primary}
               name={labelOf(primary)}
               stroke="#1a1a1a"
-              strokeWidth={2}
-              fill="rgba(207,255,4,0.35)"
-              dot={{ r: 2.5, fill: "#cfff04", stroke: "#1a1a1a", strokeWidth: 1 }}
+              strokeWidth={1.8}
+              fill="rgba(26,26,26,0.05)"
+              dot={false}
               activeDot={{ r: 4 }}
               isAnimationActive={false}
             />
@@ -112,11 +112,11 @@ export function MonthlyTrends() {
                 type="monotone"
                 dataKey={secondary}
                 name={labelOf(secondary)}
-                stroke="#2563eb"
-                strokeWidth={2}
+                stroke="#b45309"
+                strokeWidth={1.8}
                 strokeDasharray="6 3"
                 fill="none"
-                dot={{ r: 2, fill: "#2563eb", stroke: "#1a1a1a" }}
+                dot={false}
                 activeDot={{ r: 4 }}
                 isAnimationActive={false}
               />

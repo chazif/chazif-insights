@@ -5,21 +5,17 @@ import type { GradeRow } from "../lib/types";
 import { money, num, pct } from "../lib/format";
 import { StatStrip } from "../components/ui/StatStrip";
 import { Panel } from "../components/ui/Panel";
+import { Pill } from "../components/ui/Pill";
+import { gradeTone } from "../lib/grades";
 import { DataTable, type Column } from "../components/ui/DataTable";
 import { Loading, ErrorState, Empty } from "../components/ui/States";
 
-const PALETTE = ["#cfff04", "#1a1a1a", "#2f7d4f", "#dc2626", "#9ca3af", "#6366f1", "#f59e0b", "#0ea5e9", "#a855f7", "#14b8a6"];
+// Neutral qualitative palette (no lime; lime is reserved for interactive elements).
+const PALETTE = ["#1a1a1a", "#6b7280", "#2f7d4f", "#dc2626", "#6366f1", "#b45309", "#0ea5e9", "#a855f7", "#14b8a6", "#9ca3af"];
 
-// Grade pill colours mirror the original: A/B green, C yellow, D orange, F red, else grey.
+// Grade pill via the shared React Pill (A/B green, C/D amber, F red, else grey).
 function GradePill({ g }: { g: string }) {
-  const c = (g[0] || "").toUpperCase();
-  const st =
-    c === "A" || c === "B" ? { background: "#dcfce7", color: "#166534" }
-    : c === "C" ? { background: "#fef3c7", color: "#92660a" }
-    : c === "D" ? { background: "#fce7ce", color: "#9a5b1e" }
-    : c === "F" ? { background: "#fee2e2", color: "#991b1b" }
-    : { background: "#eee", color: "#555" };
-  return <span className="inline-block rounded-[4px] px-1.5 py-0.5 text-[10.5px] font-medium" style={st}>{g}</span>;
+  return <Pill tone={gradeTone(g)}>{g}</Pill>;
 }
 
 export function SearchTermsIntent() {
