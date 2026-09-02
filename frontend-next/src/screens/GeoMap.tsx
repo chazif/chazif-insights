@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { GeoJSON, MapContainer, TileLayer } from "react-leaflet";
-import type { Layer } from "leaflet";
+import { GeoJSON, MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
+import L, { type Layer } from "leaflet";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import "leaflet/dist/leaflet.css";
 import { useBundle } from "../hooks/useBundle";
+import { getLocations } from "../lib/api";
 import type { GeoRow } from "../lib/types";
 import { money, num, pct } from "../lib/format";
 import { Loading, ErrorState, Empty } from "../components/ui/States";
@@ -39,6 +40,16 @@ function ramp(t: number) {
 }
 const norm = (s: string) => s.trim().toLowerCase();
 
+// Teardrop pin as an HTML div-icon — avoids Leaflet's default marker-image URLs, which
+// break under Vite's bundler.
+const PIN = L.divIcon({
+  className: "",
+  html: '<div style="width:14px;height:14px;border-radius:50% 50% 50% 0;background:#1a1a1a;border:2px solid #fff;transform:rotate(-45deg);box-shadow:0 1px 3px rgba(0,0,0,.4)"></div>',
+  iconSize: [14, 14],
+  iconAnchor: [7, 14],
+  popupAnchor: [0, -14],
+});
+
 export function GeoMap() {
   const { clientId = "" } = useParams();
   const { data, isLoading, error } = useBundle(clientId);
@@ -51,9 +62,11 @@ export function GeoMap() {
       return r.json();
     },
   });
+  const locations = useQuery({ queryKey: ["locations", clientId], queryFn: () => getLocations(clientId) });
   const [metric, setMetric] = useState<MetricKey>("cost");
 
   const g = data?.geo_performance;
+  const pins = (locations.data?.locations ?? []).filter((l) => l.lat != null && l.lng != null);
   const byName = useMemo(() => {
     const m = new Map<string, GeoRow>();
     (g?.rows ?? []).forEach((r) => m.set(norm(r.location), r));
@@ -125,6 +138,14 @@ export function GeoMap() {
         <MapContainer center={[39.5, -98.35]} zoom={4} scrollWheelZoom style={{ height: "100%", width: "100%" }}>
           <TileLayer url={TILES.url} attribution={TILES.attribution} subdomains={TILES.subdomains} />
           {geo.data && <GeoJSON key={metric} data={geo.data} style={styleFn} onEachFeature={onEach} />}
+          {pins.map((l) => (
+            <Marker key={l.id} position={[l.lat as number, l.lng as number]} icon={PIN}>
+              <Popup>
+                <div style={{ fontWeight: 600 }}>{l.name}</div>
+                <div style={{ color: "#6b7280" }}>{l.address}</div>
+              </Popup>
+            </Marker>
+          ))}
         </MapContainer>
         {/* legend */}
         <div className="pointer-events-none absolute bottom-3 left-3 z-[500] rounded-[8px] border border-border bg-surface/95 px-3 py-2 text-[11px] shadow-sm">

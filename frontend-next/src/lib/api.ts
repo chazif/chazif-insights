@@ -63,6 +63,14 @@ export const addClient = (name: string, googleCustomerId?: string) =>
 export const deleteClient = (clientId: string) =>
   del<{ deleted: string }>(`/api/clients/${encodeURIComponent(clientId)}`);
 
+// ---- Client locations (Map tab pins) ----
+export const getLocations = (clientId: string) =>
+  get<{ locations: import("./types").ClientLocation[] }>(`${cid(clientId)}/locations`);
+export const addLocation = (clientId: string, name: string, address: string) =>
+  send<import("./types").ClientLocation & { geocoded: boolean }>(`${cid(clientId)}/locations`, "POST", { name, address });
+export const deleteLocation = (clientId: string, id: number) =>
+  del<{ ok: boolean }>(`${cid(clientId)}/locations/${id}`);
+
 export function getBundle(clientId: string, params: import("./types").BundleParams = {}) {
   const sp = new URLSearchParams({ client: clientId });
   if (params.from) sp.set("from", params.from);

@@ -80,6 +80,19 @@ term_relevance = Table(
     Column("classified_at", DateTime),
 )
 
+# Client physical locations (store/office addresses) shown as pins on the Map tab.
+# Geocoded once on save (address -> lat/lng); config-like, so it stays in Postgres.
+client_locations = Table(
+    "client_locations", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("client_id", String(64), nullable=False, index=True),
+    Column("name", String(256)),
+    Column("address", String(512)),
+    Column("lat", Float),
+    Column("lng", Float),
+    Column("created_at", DateTime),
+)
+
 
 # Quality Score is point-in-time and non-additive: Google only returns the CURRENT
 # value, so we build our own append-only, frozen-in-time history. One row per
@@ -128,7 +141,7 @@ def init_db(engine):
     # them in Postgres, so a decommission (engine.warehouse.teardown) stays torn down across
     # restarts. clients / uploads / term_relevance always live in Postgres.
     if bq.active():
-        metadata.create_all(engine, tables=[clients, uploads, term_relevance])
+        metadata.create_all(engine, tables=[clients, uploads, term_relevance, client_locations])
     else:
         metadata.create_all(engine)
     # add-column-if-missing migrations for existing DBs (SQLite + Postgres both take this form)

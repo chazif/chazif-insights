@@ -160,6 +160,32 @@ def clients_delete(client_id: str):
     return result
 
 
+@app.get("/api/clients/{client_id}/locations")
+def client_locations_get(client_id: str):
+    """Physical store/office locations for the Map tab."""
+    return {"locations": service.list_locations(client_id, engine=_engine)}
+
+
+@app.post("/api/clients/{client_id}/locations", status_code=201)
+def client_locations_post(client_id: str, body: dict):
+    """Add a location. The server geocodes the address (OpenStreetMap Nominatim) and
+    stores the resulting coordinates; `geocoded=false` in the reply means it couldn't be
+    placed on the map (fix the address and re-add)."""
+    if service.get_client(_engine, client_id) is None:
+        raise HTTPException(404, f"unknown client '{client_id}'")
+    address = (body.get("address") or "").strip()
+    if not address:
+        raise HTTPException(400, "address is required")
+    name = (body.get("name") or "").strip() or address
+    return service.add_location(client_id, name, address, engine=_engine)
+
+
+@app.delete("/api/clients/{client_id}/locations/{loc_id}")
+def client_locations_delete(client_id: str, loc_id: int):
+    service.delete_location(client_id, loc_id, engine=_engine)
+    return {"ok": True}
+
+
 @app.get("/api/clients/{client_id}/config")
 def client_config_get(client_id: str):
     cfg = service.get_config(client_id, engine=_engine)

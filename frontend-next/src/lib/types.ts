@@ -128,6 +128,15 @@ export interface LpRow {
   score: string;
 }
 
+export interface ClientLocation {
+  id: number;
+  client_id: string;
+  name: string;
+  address: string;
+  lat: number | null;
+  lng: number | null;
+}
+
 export interface GeoRow {
   location: string;
   clicks: number;

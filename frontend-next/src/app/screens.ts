@@ -28,6 +28,7 @@ import { ClientView } from "../screens/ClientView";
 import { BudgetInput } from "../screens/BudgetInput";
 import { BudgetAllocation } from "../screens/BudgetAllocation";
 import { BusinessContext } from "../screens/BusinessContext";
+import { Locations } from "../screens/Locations";
 import { CampaignMapping } from "../screens/CampaignMapping";
 import { Clients } from "../screens/Clients";
 import { DataInventory } from "../screens/DataInventory";
@@ -68,6 +69,7 @@ export const SCREENS: Record<string, ComponentType> = {
   ledger: Ledger,
   "client-view": ClientView,
   "business-context": BusinessContext,
+  "locations": Locations,
   "campaign-mapping": CampaignMapping,
   "data-inventory": DataInventory,
   "upload-data": UploadData,

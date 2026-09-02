@@ -3,14 +3,47 @@
 Plain functions so they're verifiable without a running server."""
 import datetime, re, os, glob
 from collections import defaultdict
-from sqlalchemy import select, func, insert, update, inspect
-from .store import get_engine, init_db, clients, uploads, raw_rows, term_relevance
+from sqlalchemy import select, func, insert, update, delete, inspect
+from .store import get_engine, init_db, clients, uploads, raw_rows, term_relevance, client_locations
 from .store import metadata as _ingest_md
 from .parser import (EXPECTED_REPORTS, account_cols, date_column, infer_date_order,
                      read_csv_header, iter_csv_rows)
 from .load import load_folder, replace_report, replace_report_bq
 from ..warehouse import bq
+from ..geocode import geocode
 from ..clientconfig import sanitize, merged
+
+
+def list_locations(client_id, engine=None):
+    """All saved physical locations for a client (for the Map tab + Setup screen)."""
+    engine = engine or get_engine(); init_db(engine)
+    with engine.connect() as c:
+        rows = c.execute(select(client_locations).where(client_locations.c.client_id == client_id)
+                         .order_by(client_locations.c.id)).all()
+    return [dict(r._mapping) for r in rows]
+
+
+def add_location(client_id, name, address, engine=None):
+    """Geocode the address once and store the location. Returns the new row (with a
+    `geocoded` flag so the UI can warn when an address couldn't be placed on the map)."""
+    engine = engine or get_engine(); init_db(engine)
+    coords = geocode(address)
+    lat, lng = coords if coords else (None, None)
+    with engine.begin() as c:
+        res = c.execute(insert(client_locations).values(
+            client_id=client_id, name=name, address=address, lat=lat, lng=lng,
+            created_at=datetime.datetime.now(datetime.timezone.utc)))
+        loc_id = res.inserted_primary_key[0]
+    return {"id": loc_id, "client_id": client_id, "name": name, "address": address,
+            "lat": lat, "lng": lng, "geocoded": coords is not None}
+
+
+def delete_location(client_id, loc_id, engine=None):
+    """Remove one location by id (scoped to the client so ids can't cross clients)."""
+    engine = engine or get_engine(); init_db(engine)
+    with engine.begin() as c:
+        c.execute(delete(client_locations).where(
+            (client_locations.c.id == loc_id) & (client_locations.c.client_id == client_id)))
 
 
 def slug_client(name: str) -> str:

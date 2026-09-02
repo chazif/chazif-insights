@@ -106,7 +106,7 @@ export const NAV: JobDef[] = [
         title: "Data",
         views: [v("upload-data", "Upload Data", [], { built: true }), v("ads-api", "Google Ads API", [], { built: true }), v("data-inventory", "Data Inventory", [], { built: true }), v("campaign-mapping", "Campaign Mapping", [], { built: true })],
       },
-      { title: "Settings", views: [v("business-context", "Business Context", [], { built: true }), v("clients", "Clients", [], { admin: true, built: true })] },
+      { title: "Settings", views: [v("business-context", "Business Context", [], { built: true }), v("locations", "Locations", [], { built: true }), v("clients", "Clients", [], { admin: true, built: true })] },
     ],
   },
 ];
