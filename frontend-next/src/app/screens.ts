@@ -4,6 +4,7 @@ import { ShoppingOverview } from "../screens/ShoppingOverview";
 import { ProductsSold } from "../screens/ProductsSold";
 import { SearchTermsIntent } from "../screens/SearchTermsIntent";
 import { GeoPerformance } from "../screens/GeoPerformance";
+import { GeoMap } from "../screens/GeoMap";
 import { Overview } from "../screens/Overview";
 import { MonthlyTrends } from "../screens/MonthlyTrends";
 import { LpPerformance } from "../screens/LpPerformance";
@@ -58,6 +59,7 @@ export const SCREENS: Record<string, ComponentType> = {
   "lp-performance": LpPerformance,
   "lp-category-grid": LpCategoryGrid,
   "geo-performance": GeoPerformance,
+  "geo-map": GeoMap,
   "auction-insights": AuctionInsights,
   "budget-allocation": BudgetAllocation,
   budget: Budget,
