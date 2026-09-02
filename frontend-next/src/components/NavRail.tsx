@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { NAV, type JobDef, type CategoryDef, type ViewDef } from "../nav/model";
 import { JobIcon, SearchIcon } from "./ui/JobIcon";
 import { ClientSwitcher } from "./ClientSwitcher";
@@ -20,11 +20,12 @@ const jobActive = (job: JobDef, slug: string) =>
 const catActive = (cat: CategoryDef, slug: string) => cat.views.some((v) => v.slug === slug);
 
 function ViewRow({ clientId, view, active, depth, onSelect }: { clientId: string; view: ViewDef; active: boolean; depth: 2 | 3; onSelect: () => void }) {
+  const { search } = useLocation();   // carry the active top-bar filters across tabs
   const ml = depth === 3 ? "ml-[22px]" : "ml-[9px]";
   const dot = !view.built ? "bg-transparent" : active ? "bg-ink" : "bg-text-muted";
   return (
     <Link
-      to={`/c/${clientId}/${view.slug}`}
+      to={{ pathname: `/c/${clientId}/${view.slug}`, search }}
       onClick={onSelect}
       className={`flex items-center gap-2 rounded-[6px] px-[9px] py-1 text-[12px] leading-[1.35] ${ml} ${
         active ? "bg-accent font-semibold text-ink" : "text-text-disabled hover:bg-white/[0.06]"

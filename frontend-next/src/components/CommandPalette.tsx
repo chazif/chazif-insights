@@ -1,12 +1,13 @@
 import { useEffect } from "react";
 import { Command } from "cmdk";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { NAV, breadcrumb, type ViewDef } from "../nav/model";
 
 // ⌘K command palette. Searches views (actions/campaigns/keywords join later). Escape or a
 // scrim click closes; selecting a view navigates and closes.
 export function CommandPalette({ open, onClose, clientId }: { open: boolean; onClose: () => void; clientId: string }) {
   const navigate = useNavigate();
+  const { search } = useLocation();   // carry the active top-bar filters across the jump
 
   useEffect(() => {
     if (!open) return;
@@ -26,7 +27,7 @@ export function CommandPalette({ open, onClose, clientId }: { open: boolean; onC
   }
   const go = (slug: string) => {
     onClose();
-    navigate(`/c/${clientId}/${slug}`);
+    navigate({ pathname: `/c/${clientId}/${slug}`, search });
   };
 
   return (

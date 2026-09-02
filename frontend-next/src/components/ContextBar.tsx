@@ -245,12 +245,24 @@ export function ContextBar({ view, clientId = "" }: { view?: ResolvedView; clien
 
           <div className="ml-auto flex items-center gap-1.5">
             <Label>Dates</Label>
-            <DatesControl from={sp.get("from") || ""} to={sp.get("to") || ""} dp={sp.get("dp") || ""} apply={applyMany} />
+            <DatesControl
+              from={sp.get("from") || ""}
+              to={sp.get("to") || ""}
+              dp={sp.get("dp") || (!sp.get("from") && !sp.get("to") ? "mtd" : "")}
+              apply={applyMany}
+            />
           </div>
           <div className="flex items-center gap-1.5">
             <Label>vs</Label>
-            <Toggle options={CMP_OPTS} value={g("compare", "yoy")} onChange={(v) => set("compare", v, "yoy")} />
+            <Toggle options={CMP_OPTS} value={g("compare", "mom")} onChange={(v) => set("compare", v, "mom")} />
           </div>
+          <button
+            onClick={() => setSp(new URLSearchParams(), { replace: true })}
+            title="Clear all filters (back to MTD · MoM)"
+            className="rounded-[6px] border border-border-strong bg-surface px-2.5 py-1 text-[12px] text-text-muted hover:border-ink hover:text-ink"
+          >
+            Reset
+          </button>
         </div>
       )}
     </div>
