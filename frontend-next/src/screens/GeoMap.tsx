@@ -19,12 +19,16 @@ const TILES = MAPTILER_KEY
   ? { url: `https://api.maptiler.com/maps/dataviz/{z}/{x}/{y}.png?key=${MAPTILER_KEY}`, attribution: `© <a href="https://www.maptiler.com/copyright/" target="_blank" rel="noopener">MapTiler</a> ${OSM_ATTR}`, subdomains: [] as string[] }
   : { url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", attribution: OSM_ATTR, subdomains: ["a", "b", "c"] };
 
-type MetricKey = "cost" | "clicks" | "conv" | "conv_value" | "ctr";
+// Every metric the Geographic report carries.
+type MetricKey = "cost" | "clicks" | "impr" | "conv" | "conv_value" | "cpa" | "cvr" | "ctr";
 const METRICS: { key: MetricKey; label: string; fmt: (v: number) => string; sqrt: boolean }[] = [
   { key: "cost", label: "Spend", fmt: (v) => money(v), sqrt: true },
   { key: "clicks", label: "Clicks", fmt: (v) => num(v), sqrt: true },
+  { key: "impr", label: "Impressions", fmt: (v) => num(v), sqrt: true },
   { key: "conv", label: "Conversions", fmt: (v) => num(v, 1), sqrt: true },
   { key: "conv_value", label: "Conv Value", fmt: (v) => money(v), sqrt: true },
+  { key: "cpa", label: "CPA", fmt: (v) => money(v, 2), sqrt: true },
+  { key: "cvr", label: "CVR", fmt: (v) => pct(v, 2), sqrt: false },
   { key: "ctr", label: "CTR", fmt: (v) => pct(v, 2), sqrt: false },
 ];
 
@@ -131,11 +135,10 @@ export function GeoMap() {
     const row = rowFor(feature);
     const body = row
       ? `<div style="font-weight:600;margin-bottom:2px">${name}</div>
-         <div>Spend: <b>${money(row.cost)}</b></div>
-         <div>Conversions: <b>${num(row.conv, 1)}</b></div>
-         <div>Conv Value: <b>${money(row.conv_value)}</b></div>
-         <div>CTR: <b>${pct(row.ctr, 2)}</b> · Clicks: ${num(row.clicks)}</div>`
-      : `<div style="font-weight:600">${name}</div><div style="color:#6b7280">No spend in range</div>`;
+         <div>Spend: <b>${money(row.cost)}</b> · CPA: <b>${row.cpa ? money(row.cpa, 2) : "—"}</b></div>
+         <div>Clicks: <b>${num(row.clicks)}</b> · Impr: <b>${num(row.impr)}</b> · CTR: <b>${pct(row.ctr, 2)}</b></div>
+         <div>Conv: <b>${num(row.conv, 1)}</b> · CVR: <b>${pct(row.cvr, 2)}</b> · Value: <b>${money(row.conv_value)}</b></div>`
+      : `<div style="font-weight:600">${name}</div><div style="color:#6b7280">No data in range</div>`;
     layer.bindTooltip(body, { sticky: true, className: "geo-tt", direction: "top" });
   };
 
@@ -159,17 +162,18 @@ export function GeoMap() {
             </button>
           )}
           {hasGeo && (
-            <div className="inline-flex overflow-hidden rounded-[7px] border border-border-strong divide-x divide-border-strong">
-              {METRICS.map((m) => (
-                <button
-                  key={m.key}
-                  onClick={() => setMetric(m.key)}
-                  className={`px-3 py-1 text-[13px] font-medium ${metric === m.key ? "bg-ink text-accent" : "bg-surface text-text-muted hover:text-ink"}`}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
+            <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-muted">
+              Metric
+              <select
+                value={metric}
+                onChange={(e) => setMetric(e.target.value as MetricKey)}
+                className="rounded-[7px] border border-border-strong bg-surface px-2.5 py-1 text-[13px] font-medium normal-case tracking-normal text-ink focus:border-ink focus:outline-none"
+              >
+                {METRICS.map((m) => (
+                  <option key={m.key} value={m.key}>{m.label}</option>
+                ))}
+              </select>
+            </label>
           )}
         </div>
       </div>
