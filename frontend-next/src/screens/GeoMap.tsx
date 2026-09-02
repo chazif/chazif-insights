@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { GeoJSON, MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
+import { Circle, GeoJSON, MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
 import L, { type Layer } from "leaflet";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import "leaflet/dist/leaflet.css";
 import { useBundle } from "../hooks/useBundle";
-import { getLocations } from "../lib/api";
+import { getGeoTargets, getLocations } from "../lib/api";
 import type { GeoRow } from "../lib/types";
 import { money, num, pct } from "../lib/format";
 import { Loading, ErrorState, Empty } from "../components/ui/States";
@@ -67,10 +67,17 @@ export function GeoMap() {
     },
   });
   const locations = useQuery({ queryKey: ["locations", clientId], queryFn: () => getLocations(clientId) });
+  // Best-effort — the endpoint returns empty (never errors) when the Ads API isn't reachable.
+  const geoTargets = useQuery({ queryKey: ["geo-targets", clientId], queryFn: () => getGeoTargets(clientId), retry: false });
   const [metric, setMetric] = useState<MetricKey>("cost");
+  const [showTargets, setShowTargets] = useState(true);
 
   const g = data?.geo_performance;
   const pins = (locations.data?.locations ?? []).filter((l) => l.lat != null && l.lng != null);
+  const targets = geoTargets.data?.targets ?? [];
+  const radiusTargets = targets.filter((t) => t.type === "radius" && t.lat != null && t.lng != null && t.radius_m);
+  const targetRegions = useMemo(() => new Set(targets.filter((t) => t.type === "location" && t.name).map((t) => norm(t.name as string))), [targets]);
+  const hasTargets = radiusTargets.length > 0 || targetRegions.size > 0;
   const byName = useMemo(() => {
     const m = new Map<string, GeoRow>();
     (g?.rows ?? []).forEach((r) => m.set(norm(r.location), r));
@@ -107,7 +114,14 @@ export function GeoMap() {
     const row = rowFor(feature);
     const v = row ? row[metric] ?? 0 : 0;
     const has = !!row && v > 0;
-    return { fillColor: has ? ramp(scaleT(v)) : "#e5e7eb", fillOpacity: has ? 0.82 : 0.25, weight: 0.8, color: "#ffffff", opacity: 1 };
+    const targeted = showTargets && targetRegions.size > 0 && aliases(feature?.properties).some((a) => targetRegions.has(a));
+    return {
+      fillColor: has ? ramp(scaleT(v)) : "#e5e7eb",
+      fillOpacity: has ? 0.82 : 0.25,
+      weight: targeted ? 2.4 : 0.8,
+      color: targeted ? "#1a1a1a" : "#ffffff",
+      opacity: 1,
+    };
   };
   const onEach = (feature: Feature<Geometry, FProps>, layer: Layer) => {
     const name = feature.properties?.name ?? "";
@@ -131,23 +145,42 @@ export function GeoMap() {
             {metricDef.label} by region · states & provinces shaded by performance{!MAPTILER_KEY && " · dev basemap"}
           </div>
         </div>
-        <div className="inline-flex shrink-0 overflow-hidden rounded-[7px] border border-border-strong divide-x divide-border-strong">
-          {METRICS.map((m) => (
+        <div className="flex shrink-0 items-center gap-3">
+          {hasTargets && (
             <button
-              key={m.key}
-              onClick={() => setMetric(m.key)}
-              className={`px-3 py-1 text-[13px] font-medium ${metric === m.key ? "bg-ink text-accent" : "bg-surface text-text-muted hover:text-ink"}`}
+              onClick={() => setShowTargets((v) => !v)}
+              className={`rounded-[7px] border px-3 py-1 text-[13px] font-medium ${showTargets ? "border-ink bg-ink text-accent" : "border-border-strong text-text-muted hover:text-ink"}`}
             >
-              {m.label}
+              Geo-targets
             </button>
-          ))}
+          )}
+          <div className="inline-flex overflow-hidden rounded-[7px] border border-border-strong divide-x divide-border-strong">
+            {METRICS.map((m) => (
+              <button
+                key={m.key}
+                onClick={() => setMetric(m.key)}
+                className={`px-3 py-1 text-[13px] font-medium ${metric === m.key ? "bg-ink text-accent" : "bg-surface text-text-muted hover:text-ink"}`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       <div className="relative overflow-hidden rounded-[10px] border border-border" style={{ height: 580 }}>
         <MapContainer center={[39.5, -98.35]} zoom={4} scrollWheelZoom style={{ height: "100%", width: "100%" }}>
           <TileLayer url={TILES.url} attribution={TILES.attribution} subdomains={TILES.subdomains} />
-          {geo.data && <GeoJSON key={metric} data={geo.data} style={styleFn} onEachFeature={onEach} />}
+          {geo.data && <GeoJSON key={`${metric}:${showTargets}:${targetRegions.size}`} data={geo.data} style={styleFn} onEachFeature={onEach} />}
+          {showTargets && radiusTargets.map((t, i) => (
+            <Circle key={i} center={[t.lat as number, t.lng as number]} radius={t.radius_m as number}
+              pathOptions={{ color: "#1a1a1a", weight: 1.5, fillColor: "#1a1a1a", fillOpacity: 0.06 }}>
+              <Popup>
+                <div style={{ fontWeight: 600 }}>{t.campaign}</div>
+                <div style={{ color: "#6b7280" }}>Radius target · {((t.radius_m as number) / 1609.34).toFixed(0)} mi</div>
+              </Popup>
+            </Circle>
+          ))}
           {pins.map((l) => (
             <Marker key={l.id} position={[l.lat as number, l.lng as number]} icon={PIN}>
               <Popup>

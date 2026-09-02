@@ -186,6 +186,21 @@ def client_locations_delete(client_id: str, loc_id: int):
     return {"ok": True}
 
 
+@app.get("/api/clients/{client_id}/geo-targets")
+def client_geo_targets(client_id: str):
+    """Best-effort campaign geo-targeting for the Map overlay. NEVER errors: returns an
+    empty list when the Google Ads API isn't reachable or the client has no targets, so
+    the map simply draws no overlay. Self-activates once a live account is connected."""
+    try:
+        client = service.get_client(_engine, client_id)
+        if not client:
+            return {"targets": [], "available": False}
+        from engine.adsapi.geo_targets import pull_geo_targets
+        return pull_geo_targets(client)
+    except Exception:
+        return {"targets": [], "available": False}
+
+
 @app.get("/api/clients/{client_id}/config")
 def client_config_get(client_id: str):
     cfg = service.get_config(client_id, engine=_engine)

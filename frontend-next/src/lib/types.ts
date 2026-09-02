@@ -137,6 +137,15 @@ export interface ClientLocation {
   lng: number | null;
 }
 
+export interface GeoTarget {
+  campaign: string;
+  type: "radius" | "location";
+  lat?: number;
+  lng?: number;
+  radius_m?: number;
+  name?: string;
+}
+
 export interface GeoRow {
   location: string;
   clicks: number;

@@ -71,6 +71,10 @@ export const addLocation = (clientId: string, name: string, address: string) =>
 export const deleteLocation = (clientId: string, id: number) =>
   del<{ ok: boolean }>(`${cid(clientId)}/locations/${id}`);
 
+// ---- Campaign geo-targets (Map overlay; empty when the Ads API isn't reachable) ----
+export const getGeoTargets = (clientId: string) =>
+  get<{ targets: import("./types").GeoTarget[]; available: boolean }>(`${cid(clientId)}/geo-targets`);
+
 export function getBundle(clientId: string, params: import("./types").BundleParams = {}) {
   const sp = new URLSearchParams({ client: clientId });
   if (params.from) sp.set("from", params.from);
