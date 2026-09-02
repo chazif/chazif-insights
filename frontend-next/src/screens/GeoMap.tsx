@@ -57,9 +57,11 @@ const PIN = L.divIcon({
 export function GeoMap() {
   const { clientId = "" } = useParams();
   const { data, isLoading, error } = useBundle(clientId);
+  const hasGeo = !!data?.geo_performance?.rows?.length;
   const geo = useQuery({
     queryKey: ["world-states-geojson"],
     staleTime: Infinity,
+    enabled: hasGeo, // skip the boundary download entirely when there's nothing to shade
     queryFn: async (): Promise<FeatureCollection> => {
       const r = await fetch(`${import.meta.env.BASE_URL}world-states.geojson`);
       if (!r.ok) throw new Error("Failed to load map boundaries");
@@ -102,10 +104,11 @@ export function GeoMap() {
     return mx;
   }, [g, metric, matchSet]);
 
-  if (isLoading || geo.isLoading) return <Loading />;
+  if (isLoading || locations.isLoading || (hasGeo && geo.isLoading)) return <Loading />;
   if (error) return <ErrorState msg={(error as Error).message} />;
-  if (geo.error) return <ErrorState msg={(geo.error as Error).message} />;
-  if (!g || !g.rows.length) return <Empty what="No geographic data for this client." />;
+  if (hasGeo && geo.error) return <ErrorState msg={(geo.error as Error).message} />;
+  if (!hasGeo && pins.length === 0 && !hasTargets)
+    return <Empty what="No geographic data or saved locations yet. Add locations in Setup → Locations to see them on the map." />;
 
   const metricDef = METRICS.find((m) => m.key === metric)!;
   const scaleT = (v: number) => (maxVal <= 0 ? 0 : metricDef.sqrt ? Math.sqrt(v / maxVal) : v / maxVal);
@@ -142,7 +145,8 @@ export function GeoMap() {
         <div>
           <h2 className="text-[18px] font-semibold">Map</h2>
           <div className="text-[12.5px] text-text-muted">
-            {metricDef.label} by region · states & provinces shaded by performance{!MAPTILER_KEY && " · dev basemap"}
+            {hasGeo ? `${metricDef.label} by region · states & provinces shaded by performance` : "Client locations & campaign geo-targets"}
+            {!MAPTILER_KEY && " · dev basemap"}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-3">
@@ -154,24 +158,26 @@ export function GeoMap() {
               Geo-targets
             </button>
           )}
-          <div className="inline-flex overflow-hidden rounded-[7px] border border-border-strong divide-x divide-border-strong">
-            {METRICS.map((m) => (
-              <button
-                key={m.key}
-                onClick={() => setMetric(m.key)}
-                className={`px-3 py-1 text-[13px] font-medium ${metric === m.key ? "bg-ink text-accent" : "bg-surface text-text-muted hover:text-ink"}`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
+          {hasGeo && (
+            <div className="inline-flex overflow-hidden rounded-[7px] border border-border-strong divide-x divide-border-strong">
+              {METRICS.map((m) => (
+                <button
+                  key={m.key}
+                  onClick={() => setMetric(m.key)}
+                  className={`px-3 py-1 text-[13px] font-medium ${metric === m.key ? "bg-ink text-accent" : "bg-surface text-text-muted hover:text-ink"}`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
       <div className="relative overflow-hidden rounded-[10px] border border-border" style={{ height: 580 }}>
         <MapContainer center={[39.5, -98.35]} zoom={4} scrollWheelZoom style={{ height: "100%", width: "100%" }}>
           <TileLayer url={TILES.url} attribution={TILES.attribution} subdomains={TILES.subdomains} />
-          {geo.data && <GeoJSON key={`${metric}:${showTargets}:${targetRegions.size}`} data={geo.data} style={styleFn} onEachFeature={onEach} />}
+          {hasGeo && geo.data && <GeoJSON key={`${metric}:${showTargets}:${targetRegions.size}`} data={geo.data} style={styleFn} onEachFeature={onEach} />}
           {showTargets && radiusTargets.map((t, i) => (
             <Circle key={i} center={[t.lat as number, t.lng as number]} radius={t.radius_m as number}
               pathOptions={{ color: "#1a1a1a", weight: 1.5, fillColor: "#1a1a1a", fillOpacity: 0.06 }}>
@@ -191,17 +197,19 @@ export function GeoMap() {
           ))}
         </MapContainer>
         {/* legend */}
-        <div className="pointer-events-none absolute bottom-3 left-3 z-[500] rounded-[8px] border border-border bg-surface/95 px-3 py-2 text-[11px] shadow-sm">
-          <div className="mb-1 font-semibold text-text-secondary">{metricDef.label}</div>
-          <div className="h-2 w-40 rounded" style={{ background: `linear-gradient(90deg, ${ramp(0)}, ${ramp(0.5)}, ${ramp(1)})` }} />
-          <div className="mt-0.5 flex justify-between text-text-muted">
-            <span>0</span>
-            <span>{metricDef.fmt(maxVal)}</span>
+        {hasGeo && (
+          <div className="pointer-events-none absolute bottom-3 left-3 z-[500] rounded-[8px] border border-border bg-surface/95 px-3 py-2 text-[11px] shadow-sm">
+            <div className="mb-1 font-semibold text-text-secondary">{metricDef.label}</div>
+            <div className="h-2 w-40 rounded" style={{ background: `linear-gradient(90deg, ${ramp(0)}, ${ramp(0.5)}, ${ramp(1)})` }} />
+            <div className="mt-0.5 flex justify-between text-text-muted">
+              <span>0</span>
+              <span>{metricDef.fmt(maxVal)}</span>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {offMap.length > 0 && (
+      {hasGeo && offMap.length > 0 && (
         <div className="mt-3 rounded-[8px] border border-border bg-surface-alt px-3 py-2 text-[12px] text-text-secondary">
           <span className="font-medium">Not matched to a region ({offMap.length}):</span>{" "}
           {offMap.map((r, i) => (
