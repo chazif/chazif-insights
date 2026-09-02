@@ -38,7 +38,11 @@ function ramp(t: number) {
   const a = stops[seg], b = stops[seg + 1];
   return `rgb(${lerp(a[0], b[0], u)},${lerp(a[1], b[1], u)},${lerp(a[2], b[2], u)})`;
 }
-const norm = (s: string) => s.trim().toLowerCase();
+const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+// Boundary feature carries a display name plus every name alias (English/local/etc.) it
+// can be matched against — Google Ads location names vary ("Hessen" vs "Hesse").
+type FProps = { name?: string; match?: string[] };
+const aliases = (p?: FProps) => p?.match ?? (p?.name ? [norm(p.name)] : []);
 
 // Teardrop pin as an HTML div-icon — avoids Leaflet's default marker-image URLs, which
 // break under Vite's bundler.
@@ -54,10 +58,10 @@ export function GeoMap() {
   const { clientId = "" } = useParams();
   const { data, isLoading, error } = useBundle(clientId);
   const geo = useQuery({
-    queryKey: ["us-states-geojson"],
+    queryKey: ["world-states-geojson"],
     staleTime: Infinity,
     queryFn: async (): Promise<FeatureCollection> => {
-      const r = await fetch(`${import.meta.env.BASE_URL}us-states.geojson`);
+      const r = await fetch(`${import.meta.env.BASE_URL}world-states.geojson`);
       if (!r.ok) throw new Error("Failed to load map boundaries");
       return r.json();
     },
@@ -73,17 +77,23 @@ export function GeoMap() {
     return m;
   }, [g]);
 
-  const featureNames = useMemo(
-    () => new Set((geo.data?.features ?? []).map((f) => norm((f.properties as { name?: string })?.name ?? ""))),
-    [geo.data],
-  );
-  // rows whose location has no polygon in this (US-only) boundary set — surfaced below the map.
-  const offMap = useMemo(() => (g?.rows ?? []).filter((r) => !featureNames.has(norm(r.location))).sort((a, b) => b.cost - a.cost), [g, featureNames]);
+  // every name alias present in the boundary set — a location is "on the map" if it matches one.
+  const matchSet = useMemo(() => {
+    const s = new Set<string>();
+    (geo.data?.features ?? []).forEach((f) => aliases(f.properties as FProps).forEach((m) => s.add(m)));
+    return s;
+  }, [geo.data]);
+  const rowFor = (f?: Feature<Geometry, FProps>) => {
+    for (const m of aliases(f?.properties)) { const r = byName.get(m); if (r) return r; }
+    return undefined;
+  };
+  // rows whose location has no polygon in the boundary set (rare) — surfaced below the map.
+  const offMap = useMemo(() => (g?.rows ?? []).filter((r) => !matchSet.has(norm(r.location))).sort((a, b) => b.cost - a.cost), [g, matchSet]);
   const maxVal = useMemo(() => {
     let mx = 0;
-    (g?.rows ?? []).forEach((r) => { const v = r[metric] ?? 0; if (featureNames.has(norm(r.location)) && v > mx) mx = v; });
+    (g?.rows ?? []).forEach((r) => { const v = r[metric] ?? 0; if (matchSet.has(norm(r.location)) && v > mx) mx = v; });
     return mx;
-  }, [g, metric, featureNames]);
+  }, [g, metric, matchSet]);
 
   if (isLoading || geo.isLoading) return <Loading />;
   if (error) return <ErrorState msg={(error as Error).message} />;
@@ -93,15 +103,15 @@ export function GeoMap() {
   const metricDef = METRICS.find((m) => m.key === metric)!;
   const scaleT = (v: number) => (maxVal <= 0 ? 0 : metricDef.sqrt ? Math.sqrt(v / maxVal) : v / maxVal);
 
-  const styleFn = (feature?: Feature<Geometry, { name?: string }>) => {
-    const row = feature ? byName.get(norm(feature.properties?.name ?? "")) : undefined;
+  const styleFn = (feature?: Feature<Geometry, FProps>) => {
+    const row = rowFor(feature);
     const v = row ? row[metric] ?? 0 : 0;
     const has = !!row && v > 0;
     return { fillColor: has ? ramp(scaleT(v)) : "#e5e7eb", fillOpacity: has ? 0.82 : 0.25, weight: 0.8, color: "#ffffff", opacity: 1 };
   };
-  const onEach = (feature: Feature<Geometry, { name?: string }>, layer: Layer) => {
+  const onEach = (feature: Feature<Geometry, FProps>, layer: Layer) => {
     const name = feature.properties?.name ?? "";
-    const row = byName.get(norm(name));
+    const row = rowFor(feature);
     const body = row
       ? `<div style="font-weight:600;margin-bottom:2px">${name}</div>
          <div>Spend: <b>${money(row.cost)}</b></div>
@@ -118,7 +128,7 @@ export function GeoMap() {
         <div>
           <h2 className="text-[18px] font-semibold">Map</h2>
           <div className="text-[12.5px] text-text-muted">
-            {metricDef.label} by state · US states shaded by performance{!MAPTILER_KEY && " · dev basemap"}
+            {metricDef.label} by region · states & provinces shaded by performance{!MAPTILER_KEY && " · dev basemap"}
           </div>
         </div>
         <div className="inline-flex shrink-0 overflow-hidden rounded-[7px] border border-border-strong divide-x divide-border-strong">
@@ -160,11 +170,10 @@ export function GeoMap() {
 
       {offMap.length > 0 && (
         <div className="mt-3 rounded-[8px] border border-border bg-surface-alt px-3 py-2 text-[12px] text-text-secondary">
-          <span className="font-medium">Not on the US map ({offMap.length}):</span>{" "}
+          <span className="font-medium">Not matched to a region ({offMap.length}):</span>{" "}
           {offMap.map((r, i) => (
             <span key={r.location}>{i > 0 && " · "}{r.location} ({metricDef.fmt(r[metric] ?? 0)})</span>
           ))}
-          <span className="text-text-muted"> — add the world boundary set to shade these.</span>
         </div>
       )}
     </div>
