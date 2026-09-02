@@ -188,26 +188,22 @@ def _cp_range_sums(c, client_id, keep, lo, hi):
 
 def _latest_complete_month(engine, client_id, today=None):
     """From the export window_end, return the latest month to anchor on as
-    {year, month, ym, full, abbr}, or None.
+    {year, month, ym, full, abbr}, or None — always the month of the latest window_end.
 
-    A window ending mid-month normally means that month is still partial, so we step
-    back one. The exception is the CURRENT calendar month: it is expected to be
-    month-to-date (you can never have its final days yet), so we show it as the latest
-    month rather than hiding it. A genuinely truncated PAST month is still stepped over.
-    Note: when the current month is anchored this way it is month-to-date, so YoY/MoM
-    comparisons weigh a partial month against a full prior period until the month ends."""
-    today = today or datetime.date.today()
+    We do NOT step back when the window ends mid-month. Doing so hid the latest month's
+    data twice over: the CURRENT calendar month (which is always month-to-date — you can't
+    have its final days yet) and any PAST month whose export simply stopped a day short of
+    month-end (e.g. data through Aug 30, viewed in September). Both are legitimate 'latest'
+    months and should show. When the anchored month is still open it is month-to-date, so
+    YoY/MoM comparisons weigh it against a full prior period until it closes. `today` is
+    accepted for call/test compatibility but no longer affects the result."""
+    today = today or datetime.date.today()  # noqa: F841 — kept for signature compatibility
     with engine.connect() as c:
         we = c.execute(select(func.max(uploads.c.window_end)).where(
             uploads.c.client_id == client_id)).scalar()
     if not we:
         return None
     y, m = we.year, we.month
-    is_current_month = (y == today.year and m == today.month)
-    if we.day < calendar.monthrange(y, m)[1] and not is_current_month:
-        m -= 1
-        if m == 0:
-            m, y = 12, y - 1
     return {"year": y, "month": m, "ym": f"{y}-{m:02d}",
             "full": f"{FULL_MONTHS[m-1]} {y}", "abbr": f"{MABBR[m-1]} {y}"}
 

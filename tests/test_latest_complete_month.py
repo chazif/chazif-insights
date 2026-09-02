@@ -49,12 +49,12 @@ def test_full_current_month_shown(engine):
     assert (cm["year"], cm["month"]) == (2026, 8)
 
 
-def test_past_truncated_month_still_stepped_back(engine):
-    """Data ends mid-August but it's now September -> August is a past, truncated month,
-    so it's still treated as partial and we step back to July."""
+def test_past_month_ending_mid_month_is_shown(engine):
+    """Data ends Aug 30, viewed in September: August is the latest month with data and is
+    shown as-is — NOT stepped back to July (the export just stopped a day short)."""
     set_window_end(engine, D(2026, 8, 30))
     cm = _latest_complete_month(engine, CID, today=D(2026, 9, 15))
-    assert (cm["year"], cm["month"]) == (2026, 7)
+    assert (cm["year"], cm["month"]) == (2026, 8)
 
 
 def test_complete_past_month_unchanged(engine):
@@ -64,11 +64,11 @@ def test_complete_past_month_unchanged(engine):
     assert (cm["year"], cm["month"]) == (2026, 7)
 
 
-def test_year_boundary_step_back(engine):
-    """Past truncated January steps back across the year boundary to December."""
+def test_no_step_back_across_year_boundary(engine):
+    """A window ending mid-January anchors on January — never stepped back to December."""
     set_window_end(engine, D(2026, 1, 20))
     cm = _latest_complete_month(engine, CID, today=D(2026, 3, 1))
-    assert (cm["year"], cm["month"]) == (2025, 12)
+    assert (cm["year"], cm["month"]) == (2026, 1)
 
 
 def test_no_uploads_returns_none(engine):
