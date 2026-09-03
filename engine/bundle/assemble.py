@@ -301,26 +301,34 @@ def _campaigns(engine, client_id, cm, keep=None, dateless=False):
 
 def _geo(engine, client_id, keep=None, date_from=None, date_to=None):
     """Performance by geographic location (whatever grain the export carries — State
-    for most single-market accounts). Cost derived from Cost/conv since the Geographic
-    export has no Cost column. Returns None if no geo data."""
+    for most single-market accounts). Uses the real Cost column when the export carries
+    one; falls back to Cost/conv × conversions for older geo exports that had no Cost
+    column (there, a region with clicks but no conversions would show $0). Returns None
+    if no geo data."""
     keep = keep or (lambda d: True)
     rc, rp = _range_sql(date_from, date_to)
     with engine.connect() as c:
         rows = c.execute(text(
-            "SELECT entity, clicks, impressions, conversions, conv_value, row FROM raw_rows "
+            "SELECT entity, clicks, impressions, cost, conversions, conv_value, row FROM raw_rows "
             "WHERE client_id=:c AND report_type='geographic'" + rc), {"c": client_id, **rp}).all()
     if not rows:
         return None
+    # Does this export carry a real Cost column? If any row has cost, trust the column
+    # everywhere (so a genuine $0 region stays $0); otherwise derive for every row.
+    has_real_cost = any(_num(cost) for _e, _cl, _im, cost, _cv, _cval, _r in rows)
     agg = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0, 0.0])  # clicks, impr, conv, conv_value, cost
-    for ent, clicks, impr, conv, cval, row in rows:
+    for ent, clicks, impr, cost, conv, cval, row in rows:
         if not keep(_asdict(row)):
             continue
         loc = ent or "(not set)"
         d = agg[loc]
         cv = _num(conv)
         d[0] += _num(clicks); d[1] += _num(impr); d[2] += cv; d[3] += _num(cval)
-        cpc = _num(_asdict(row).get("cost_conv"))     # Cost / conv.
-        d[4] += cpc * cv if cpc else 0.0
+        if has_real_cost:
+            d[4] += _num(cost)
+        else:
+            cpc = _num(_asdict(row).get("cost_conv"))     # Cost / conv.
+            d[4] += cpc * cv if cpc else 0.0
     if not agg:
         return None
     out = []
