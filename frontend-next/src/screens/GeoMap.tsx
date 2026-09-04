@@ -114,7 +114,6 @@ export function GeoMap() {
   // Level-of-detail: the current zoom picks the grain; its boundary file loads lazily.
   const active = hasGeo ? pickLevel(zoom, available) : undefined;
   const activeRows: GeoRow[] = active ? (levelsMap[active.key]?.rows ?? []) : [];
-  const activeDim = active ? levelsMap[active.key]?.dimension ?? "Region" : "Region";
 
   const geo = useQuery({
     queryKey: ["geo-boundary", active?.file],
@@ -218,7 +217,6 @@ export function GeoMap() {
   const metricDef = METRICS.find((m) => m.key === metric)!;
   const scaleT = (v: number) => (maxVal <= 0 ? 0 : metricDef.sqrt ? Math.sqrt(v / maxVal) : v / maxVal);
   // When city bubbles carry the metric, the polygons step back to plain context.
-  const displayDim = cityActive ? cityDim : activeDim;
   const legendMax = cityActive ? cityMax : maxVal;
   // Bubble radius (px): area ∝ value, so radius ∝ √value; a floor keeps tiny cities visible.
   const cityRadius = (v: number) => (cityMax <= 0 ? 4 : 4 + 16 * Math.sqrt(Math.max(0, v) / cityMax));
@@ -254,11 +252,9 @@ export function GeoMap() {
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
           <h2 className="text-[18px] font-semibold">Map</h2>
-          <div className="text-[12.5px] text-text-muted">
-            {hasGeo ? `${metricDef.label} by ${displayDim} · ${cityActive ? "sized by performance" : "shaded by performance"}` : "Client locations & campaign geo-targets"}
-            {cityActive && cityPending > 0 && ` · locating ${cityPending} more…`}
-            {!MAPTILER_KEY && " · dev basemap"}
-          </div>
+          {cityActive && cityPending > 0 && (
+            <div className="text-[12.5px] text-text-muted">Locating {cityPending} more cities…</div>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-3">
           {hasTargets && (
@@ -286,7 +282,9 @@ export function GeoMap() {
         </div>
       </div>
 
-      <div className="relative overflow-hidden rounded-[10px] border border-border" style={{ height: 580 }}>
+      {/* `isolate` traps Leaflet's internal z-indexes (its controls reach ~1000) inside this
+          box so they can't paint over the sticky ContextBar's dropdowns above the map. */}
+      <div className="relative isolate overflow-hidden rounded-[10px] border border-border" style={{ height: 580 }}>
         <MapContainer center={[39.5, -98.35]} zoom={4} scrollWheelZoom style={{ height: "100%", width: "100%" }}>
           <ZoomWatcher onZoom={setZoom} />
           <TileLayer url={TILES.url} attribution={TILES.attribution} subdomains={TILES.subdomains} />
