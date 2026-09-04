@@ -201,6 +201,21 @@ def client_geo_targets(client_id: str):
         return {"targets": [], "available": False}
 
 
+@app.post("/api/geocode")
+def geocode_places(body: dict):
+    """Resolve place names to coordinates for the map's city bubbles. Cache-first and
+    progressive: returns cached hits plus a bounded batch of fresh geocodes, with
+    `pending` telling the client how many remain for a follow-up call. Best-effort —
+    an unresolvable name is simply omitted, so the map just draws fewer bubbles."""
+    places = body.get("places") if isinstance(body, dict) else None
+    if not isinstance(places, list):
+        return {"resolved": {}, "pending": 0}
+    try:
+        return service.geocode_places(places[:300], engine=_engine)
+    except Exception:
+        return {"resolved": {}, "pending": 0}
+
+
 @app.get("/api/clients/{client_id}/config")
 def client_config_get(client_id: str):
     cfg = service.get_config(client_id, engine=_engine)

@@ -93,6 +93,18 @@ client_locations = Table(
     Column("created_at", DateTime),
 )
 
+# Global geocode cache for the map's city bubbles: place name -> coordinates. Not
+# client-scoped (a city's location is universal) and never re-fetched — `ok=0` records a
+# resolved-as-unfindable place so we don't hammer Nominatim on every view.
+geo_cache = Table(
+    "geo_cache", metadata,
+    Column("place", String(512), primary_key=True),   # normalized place string
+    Column("lat", Float),
+    Column("lng", Float),
+    Column("ok", Integer),                             # 1 = resolved, 0 = tried & unfindable
+    Column("created_at", DateTime),
+)
+
 
 # Quality Score is point-in-time and non-additive: Google only returns the CURRENT
 # value, so we build our own append-only, frozen-in-time history. One row per
@@ -141,7 +153,7 @@ def init_db(engine):
     # them in Postgres, so a decommission (engine.warehouse.teardown) stays torn down across
     # restarts. clients / uploads / term_relevance always live in Postgres.
     if bq.active():
-        metadata.create_all(engine, tables=[clients, uploads, term_relevance, client_locations])
+        metadata.create_all(engine, tables=[clients, uploads, term_relevance, client_locations, geo_cache])
     else:
         metadata.create_all(engine)
     # add-column-if-missing migrations for existing DBs (SQLite + Postgres both take this form)

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Service layer between the HTTP API and the store: clients, uploads, inventory.
 Plain functions so they're verifiable without a running server."""
-import datetime, re, os, glob
+import datetime, re, os, glob, time
 from collections import defaultdict
 from sqlalchemy import select, func, insert, update, delete, inspect
-from .store import get_engine, init_db, clients, uploads, raw_rows, term_relevance, client_locations
+from .store import get_engine, init_db, clients, uploads, raw_rows, term_relevance, client_locations, geo_cache
 from .store import metadata as _ingest_md
 from .parser import (EXPECTED_REPORTS, account_cols, date_column, infer_date_order,
                      read_csv_header, iter_csv_rows)
@@ -44,6 +44,63 @@ def delete_location(client_id, loc_id, engine=None):
     with engine.begin() as c:
         c.execute(delete(client_locations).where(
             (client_locations.c.id == loc_id) & (client_locations.c.client_id == client_id)))
+
+
+def _norm_place(s):
+    return " ".join(str(s or "").strip().lower().split())
+
+
+def geocode_places(places, engine=None, budget=8):
+    """Resolve place names to coordinates for the map's city bubbles, cache-first and
+    progressive. Returns already-cached hits immediately and geocodes at most `budget`
+    of the still-unknown places this call (Nominatim caps at ~1 req/s, so a batch is
+    rate-limited); the rest come back as `pending` for the client to fetch on a follow-up.
+    Failures are cached too, so an unfindable place is never retried. Never raises for a
+    single bad name — the map simply shows fewer bubbles.
+
+    -> {"resolved": {original_place: {"lat", "lng"}}, "pending": <count not yet tried>}."""
+    engine = engine or get_engine(); init_db(engine)
+    pairs, seen = [], set()
+    for p in places or []:
+        n = _norm_place(p)
+        if n and n not in seen:
+            seen.add(n); pairs.append((p, n))
+    if not pairs:
+        return {"resolved": {}, "pending": 0}
+    norms = [n for _, n in pairs]
+    with engine.connect() as c:
+        cached = {r.place: r for r in c.execute(
+            select(geo_cache.c.place, geo_cache.c.lat, geo_cache.c.lng, geo_cache.c.ok)
+            .where(geo_cache.c.place.in_(norms))).all()}
+
+    resolved, to_fetch = {}, []
+    for orig, n in pairs:
+        row = cached.get(n)
+        if row is None:
+            to_fetch.append((orig, n))
+        elif row.ok and row.lat is not None:
+            resolved[orig] = {"lat": row.lat, "lng": row.lng}
+        # ok == 0 -> known-unfindable, skip silently
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    fetched = 0
+    for orig, n in to_fetch:
+        if fetched >= budget:
+            break
+        coords = geocode(orig)                 # the original carries fuller context (", State, Country")
+        fetched += 1
+        try:
+            with engine.begin() as c:
+                c.execute(insert(geo_cache).values(
+                    place=n, lat=(coords[0] if coords else None),
+                    lng=(coords[1] if coords else None), ok=1 if coords else 0, created_at=now))
+        except Exception:
+            pass                                # a concurrent insert already cached it — fine
+        if coords:
+            resolved[orig] = {"lat": coords[0], "lng": coords[1]}
+        if fetched < budget:
+            time.sleep(1.1)                     # respect Nominatim's ~1 req/s policy
+    return {"resolved": resolved, "pending": max(0, len(to_fetch) - fetched)}
 
 
 def slug_client(name: str) -> str:

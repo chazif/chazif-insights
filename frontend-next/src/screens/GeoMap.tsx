@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Circle, GeoJSON, MapContainer, Marker, Popup, TileLayer, useMapEvents } from "react-leaflet";
+import { Circle, CircleMarker, GeoJSON, MapContainer, Marker, Popup, TileLayer, Tooltip, useMapEvents } from "react-leaflet";
 import L, { type Layer } from "leaflet";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import "leaflet/dist/leaflet.css";
 import { useBundle } from "../hooks/useBundle";
-import { getGeoTargets, getLocations } from "../lib/api";
+import { geocodePlaces, getGeoTargets, getLocations } from "../lib/api";
 import type { GeoLevelKey, GeoRow } from "../lib/types";
 import { money, num, pct } from "../lib/format";
 import { Loading, ErrorState, Empty } from "../components/ui/States";
@@ -67,6 +67,11 @@ const BOUNDARIES: { key: GeoLevelKey; file: string; minZoom: number }[] = [
   { key: "county", file: "us-counties.geojson", minZoom: 6 },
 ];
 
+// City is the deepest grain — it has no polygons, so it renders as geocoded bubbles that
+// appear once the user zooms in past the county fill. Cap how many we place (and geocode).
+const CITY_MIN_ZOOM = 8;
+const CITY_CAP = 200;
+
 // The finest boundary level that (a) has data and (b) whose minZoom the current zoom has
 // reached. Always resolves to something when `available` is non-empty (state at minZoom 0).
 function pickLevel(zoom: number, available: Set<string>): typeof BOUNDARIES[number] | undefined {
@@ -110,7 +115,6 @@ export function GeoMap() {
   const active = hasGeo ? pickLevel(zoom, available) : undefined;
   const activeRows: GeoRow[] = active ? (levelsMap[active.key]?.rows ?? []) : [];
   const activeDim = active ? levelsMap[active.key]?.dimension ?? "Region" : "Region";
-  const finest = [...BOUNDARIES].reverse().find((b) => available.has(b.key)); // deepest grain with data
 
   const geo = useQuery({
     queryKey: ["geo-boundary", active?.file],
@@ -168,6 +172,43 @@ export function GeoMap() {
     return mx;
   }, [activeRows, metric, matchSet]);
 
+  // ---- City bubbles: the deepest grain, drawn as geocoded points once zoomed in. ----
+  const cityLevel = levelsMap["city"];
+  const hasCity = !!cityLevel?.rows?.length;
+  const cityActive = hasCity && zoom >= CITY_MIN_ZOOM;
+  const cityDim = cityLevel?.dimension ?? "City";
+  // The cities we'll place: the strongest by the current metric (bounds the geocoding).
+  const cityRows = useMemo(() => {
+    const rows = cityLevel?.rows;
+    return rows?.length ? [...rows].sort((a, b) => (b[metric] ?? 0) - (a[metric] ?? 0)).slice(0, CITY_CAP) : [];
+  }, [cityLevel, metric]);
+  const cityNames = useMemo(() => cityRows.map((r) => r.location), [cityRows]);
+  const cityGeo = useQuery({
+    queryKey: ["geo-points", clientId, cityNames],
+    enabled: cityActive && cityNames.length > 0,
+    staleTime: Infinity,
+    retry: false,
+    // Progressive: the endpoint geocodes a bounded batch per call and reports how many
+    // remain; keep polling until every city is placed, then stop.
+    refetchInterval: (q) => ((q.state.data as { pending?: number } | undefined)?.pending ? 3500 : false),
+    queryFn: () => geocodePlaces(cityNames),
+  });
+  const cityPoints = useMemo(() => {
+    const resolved = cityGeo.data?.resolved ?? {};
+    return cityRows.map((r) => ({ row: r, pt: resolved[r.location] })).filter((x) => x.pt);
+  }, [cityRows, cityGeo.data]);
+  const cityMax = useMemo(() => cityPoints.reduce((mx, x) => Math.max(mx, x.row[metric] ?? 0), 0), [cityPoints, metric]);
+  const cityPending = cityGeo.data?.pending ?? 0;
+
+  // The next finer grain the user hasn't zoomed into yet — drives the "zoom in for …" hint.
+  const nextDrill = useMemo(() => {
+    const targets = [
+      ...BOUNDARIES.filter((b) => b.key !== "state" && available.has(b.key)).map((b) => ({ minZoom: b.minZoom, label: levelsMap[b.key]?.dimension ?? b.key })),
+      ...(hasCity ? [{ minZoom: CITY_MIN_ZOOM, label: cityDim }] : []),
+    ].sort((a, b) => a.minZoom - b.minZoom);
+    return targets.find((t) => zoom < t.minZoom);
+  }, [available, levelsMap, hasCity, cityLevel, zoom]);
+
   if (isLoading || locations.isLoading || (hasGeo && geo.isLoading && !geo.data)) return <Loading />;
   if (error) return <ErrorState msg={(error as Error).message} />;
   if (hasGeo && geo.error && !geo.data) return <ErrorState msg={(geo.error as Error).message} />;
@@ -176,12 +217,18 @@ export function GeoMap() {
 
   const metricDef = METRICS.find((m) => m.key === metric)!;
   const scaleT = (v: number) => (maxVal <= 0 ? 0 : metricDef.sqrt ? Math.sqrt(v / maxVal) : v / maxVal);
+  // When city bubbles carry the metric, the polygons step back to plain context.
+  const displayDim = cityActive ? cityDim : activeDim;
+  const legendMax = cityActive ? cityMax : maxVal;
+  // Bubble radius (px): area ∝ value, so radius ∝ √value; a floor keeps tiny cities visible.
+  const cityRadius = (v: number) => (cityMax <= 0 ? 4 : 4 + 16 * Math.sqrt(Math.max(0, v) / cityMax));
 
   const styleFn = (feature?: Feature<Geometry, FProps>) => {
     const row = rowFor(feature);
     const v = row ? row[metric] ?? 0 : 0;
     const has = !!row && v > 0;
     const targeted = showTargets && targetRegions.size > 0 && aliases(feature?.properties).some((a) => targetRegions.has(a));
+    if (cityActive) return { fillColor: "#94a3b8", fillOpacity: 0.08, weight: 0.6, color: "#cbd5e1", opacity: 0.9 };
     return {
       fillColor: has ? ramp(scaleT(v)) : "#e5e7eb",
       fillOpacity: has ? 0.82 : 0.25,
@@ -208,7 +255,8 @@ export function GeoMap() {
         <div>
           <h2 className="text-[18px] font-semibold">Map</h2>
           <div className="text-[12.5px] text-text-muted">
-            {hasGeo ? `${metricDef.label} by ${activeDim} · shaded by performance` : "Client locations & campaign geo-targets"}
+            {hasGeo ? `${metricDef.label} by ${displayDim} · ${cityActive ? "sized by performance" : "shaded by performance"}` : "Client locations & campaign geo-targets"}
+            {cityActive && cityPending > 0 && ` · locating ${cityPending} more…`}
             {!MAPTILER_KEY && " · dev basemap"}
           </div>
         </div>
@@ -252,6 +300,21 @@ export function GeoMap() {
               </Popup>
             </Circle>
           ))}
+          {/* City bubbles — geocoded points sized (and coloured) by the metric, over faded polygons. */}
+          {cityActive && cityPoints.map(({ row, pt }, i) => {
+            const v = row[metric] ?? 0;
+            return (
+              <CircleMarker key={`${row.location}:${i}`} center={[pt!.lat, pt!.lng]} radius={cityRadius(v)}
+                pathOptions={{ color: "#ffffff", weight: 1, fillColor: ramp(cityMax <= 0 ? 0 : Math.sqrt(Math.max(0, v) / cityMax)), fillOpacity: 0.85 }}>
+                <Tooltip direction="top" sticky className="geo-tt">
+                  <div style={{ fontWeight: 600, marginBottom: 2 }}>{row.location}</div>
+                  <div>Spend: <b>{money(row.cost)}</b> · CPA: <b>{row.cpa ? money(row.cpa, 2) : "—"}</b></div>
+                  <div>Clicks: <b>{num(row.clicks)}</b> · Impr: <b>{num(row.impr)}</b> · CTR: <b>{pct(row.ctr, 2)}</b></div>
+                  <div>Conv: <b>{num(row.conv, 1)}</b> · CVR: <b>{pct(row.cvr, 2)}</b> · Value: <b>{money(row.conv_value)}</b></div>
+                </Tooltip>
+              </CircleMarker>
+            );
+          })}
           {pins.map((l) => (
             <Marker key={l.id} position={[l.lat as number, l.lng as number]} icon={PIN}>
               <Popup>
@@ -261,10 +324,10 @@ export function GeoMap() {
             </Marker>
           ))}
         </MapContainer>
-        {/* zoom-to-drill hint — only while a finer grain with data is still hidden */}
-        {hasGeo && finest && active && finest.key !== active.key && (
+        {/* zoom-to-drill hint — points at the next finer grain the user hasn't reached yet */}
+        {hasGeo && !cityActive && nextDrill && (
           <div className="pointer-events-none absolute right-3 top-3 z-[500] rounded-full border border-border bg-surface/95 px-3 py-1 text-[11px] font-medium text-text-secondary shadow-sm">
-            Zoom in for {levelsMap[finest.key]?.dimension ?? "finer"} detail
+            Zoom in for {nextDrill.label} detail
           </div>
         )}
         {/* legend */}
@@ -274,13 +337,13 @@ export function GeoMap() {
             <div className="h-2 w-40 rounded" style={{ background: `linear-gradient(90deg, ${ramp(0)}, ${ramp(0.5)}, ${ramp(1)})` }} />
             <div className="mt-0.5 flex justify-between text-text-muted">
               <span>0</span>
-              <span>{metricDef.fmt(maxVal)}</span>
+              <span>{metricDef.fmt(legendMax)}</span>
             </div>
           </div>
         )}
       </div>
 
-      {hasGeo && offMap.length > 0 && (
+      {hasGeo && !cityActive && offMap.length > 0 && (
         <div className="mt-3 rounded-[8px] border border-border bg-surface-alt px-3 py-2 text-[12px] text-text-secondary">
           <span className="font-medium">Not matched to a region ({offMap.length}):</span>{" "}
           {offMap.map((r, i) => (

@@ -75,6 +75,10 @@ export const deleteLocation = (clientId: string, id: number) =>
 export const getGeoTargets = (clientId: string) =>
   get<{ targets: import("./types").GeoTarget[]; available: boolean }>(`${cid(clientId)}/geo-targets`);
 
+// ---- Geocoding for city bubbles (cache-first, progressive: `pending` > 0 means call again) ----
+export const geocodePlaces = (places: string[]) =>
+  send<{ resolved: Record<string, { lat: number; lng: number }>; pending: number }>("/api/geocode", "POST", { places });
+
 export function getBundle(clientId: string, params: import("./types").BundleParams = {}) {
   const sp = new URLSearchParams({ client: clientId });
   if (params.from) sp.set("from", params.from);
