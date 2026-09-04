@@ -299,49 +299,103 @@ def _campaigns(engine, client_id, cm, keep=None, dateless=False):
                        "conv": round(sum(v["conv"] for v in cur.values()), 1)}}
 
 
+# Geographic grains a Google Ads export may carry, coarse → fine. Each level is emitted
+# only when the export actually has a non-empty value for it, so a state-only export still
+# yields just "state" and the zoom-aware map simply has nothing finer to reveal (no break).
+# (key, display dimension, row-column slugs finest-first, per-level row cap)
+# Real Google Ads geographic columns carry a "(Matched location)" / "(User location)"
+# suffix, so "County (Matched location)" slugs to county_matched_location (not bare
+# county). List matched-location first (targeting grain, the report default), then user
+# location, then the short forms — finest present wins per level.
+GEO_LEVELS = [
+    ("state",  "State",  ("state_matched", "region_matched_location", "region_user_location", "region", "state"), 120),
+    ("metro",  "Metro",  ("metro_area_matched_location", "metro_area_user_location", "metro_matched_location", "metro_area", "metro"), 400),
+    ("county", "County", ("county_matched_location", "county_user_location", "county"), 800),
+    ("city",   "City",   ("most_specific_location_matched_location", "most_specific_location_user_location",
+                          "city_matched_location", "city_user_location", "most_specific_location", "city"), 1200),
+]
+
+
+def _geo_level(recs, slugs, has_real_cost, cap, parent_slugs=None):
+    """Aggregate pre-filtered geo records by the first non-empty slug in `slugs`. `recs`
+    are (clicks, impr, cost, conv, conv_value, row_dict) tuples. Real Cost column when the
+    export has one, else Cost/conv × conversions. `parent_slugs` (coarser grain) is stamped
+    on each row as `region` so a fine name can be disambiguated against boundaries
+    ("Franklin County" exists in many states). Returns (rows, totals) or (None, None) when
+    the export carries no value for this grain."""
+    agg = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0, 0.0, None])  # clicks, impr, conv, conv_value, cost, parent
+    seen = False
+    for clicks, impr, cost, conv, cval, rd in recs:
+        val = next((rd.get(s) for s in slugs if rd.get(s)), None)
+        if not val:
+            continue
+        seen = True
+        d = agg[val]
+        cv = _num(conv)
+        d[0] += _num(clicks); d[1] += _num(impr); d[2] += cv; d[3] += _num(cval)
+        d[4] += _num(cost) if has_real_cost else (_num(rd.get("cost_conv")) * cv)
+        if parent_slugs and d[5] is None:
+            d[5] = next((rd.get(s) for s in parent_slugs if rd.get(s)), None)
+    if not seen:
+        return None, None
+    out = []
+    for loc, (cl, im, cv, cval, cost, parent) in sorted(agg.items(), key=lambda kv: -kv[1][4] or -kv[1][0]):
+        row = {"location": loc, "clicks": round(cl), "impr": round(im),
+               "conv": round(cv, 1), "conv_value": round(cval, 2), "cost": round(cost, 2),
+               "cpa": round(cost / cv, 2) if cv else 0,
+               "cvr": round(cv / cl, 4) if cl else 0,
+               "ctr": round(cl / im, 4) if im else 0}
+        if parent and parent != loc:
+            row["region"] = parent
+        out.append(row)
+    out = out[:cap]
+    tot = [sum(x) for x in zip(*[[r["clicks"], r["impr"], r["conv"], r["conv_value"], r["cost"]] for r in out])]
+    totals = {"clicks": round(tot[0]), "impr": round(tot[1]), "conv": round(tot[2], 1),
+              "conv_value": round(tot[3], 2), "cost": round(tot[4], 2)}
+    return out, totals
+
+
 def _geo(engine, client_id, keep=None, date_from=None, date_to=None):
-    """Performance by geographic location (whatever grain the export carries — State
-    for most single-market accounts). Uses the real Cost column when the export carries
-    one; falls back to Cost/conv × conversions for older geo exports that had no Cost
-    column (there, a region with clicks but no conversions would show $0). Returns None
-    if no geo data."""
+    """Performance by geographic location at every grain the export carries. The coarsest
+    grain present drives the top-level rows/totals (State for most single-market accounts,
+    unchanged); `levels` holds one entry per present grain (state → metro → county → city)
+    so the map can reveal finer detail as the user zooms in. Uses the real Cost column when
+    the export has one, else Cost/conv × conversions (older exports; a region with clicks
+    but no conversions would otherwise show $0). Returns None if no geo data."""
     keep = keep or (lambda d: True)
     rc, rp = _range_sql(date_from, date_to)
     with engine.connect() as c:
         rows = c.execute(text(
-            "SELECT entity, clicks, impressions, cost, conversions, conv_value, row FROM raw_rows "
+            "SELECT clicks, impressions, cost, conversions, conv_value, row FROM raw_rows "
             "WHERE client_id=:c AND report_type='geographic'" + rc), {"c": client_id, **rp}).all()
     if not rows:
         return None
     # Does this export carry a real Cost column? If any row has cost, trust the column
     # everywhere (so a genuine $0 region stays $0); otherwise derive for every row.
-    has_real_cost = any(_num(cost) for _e, _cl, _im, cost, _cv, _cval, _r in rows)
-    agg = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0, 0.0])  # clicks, impr, conv, conv_value, cost
-    for ent, clicks, impr, cost, conv, cval, row in rows:
-        if not keep(_asdict(row)):
-            continue
-        loc = ent or "(not set)"
-        d = agg[loc]
-        cv = _num(conv)
-        d[0] += _num(clicks); d[1] += _num(impr); d[2] += cv; d[3] += _num(cval)
-        if has_real_cost:
-            d[4] += _num(cost)
-        else:
-            cpc = _num(_asdict(row).get("cost_conv"))     # Cost / conv.
-            d[4] += cpc * cv if cpc else 0.0
-    if not agg:
+    has_real_cost = any(_num(cost) for _cl, _im, cost, _cv, _cval, _r in rows)
+    # Filter + materialize the row dict once; every level re-aggregates these same records.
+    recs = []
+    for clicks, impr, cost, conv, cval, row in rows:
+        rd = _asdict(row)
+        if keep(rd):
+            recs.append((clicks, impr, cost, conv, cval, rd))
+    if not recs:
         return None
-    out = []
-    for loc, (cl, im, cv, cval, cost) in sorted(agg.items(), key=lambda kv: -kv[1][4] or -kv[1][0]):
-        out.append({"location": loc, "clicks": round(cl), "impr": round(im),
-                    "conv": round(cv, 1), "conv_value": round(cval, 2), "cost": round(cost, 2),
-                    "cpa": round(cost / cv, 2) if cv else 0,
-                    "cvr": round(cv / cl, 4) if cl else 0,
-                    "ctr": round(cl / im, 4) if im else 0})
-    tot = [sum(x) for x in zip(*[[r["clicks"], r["impr"], r["conv"], r["conv_value"], r["cost"]] for r in out])]
-    return {"dimension": "State", "rows": out[:60],
-            "totals": {"clicks": round(tot[0]), "impr": round(tot[1]), "conv": round(tot[2], 1),
-                       "conv_value": round(tot[3], 2), "cost": round(tot[4], 2)}}
+
+    levels = {}
+    coarser = None  # slugs of the nearest coarser present grain, for parent stamping
+    for key, dim, slugs, cap in GEO_LEVELS:
+        lrows, ltot = _geo_level(recs, slugs, has_real_cost, cap, parent_slugs=coarser)
+        if lrows is None:
+            continue
+        levels[key] = {"dimension": dim, "rows": lrows, "totals": ltot}
+        coarser = slugs
+    if not levels:
+        return None
+
+    base = levels.get("state") or next(iter(levels.values()))
+    return {"dimension": base["dimension"], "rows": base["rows"][:60],
+            "totals": base["totals"], "levels": levels}
 
 
 def _effective_budget(config):

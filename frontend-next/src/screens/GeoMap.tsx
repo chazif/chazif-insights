@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Circle, GeoJSON, MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
+import { Circle, GeoJSON, MapContainer, Marker, Popup, TileLayer, useMapEvents } from "react-leaflet";
 import L, { type Layer } from "leaflet";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import "leaflet/dist/leaflet.css";
 import { useBundle } from "../hooks/useBundle";
 import { getGeoTargets, getLocations } from "../lib/api";
-import type { GeoRow } from "../lib/types";
+import type { GeoLevelKey, GeoRow } from "../lib/types";
 import { money, num, pct } from "../lib/format";
 import { Loading, ErrorState, Empty } from "../components/ui/States";
 
@@ -58,16 +58,67 @@ const PIN = L.divIcon({
   popupAnchor: [0, -14],
 });
 
+// Level-of-detail: each geographic grain the bundle can carry, paired with its boundary
+// file and the zoom at which it takes over. Coarse → fine. A level renders only when the
+// export carries that grain AND its boundary file exists (metro/city have no polygons yet,
+// so they quietly fall back to the finest level that does). Zooming in reveals finer detail.
+const BOUNDARIES: { key: GeoLevelKey; file: string; minZoom: number }[] = [
+  { key: "state", file: "world-states.geojson", minZoom: 0 },
+  { key: "county", file: "us-counties.geojson", minZoom: 6 },
+];
+
+// The finest boundary level that (a) has data and (b) whose minZoom the current zoom has
+// reached. Always resolves to something when `available` is non-empty (state at minZoom 0).
+function pickLevel(zoom: number, available: Set<string>): typeof BOUNDARIES[number] | undefined {
+  let chosen: typeof BOUNDARIES[number] | undefined;
+  for (const b of BOUNDARIES) {
+    if (!available.has(b.key)) continue;
+    if (!chosen || zoom >= b.minZoom) chosen = b;   // finest reached wins
+  }
+  return chosen;
+}
+
+// Reports live zoom changes out of the Leaflet map into React state.
+function ZoomWatcher({ onZoom }: { onZoom: (z: number) => void }) {
+  const map = useMapEvents({ zoomend: () => onZoom(map.getZoom()) });
+  return null;
+}
+
 export function GeoMap() {
   const { clientId = "" } = useParams();
   const { data, isLoading, error } = useBundle(clientId);
-  const hasGeo = !!data?.geo_performance?.rows?.length;
+  const g = data?.geo_performance;
+  const hasGeo = !!g?.rows?.length;
+
+  // The grains this bundle carries. Older bundles have no `levels` — synthesize a lone
+  // state level from the base rows so everything below is level-driven uniformly.
+  const levelsMap = useMemo(
+    () => (g?.levels ?? (g ? { state: { dimension: g.dimension, rows: g.rows, totals: g.totals } } : {})) as Record<string, { dimension: string; rows: GeoRow[] }>,
+    [g],
+  );
+  const available = useMemo(() => {
+    const s = new Set<string>();
+    BOUNDARIES.forEach((b) => { if (levelsMap[b.key]?.rows?.length) s.add(b.key); });
+    return s;
+  }, [levelsMap]);
+
+  const [zoom, setZoom] = useState(4);
+  const [metric, setMetric] = useState<MetricKey>("cost");
+  const [showTargets, setShowTargets] = useState(true);
+
+  // Level-of-detail: the current zoom picks the grain; its boundary file loads lazily.
+  const active = hasGeo ? pickLevel(zoom, available) : undefined;
+  const activeRows: GeoRow[] = active ? (levelsMap[active.key]?.rows ?? []) : [];
+  const activeDim = active ? levelsMap[active.key]?.dimension ?? "Region" : "Region";
+  const finest = [...BOUNDARIES].reverse().find((b) => available.has(b.key)); // deepest grain with data
+
   const geo = useQuery({
-    queryKey: ["world-states-geojson"],
+    queryKey: ["geo-boundary", active?.file],
     staleTime: Infinity,
-    enabled: hasGeo, // skip the boundary download entirely when there's nothing to shade
+    enabled: hasGeo && !!active,
+    placeholderData: (prev) => prev,   // keep the current boundaries on screen while a finer set loads
     queryFn: async (): Promise<FeatureCollection> => {
-      const r = await fetch(`${import.meta.env.BASE_URL}world-states.geojson`);
+      const r = await fetch(`${import.meta.env.BASE_URL}${active!.file}`);
       if (!r.ok) throw new Error("Failed to load map boundaries");
       return r.json();
     },
@@ -75,22 +126,31 @@ export function GeoMap() {
   const locations = useQuery({ queryKey: ["locations", clientId], queryFn: () => getLocations(clientId) });
   // Best-effort — the endpoint returns empty (never errors) when the Ads API isn't reachable.
   const geoTargets = useQuery({ queryKey: ["geo-targets", clientId], queryFn: () => getGeoTargets(clientId), retry: false });
-  const [metric, setMetric] = useState<MetricKey>("cost");
-  const [showTargets, setShowTargets] = useState(true);
 
-  const g = data?.geo_performance;
   const pins = (locations.data?.locations ?? []).filter((l) => l.lat != null && l.lng != null);
   const targets = geoTargets.data?.targets ?? [];
   const radiusTargets = targets.filter((t) => t.type === "radius" && t.lat != null && t.lng != null && t.radius_m);
   const targetRegions = useMemo(() => new Set(targets.filter((t) => t.type === "location" && t.name).map((t) => norm(t.name as string))), [targets]);
   const hasTargets = radiusTargets.length > 0 || targetRegions.size > 0;
+
+  // A row can be matched by its bare name and — for finer grains — by its state-qualified
+  // form ("Suffolk County, New York"), which disambiguates same-named counties across
+  // states. Google's matched-location cells often trail the country ("…, United States"),
+  // so strip that before keying.
+  const stripCountry = (s: string) => s.replace(/,\s*(united states|usa|us)$/, "").trim();
+  const rowKeys = (r: GeoRow) => {
+    const loc = stripCountry(norm(r.location));
+    const keys = new Set([loc]);
+    if (r.region) keys.add(`${loc}, ${norm(r.region)}`);
+    return [...keys];
+  };
   const byName = useMemo(() => {
     const m = new Map<string, GeoRow>();
-    (g?.rows ?? []).forEach((r) => m.set(norm(r.location), r));
+    activeRows.forEach((r) => rowKeys(r).forEach((k) => { if (!m.has(k)) m.set(k, r); }));
     return m;
-  }, [g]);
+  }, [activeRows]);
 
-  // every name alias present in the boundary set — a location is "on the map" if it matches one.
+  // every name alias present in the active boundary set — a location is "on the map" if it matches one.
   const matchSet = useMemo(() => {
     const s = new Set<string>();
     (geo.data?.features ?? []).forEach((f) => aliases(f.properties as FProps).forEach((m) => s.add(m)));
@@ -100,17 +160,17 @@ export function GeoMap() {
     for (const m of aliases(f?.properties)) { const r = byName.get(m); if (r) return r; }
     return undefined;
   };
-  // rows whose location has no polygon in the boundary set (rare) — surfaced below the map.
-  const offMap = useMemo(() => (g?.rows ?? []).filter((r) => !matchSet.has(norm(r.location))).sort((a, b) => b.cost - a.cost), [g, matchSet]);
+  // rows whose location has no polygon in the active boundary set — surfaced below the map.
+  const offMap = useMemo(() => activeRows.filter((r) => !rowKeys(r).some((k) => matchSet.has(k))).sort((a, b) => b.cost - a.cost), [activeRows, matchSet]);
   const maxVal = useMemo(() => {
     let mx = 0;
-    (g?.rows ?? []).forEach((r) => { const v = r[metric] ?? 0; if (matchSet.has(norm(r.location)) && v > mx) mx = v; });
+    activeRows.forEach((r) => { const v = r[metric] ?? 0; if (rowKeys(r).some((k) => matchSet.has(k)) && v > mx) mx = v; });
     return mx;
-  }, [g, metric, matchSet]);
+  }, [activeRows, metric, matchSet]);
 
-  if (isLoading || locations.isLoading || (hasGeo && geo.isLoading)) return <Loading />;
+  if (isLoading || locations.isLoading || (hasGeo && geo.isLoading && !geo.data)) return <Loading />;
   if (error) return <ErrorState msg={(error as Error).message} />;
-  if (hasGeo && geo.error) return <ErrorState msg={(geo.error as Error).message} />;
+  if (hasGeo && geo.error && !geo.data) return <ErrorState msg={(geo.error as Error).message} />;
   if (!hasGeo && pins.length === 0 && !hasTargets)
     return <Empty what="No geographic data or saved locations yet. Add locations in Setup → Locations to see them on the map." />;
 
@@ -148,7 +208,7 @@ export function GeoMap() {
         <div>
           <h2 className="text-[18px] font-semibold">Map</h2>
           <div className="text-[12.5px] text-text-muted">
-            {hasGeo ? `${metricDef.label} by region · states & provinces shaded by performance` : "Client locations & campaign geo-targets"}
+            {hasGeo ? `${metricDef.label} by ${activeDim} · shaded by performance` : "Client locations & campaign geo-targets"}
             {!MAPTILER_KEY && " · dev basemap"}
           </div>
         </div>
@@ -180,8 +240,9 @@ export function GeoMap() {
 
       <div className="relative overflow-hidden rounded-[10px] border border-border" style={{ height: 580 }}>
         <MapContainer center={[39.5, -98.35]} zoom={4} scrollWheelZoom style={{ height: "100%", width: "100%" }}>
+          <ZoomWatcher onZoom={setZoom} />
           <TileLayer url={TILES.url} attribution={TILES.attribution} subdomains={TILES.subdomains} />
-          {hasGeo && geo.data && <GeoJSON key={`${metric}:${showTargets}:${targetRegions.size}`} data={geo.data} style={styleFn} onEachFeature={onEach} />}
+          {hasGeo && geo.data && <GeoJSON key={`${active?.key}:${geo.data.features.length}:${metric}:${showTargets}:${targetRegions.size}`} data={geo.data} style={styleFn} onEachFeature={onEach} />}
           {showTargets && radiusTargets.map((t, i) => (
             <Circle key={i} center={[t.lat as number, t.lng as number]} radius={t.radius_m as number}
               pathOptions={{ color: "#1a1a1a", weight: 1.5, fillColor: "#1a1a1a", fillOpacity: 0.06 }}>
@@ -200,6 +261,12 @@ export function GeoMap() {
             </Marker>
           ))}
         </MapContainer>
+        {/* zoom-to-drill hint — only while a finer grain with data is still hidden */}
+        {hasGeo && finest && active && finest.key !== active.key && (
+          <div className="pointer-events-none absolute right-3 top-3 z-[500] rounded-full border border-border bg-surface/95 px-3 py-1 text-[11px] font-medium text-text-secondary shadow-sm">
+            Zoom in for {levelsMap[finest.key]?.dimension ?? "finer"} detail
+          </div>
+        )}
         {/* legend */}
         {hasGeo && (
           <div className="pointer-events-none absolute bottom-3 left-3 z-[500] rounded-[8px] border border-border bg-surface/95 px-3 py-2 text-[11px] shadow-sm">

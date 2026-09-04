@@ -156,11 +156,21 @@ export interface GeoRow {
   cpa: number;
   cvr: number;
   ctr: number;
+  region?: string;   // parent grain (e.g. state of a county/city), for boundary disambiguation
+}
+export type GeoLevelKey = "state" | "metro" | "county" | "city";
+export interface GeoLevel {
+  dimension: string;
+  rows: GeoRow[];
+  totals: { clicks: number; impr: number; conv: number; conv_value: number; cost: number };
 }
 export interface GeoSection {
   dimension: string;
   rows: GeoRow[];
   totals: { clicks: number; impr: number; conv: number; conv_value: number; cost: number };
+  // One entry per geographic grain the export carries (state → metro → county → city).
+  // The zoom-aware map reveals finer levels as the user zooms in; absent for older bundles.
+  levels?: Partial<Record<GeoLevelKey, GeoLevel>>;
 }
 
 // ---- Non-Brand Categories ----
