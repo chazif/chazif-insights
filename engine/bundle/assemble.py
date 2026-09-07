@@ -310,9 +310,12 @@ def _campaigns(engine, client_id, cm, keep=None, dateless=False):
 GEO_LEVELS = [
     ("state",  "State",  ("state_matched", "region_matched_location", "region_user_location", "region", "state"), 120),
     ("metro",  "Metro",  ("metro_area_matched_location", "metro_area_user_location", "metro_matched_location", "metro_area", "metro"), 400),
-    ("county", "County", ("county_matched_location", "county_user_location", "county"), 800),
-    ("city",   "City",   ("most_specific_location_matched_location", "most_specific_location_user_location",
-                          "city_matched_location", "city_user_location", "most_specific_location", "city"), 1200),
+    ("county", "County", ("county_matched_location", "county_user_location", "county_matched", "county"), 800),
+    ("city",   "City",   ("city_matched_location", "city_user_location", "city_matched",
+                          "most_specific_location_matched_location", "most_specific_location_user_location",
+                          "most_specific_location", "city"), 1200),
+    ("postal", "Postal code", ("postal_code_matched_location", "postal_code_user_location",
+                               "postal_code_matched", "postal_code", "zip_code", "zip"), 4000),
 ]
 
 

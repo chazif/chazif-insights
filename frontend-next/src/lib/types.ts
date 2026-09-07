@@ -159,7 +159,7 @@ export interface GeoRow {
   ctr: number;
   region?: string;   // parent grain (e.g. state of a county/city), for boundary disambiguation
 }
-export type GeoLevelKey = "state" | "metro" | "county" | "city";
+export type GeoLevelKey = "state" | "metro" | "county" | "city" | "postal";
 export interface GeoLevel {
   dimension: string;
   rows: GeoRow[];

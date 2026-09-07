@@ -87,5 +87,24 @@ def test_finer_columns_produce_extra_levels_that_roll_up(engine):
     assert g["levels"]["city"]["totals"]["cost"] == 250.0      # same total, finer grain
 
 
+def test_matched_columns_and_postal_level(engine):
+    """Real Google 'City/County/Postal Code (Matched)' columns (bare `_matched` slugs) each
+    produce their level, and postal code is the deepest grain with its parent stamped."""
+    add_geo(engine, "New York", clicks=50, impr=900, cost=120.0, conv=5, cost_conv=24.0,
+            extra={"city_matched": "Brooklyn", "county_matched": "Kings County",
+                   "postal_code_matched": "11201"})
+    add_geo(engine, "New York", clicks=30, impr=600, cost=80.0, conv=2, cost_conv=40.0,
+            extra={"city_matched": "Brooklyn", "county_matched": "Kings County",
+                   "postal_code_matched": "11215"})
+    g = _geo(engine, CID)
+    assert {"state", "county", "city", "postal"} <= set(g["levels"])
+    postal = g["levels"]["postal"]
+    assert postal["dimension"] == "Postal code"
+    assert {r["location"] for r in postal["rows"]} == {"11201", "11215"}
+    assert all(r["region"] for r in postal["rows"])          # parent (city) stamped for geocoding
+    assert postal["totals"]["cost"] == 200.0                 # same spend, finest grain
+    assert g["levels"]["county"]["rows"][0]["location"] == "Kings County"
+
+
 def test_none_when_no_geo_rows(engine):
     assert _geo(engine, CID) is None
