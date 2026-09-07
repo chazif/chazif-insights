@@ -65,6 +65,8 @@ class SnapshotIn(BaseModel):
     campaign: Optional[str] = None
     source: str = "manual"
     fit: bool = True                     # fit + activate account-level curves
+    sim_type: str = "budget"             # V2 §6: budget | target_cpa
+    x_axis: str = "is_share"             # V2 §6: is_share | spend
 
 
 class RunIn(BaseModel):
@@ -137,9 +139,11 @@ def put_metrics(client_id: str, rows: List[MetricsRow]):
 @router.post("/simulator-snapshots", status_code=201)
 def add_snapshot(client_id: str, body: SnapshotIn):
     bi.add_snapshot(engine(), client_id, body.points, source=body.source,
-                    campaign=body.campaign)
+                    campaign=body.campaign, sim_type=body.sim_type, x_axis=body.x_axis)
     out = {"saved": len(body.points)}
-    if body.fit:
+    # only BUDGET sims fit the master leads/cpl curve; TARGET_CPA sims are stored for the
+    # compare report (§6d) and are not fit into the model.
+    if body.fit and body.sim_type == "budget":
         try:
             params, diag = bi_curves.fit_master_curves(body.points)
             bi_curves.save_fit(engine(), client_id, params, diag, source="simulator")
@@ -147,6 +151,12 @@ def add_snapshot(client_id: str, body: SnapshotIn):
         except ValueError as e:
             raise HTTPException(422, f"points saved, but fitting failed: {e}")
     return out
+
+
+@router.get("/simulations/compare")
+def simulations_compare(client_id: str):
+    """V2 §6d: the budget curve's implied CPA at each spend vs the target-CPA simulation."""
+    return bi.simulations_compare(engine(), client_id)
 
 
 @router.get("/curves")

@@ -219,6 +219,14 @@ def migrate_business_metrics(engine, client_id):
 # ---- guard config (V2 §5): per-cell change limit, resolved most-specific-first ----
 
 DEFAULT_GUARD_BAND = 0.30
+LOST_RANK_CAUTION = 0.35            # V2 §6: above this, budget alone won't buy the share
+
+
+def _lost_rank_caution(is_lost_rank):
+    """Display-only caution (V2 §6): high IS-lost-to-rank means spend alone won't fix it."""
+    if is_lost_rank is not None and is_lost_rank >= LOST_RANK_CAUTION:
+        return "budget alone is unlikely to buy this share — pair with the tCPA move"
+    return None
 
 
 def upsert_guard_config(engine, client_id, rows):
@@ -258,6 +266,17 @@ def resolve_guard_band(guard_rows, brand, region, category, default=DEFAULT_GUAR
 
 
 # ---- reference period (V2 §5): the actuals/guard window --------------------
+
+def _frac(v):
+    """A percentage-or-fraction cell -> fraction (0.35 or 35 -> 0.35); None if unparseable."""
+    try:
+        f = float(str(v).replace("%", "").replace(",", "")) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+    if f is None:
+        return None
+    return f / 100.0 if f > 1.0 else f
+
 
 def _as_date(v):
     if isinstance(v, datetime.datetime):
@@ -369,6 +388,40 @@ def cell_curve_diagnostics(engine, client_id, cells, account_master):
     return out
 
 
+def simulations_compare(engine, client_id, n=20):
+    """Budget vs target-CPA (V2 §6d, evaluate-only): the budget curve's implied CPA at each
+    spend against the stored TARGET_CPA simulation. No model change — the calibration loop
+    decides which to trust before either is used jointly. Returns
+    {budget:[{spend,conversions,implied_cpa}], target_cpa:[{spend,conversions,cpa}], available}."""
+    budget = []
+    try:
+        acct = spend_curve_from_master(get_active_curves(engine, client_id))
+        if acct.spend:
+            hi = acct.max_spend
+            for i in range(n):
+                s = hi * (i + 1) / n
+                cv = acct.conv_at(s)
+                budget.append({"spend": round(s, 2), "conversions": round(cv, 2),
+                               "implied_cpa": round(s / cv, 4) if cv else None})
+    except LookupError:
+        pass
+    tcpa = []
+    for snap in get_snapshots(engine, client_id, sim_type="target_cpa"):
+        pts = snap["points"] if isinstance(snap["points"], list) else json.loads(snap["points"])
+        for p in pts:
+            spend = p.get("spend_week", p.get("spend"))
+            conv = p.get("conversions", p.get("leads_week", p.get("leads")))
+            if spend is None or not conv:
+                continue
+            cpa = p.get("target_cpa")
+            if cpa is None:
+                cpa = float(spend) / float(conv)
+            tcpa.append({"spend": round(float(spend), 2), "conversions": round(float(conv), 2),
+                         "cpa": round(float(cpa), 4)})
+    tcpa.sort(key=lambda x: x["spend"])
+    return {"budget": budget, "target_cpa": tcpa, "available": bool(tcpa)}
+
+
 # ---- actuals builder (the programmatic Actuals sheet) ------------------------
 
 def build_cells(engine, client_id, reference=None):
@@ -405,7 +458,8 @@ def build_cells(engine, client_id, reference=None):
 
         key = (m["brand"], m["region"], m["category"])
         a = agg.setdefault(key, dict(impr=0.0, clicks=0.0, cost=0.0, conv=0.0,
-                                     eligible=0.0, tcpa_wsum=0.0, tcpa_w=0.0, all_conv=0.0))
+                                     eligible=0.0, tcpa_wsum=0.0, tcpa_w=0.0, all_conv=0.0,
+                                     lb_wsum=0.0, lr_wsum=0.0))
         j = _jrow(r["row"])
         impr = r["impressions"] or 0.0
         a["impr"] += impr
@@ -424,7 +478,13 @@ def build_cells(engine, client_id, reference=None):
         except (TypeError, ValueError):
             is_frac = None
         if is_frac and impr:
-            a["eligible"] += impr / is_frac
+            el = impr / is_frac
+            a["eligible"] += el
+            lb, lr = _frac(j.get("search_lost_is_budget")), _frac(j.get("search_lost_is_rank"))
+            if lb is not None:
+                a["lb_wsum"] += lb * el          # eligible-impression weighted (V2 §6)
+            if lr is not None:
+                a["lr_wsum"] += lr * el
         tcpa = j.get("target_cpa")
         try:
             tcpa = float(str(tcpa).replace("$", "").replace(",", ""))
@@ -489,6 +549,8 @@ def build_cells(engine, client_id, reference=None):
             cost_per_car=cost / car_count if car_count else 0.0,
             car_count=car_count,
             is_current=max(1, min(100, mround(is_share * 100))) if is_share else 0,
+            is_lost_budget=(a["lb_wsum"] / a["eligible"]) if a["eligible"] else 0.0,
+            is_lost_rank=(a["lr_wsum"] / a["eligible"]) if a["eligible"] else 0.0,
             goal_units=goals,
         ))
     return cells
@@ -597,7 +659,11 @@ def get_run(engine, client_id, run_id):
         out["run_at"] = out["run_at"].isoformat()
     scenarios = defaultdict(list)
     for r in rows:
-        scenarios[r.get("goal") or ""].append(dict(r))
+        d = dict(r)
+        caution = _lost_rank_caution(d.get("is_lost_rank"))   # V2 §6 display signal
+        if caution:
+            d["caution"] = caution
+        scenarios[d.get("goal") or ""].append(d)
     out["scenarios"] = dict(scenarios)
     default = out.get("chosen_goal") or out.get("goal")
     out["results"] = scenarios.get(default) or next(iter(scenarios.values()), [])

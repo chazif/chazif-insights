@@ -145,6 +145,8 @@ allocation_results = Table(
     Column("guard_band_pct", Float),       # V2 §5: the change limit resolved for this cell
     Column("weeks_to_target", Float),      # V2 §5: weeks of guarded steps to reach the cap
     Column("curve", JSON),                 # V2 §6: which curve produced this (scope/source/points/w)
+    Column("is_lost_budget", Float),       # V2 §6: IS lost to budget (display signal, eligible-weighted)
+    Column("is_lost_rank", Float),         # V2 §6: IS lost to rank (caution when ≥ 0.35)
     Column("opp_score", Float),
     Column("lw_spend", Float), Column("rec_spend", Float),
     Column("spend_cap", Float), Column("spend_floor", Float),
@@ -180,7 +182,8 @@ _V2_COLUMNS = {
                               ("spend_saturation", "FLOAT"), ("data_source", "VARCHAR(64)"),
                               ("proposed_spend", "FLOAT"), ("held_back", "FLOAT"),
                               ("guard_band_pct", "FLOAT"), ("weeks_to_target", "FLOAT"),
-                              ("curve", "JSON")],
+                              ("curve", "JSON"), ("is_lost_budget", "FLOAT"),
+                              ("is_lost_rank", "FLOAT")],
     "bi_predictions": [("goal", "VARCHAR(32) DEFAULT ''")],
     "bi_curve_fits": [("scope_campaign", "VARCHAR(512)")],
     "bi_simulator_snapshots": [("sim_type", "VARCHAR(16)"), ("x_axis", "VARCHAR(16)")],
