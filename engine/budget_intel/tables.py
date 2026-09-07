@@ -42,6 +42,20 @@ business_metrics = Table(
     Column("updated_at", DateTime),
 )
 
+# V2 goal ladder (§2): a value on every rung. gross_profit = units × value_per_unit
+# × margin_pct − spend. A rung with a NULL value_per_unit still runs but is
+# volume-maximizing (no profit optimum). bi_business_metrics seeds this for the
+# `transactions` rung during migration.
+goal_config = Table(
+    "bi_goal_config", metadata,
+    Column("client_id", String(64), primary_key=True),
+    Column("goal_key", String(32), primary_key=True),   # transactions|customers|new_customers|revenue|main_conv|all_conv
+    Column("value_per_unit", Float),                    # nullable — no value => volume goal
+    Column("margin_pct", Float),                        # nullable — defaults to 1.0 in the model
+    Column("label", String(64)),
+    Column("updated_at", DateTime),
+)
+
 curve_fits = Table(
     "bi_curve_fits", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),

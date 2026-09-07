@@ -86,6 +86,10 @@ class Cell:
     cost_per_car: float = 0.0
     car_count: float = 0.0
     is_current: int = 0            # rounded integer percent (curve index)
+    # V2 goal ladder: observed units per rung over the reference period, keyed by
+    # goal_key (e.g. {"all_conv": 500, "transactions": 120, ...}). main_conv is the
+    # curve rung (ratio 1) and lives in `main_conv`; this holds the other rungs.
+    goal_units: dict = field(default_factory=dict)
 
     @property
     def key(self):
@@ -94,13 +98,21 @@ class Cell:
 
 @dataclass
 class Surfaces:
-    """Six projection surfaces for one cell, indexed t = 1..100 (MODEL_SPEC §3)."""
+    """Projection surfaces for one cell, indexed t = 1..100 (MODEL_SPEC §3).
+
+    leads/cpl/spend are always populated. Legacy mode fills cars/revenue/adroi (the
+    constant cost-per-car chain). Chained (V2) mode fills the per-goal dicts instead:
+    `units[goal_key]`, `goal_revenue[goal_key]`, `goal_profit[goal_key]` — each a
+    100-length list; a volume goal (no value) has units only."""
     leads: list = field(default_factory=list)
     cpl: list = field(default_factory=list)
     spend: list = field(default_factory=list)
     cars: list = field(default_factory=list)
     revenue: list = field(default_factory=list)
     adroi: list = field(default_factory=list)
+    units: dict = field(default_factory=dict)          # goal_key -> [units at t=1..100]
+    goal_revenue: dict = field(default_factory=dict)   # goal_key -> [revenue at t]
+    goal_profit: dict = field(default_factory=dict)    # goal_key -> [profit at t] (valued rungs)
 
     def at(self, t):
         i = t - 1
@@ -108,8 +120,19 @@ class Surfaces:
                     cars=self.cars[i], revenue=self.revenue[i], adroi=self.adroi[i])
 
 
-def project(cell: Cell, curves: MasterCurves) -> Surfaces:
-    """MODEL_SPEC §3. Ratio-scales the master tables to the cell's actuals."""
+def project(cell: Cell, curves: MasterCurves, mode="legacy", goal_config=None) -> Surfaces:
+    """MODEL_SPEC §3. Ratio-scales the master tables to the cell's actuals.
+
+    mode="legacy" (default — golden parity): business cars/revenue/adroi from the
+    constant cost-per-car chain (`cars = spend ÷ cost_per_car`), which is linear in
+    spend so its optimum is the curve's saturation point.
+
+    mode="chained" (V2): every goal rung is scaled off the LEAD curve by its observed
+    ratio, so revenue/profit inherit the lead curve's diminishing returns and each
+    valued rung has a genuine interior optimum. `goal_config` maps goal_key ->
+    {value_per_unit, margin_pct}; a rung without a value is volume-maximizing.
+
+    leads/cpl/spend are computed the same way in both modes."""
     s = Surfaces()
     ok = 1 <= cell.is_current <= 100
     base_leads = curves.leads_at(cell.is_current) if ok else 0
@@ -121,12 +144,42 @@ def project(cell: Cell, curves: MasterCurves) -> Surfaces:
             leads = mround(cell.main_conv * curves.leads_at(t) / base_leads)
             cpl = cell.cpa * curves.cpl_at(t) / base_cpl
         spend = cpl * leads
-        cars = mround(spend / cell.cost_per_car) if cell.cost_per_car else 0
-        revenue = cars * cell.rev_per_car
-        adroi = revenue * cell.gp_pct - spend
         s.leads.append(leads); s.cpl.append(cpl); s.spend.append(spend)
-        s.cars.append(cars); s.revenue.append(revenue); s.adroi.append(adroi)
+        if mode == "legacy":
+            cars = mround(spend / cell.cost_per_car) if cell.cost_per_car else 0
+            revenue = cars * cell.rev_per_car
+            adroi = revenue * cell.gp_pct - spend
+            s.cars.append(cars); s.revenue.append(revenue); s.adroi.append(adroi)
+    if mode == "chained":
+        _project_goals(cell, s, goal_config or {})
     return s
+
+
+def goal_ratios(cell: Cell):
+    """Observed per-cell ratio of each rung to main_conv (main_conv itself = 1),
+    held constant along the curve (MODEL_SPEC / V2 §2 stated assumption)."""
+    ratios = {"main_conv": 1.0}
+    if cell.main_conv:
+        for g, u in (cell.goal_units or {}).items():
+            ratios[g] = u / cell.main_conv
+    return ratios
+
+
+def _project_goals(cell: Cell, s: Surfaces, goal_config):
+    """Chain each rung off the lead curve (V2 §3): units[g](t) = mround(leads(t)·ratio[g]);
+    revenue/profit follow when the rung carries a value, else it is volume-only."""
+    for g, ratio in goal_ratios(cell).items():
+        units = [mround(lead * ratio) for lead in s.leads]
+        s.units[g] = units
+        cfg = goal_config.get(g) or {}
+        vpu = cfg.get("value_per_unit")
+        if vpu is None:
+            continue                                   # volume goal — no profit optimum
+        margin = cfg.get("margin_pct")
+        margin = 1.0 if margin is None else margin
+        rev = [u * vpu for u in units]
+        s.goal_revenue[g] = rev
+        s.goal_profit[g] = [rev[i] * margin - s.spend[i] for i in range(len(units))]
 
 
 def max_roi_point(s: Surfaces):
@@ -134,6 +187,30 @@ def max_roi_point(s: Surfaces):
     matching the workbook's MAX + exact XLOOKUP (MODEL_SPEC §3)."""
     best = max(s.adroi)
     t = s.adroi.index(best) + 1
+    return t, best, s.spend[t - 1]
+
+
+def spend_saturation(s: Surfaces):
+    """Curve freeze point (goal-independent): (t, spend) where projected spend stops
+    rising — extra impression share buys nothing more. Spend is non-decreasing then
+    flat, so this is the max and the first t that reaches it; t=100 when it never
+    freezes. This is the 'ceiling' number surfaced alongside each goal's optimum."""
+    if not s.spend:
+        return 0, 0.0
+    sat = max(s.spend)
+    return s.spend.index(sat) + 1, sat
+
+
+def goal_cap(s: Surfaces, goal_key):
+    """Profit-max for one goal: (t, max_profit, spend_cap) at argmax profit[goal_key].
+    A volume goal (no profit curve — no value on the rung) caps at spend_saturation,
+    returned as (t_sat, None, spend_sat)."""
+    profit = s.goal_profit.get(goal_key)
+    if not profit:
+        t, sat = spend_saturation(s)
+        return t, None, sat
+    best = max(profit)
+    t = profit.index(best) + 1
     return t, best, s.spend[t - 1]
 
 
