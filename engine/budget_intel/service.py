@@ -14,7 +14,7 @@ from sqlalchemy import select, insert, delete, text
 from .model import Cell, mround
 from .tables import (campaign_mappings, business_metrics, simulator_snapshots,
                      allocation_runs, allocation_results, predictions,
-                     goal_config, goal_values)
+                     goal_config, goal_values, guard_config)
 from .curves import get_active_curves
 from .allocate import run_allocation, run_allocation_v2
 
@@ -215,6 +215,82 @@ def migrate_business_metrics(engine, client_id):
     return True
 
 
+# ---- guard config (V2 §5): per-cell change limit, resolved most-specific-first ----
+
+DEFAULT_GUARD_BAND = 0.30
+
+
+def upsert_guard_config(engine, client_id, rows):
+    """rows: [{brand?, region?, category?, max_change_pct}] — omitted/'' = any on a dimension."""
+    now = _now()
+    with engine.begin() as c:
+        for r in rows:
+            b, rg, cat = r.get("brand") or "", r.get("region") or "", r.get("category") or ""
+            where = ((guard_config.c.client_id == client_id) & (guard_config.c.brand == b)
+                     & (guard_config.c.region == rg) & (guard_config.c.category == cat))
+            c.execute(delete(guard_config).where(where))
+            c.execute(insert(guard_config).values(
+                client_id=client_id, brand=b, region=rg, category=cat,
+                max_change_pct=r.get("max_change_pct"), updated_at=now))
+    return len(rows)
+
+
+def get_guard_config(engine, client_id):
+    with engine.connect() as c:
+        rows = c.execute(select(guard_config).where(
+            guard_config.c.client_id == client_id)).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def resolve_guard_band(guard_rows, brand, region, category, default=DEFAULT_GUARD_BAND):
+    """Most-specific match wins (category > region > brand > client); `default` when none
+    matches (V2 §5). A dimension left '' on a rule means 'any'."""
+    best, best_rank = default, -1
+    for g in guard_rows:
+        gb, gr, gc = g.get("brand") or "", g.get("region") or "", g.get("category") or ""
+        if (gb and gb != brand) or (gr and gr != region) or (gc and gc != category):
+            continue
+        rank = (4 if gc else 0) + (2 if gr else 0) + (1 if gb else 0)
+        if rank > best_rank:
+            best_rank, best = rank, g.get("max_change_pct")
+    return best
+
+
+# ---- reference period (V2 §5): the actuals/guard window --------------------
+
+def _as_date(v):
+    if isinstance(v, datetime.datetime):
+        return v.date()
+    if isinstance(v, datetime.date):
+        return v
+    if isinstance(v, str) and v:
+        try:
+            return datetime.date.fromisoformat(v[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def _resolve_window(dates, reference):
+    """(lo, hi, exclude_set) for build_cells. reference: {mode: week|trailing, period_start,
+    weeks, exclude[]}. None -> (None, None, set()) = aggregate everything (back-compat).
+    'trailing' / a missing period_start use the latest dated day as the window's end."""
+    if not reference:
+        return None, None, set()
+    exclude = {d for d in (_as_date(x) for x in (reference.get("exclude") or [])) if d}
+    ps = _as_date(reference.get("period_start"))
+    weeks = int(reference.get("weeks") or 1)
+    span = datetime.timedelta(days=7 * weeks - 1)
+    mode = reference.get("mode") or ("week" if ps else "trailing")
+    if mode == "week" and ps:
+        return ps, ps + span, exclude
+    real = [d for d in dates if d]                      # trailing / latest complete window
+    if not real:
+        return None, None, exclude
+    hi = max(real)
+    return hi - span, hi, exclude
+
+
 # ---- simulator snapshots ----------------------------------------------------
 
 def add_snapshot(engine, client_id, points, source="manual", campaign=None):
@@ -228,12 +304,14 @@ def add_snapshot(engine, client_id, points, source="manual", campaign=None):
 
 # ---- actuals builder (the programmatic Actuals sheet) ------------------------
 
-def build_cells(engine, client_id):
+def build_cells(engine, client_id, reference=None):
     """Aggregate mapped campaign_performance rows to Brand × Region × Category
     Cells, merging tCPA (cost-weighted, where the export carries target_cpa) and
     the latest business metrics per cell. MODEL_SPEC §1 semantics.
 
-    IS aggregation: eligible impressions = impr / IS per campaign;
+    `reference` (V2 §5) selects the actuals/guard window — {mode, period_start, weeks,
+    exclude[]}; None aggregates everything. Both the projection baseline and the guard
+    read this window. IS aggregation: eligible impressions = impr / IS per campaign;
     cell IS = sum(impr) / sum(eligible)."""
     mappings = {m["campaign"]: m for m in get_mappings(engine, client_id)}
     # text() SQL, not a Core select: the BigQuery RouterEngine (engine/warehouse/
@@ -242,16 +320,22 @@ def build_cells(engine, client_id):
     # of the PG and BQ raw_rows schemas.
     with engine.connect() as c:
         rows = c.execute(text(
-            "SELECT campaign, clicks, impressions, cost, conversions, row "
+            "SELECT campaign, clicks, impressions, cost, conversions, date_norm, row "
             "FROM raw_rows WHERE client_id = :cid "
             "AND report_type = 'campaign_performance'"),
             {"cid": client_id}).mappings().all()
+
+    lo, hi, exclude = _resolve_window([_as_date(r["date_norm"]) for r in rows], reference)
 
     agg = {}
     for r in rows:
         m = mappings.get(r["campaign"])
         if not m or not m.get("brand"):
             continue
+        d = _as_date(r["date_norm"])
+        if d is not None and ((lo and d < lo) or (hi and d > hi) or d in exclude):
+            continue                                    # dated row outside the reference window
+
         key = (m["brand"], m["region"], m["category"])
         a = agg.setdefault(key, dict(impr=0.0, clicks=0.0, cost=0.0, conv=0.0,
                                      eligible=0.0, tcpa_wsum=0.0, tcpa_w=0.0, all_conv=0.0))
@@ -297,6 +381,9 @@ def build_cells(engine, client_id):
     per_cell_goals = {key: {} for key in agg}
     account_goals = defaultdict(float)
     for gv in get_goal_values(engine, client_id):
+        gvd = _as_date(gv["period_start"])
+        if gvd and ((lo and gvd < lo) or (hi and gvd > hi) or gvd in exclude):
+            continue                                    # outside the reference window
         gk, u, camp = gv["goal_key"], (gv["units"] or 0.0), gv["campaign"]
         if camp:
             m = mappings.get(camp)
@@ -387,9 +474,10 @@ def create_run(engine, client_id, goal, budget, mode="greedy_marginal",
     if unmapped and cells is None:
         raise ValueError(f"unmapped campaigns block the run: {unmapped[:10]}"
                          + (f" (+{len(unmapped)-10} more)" if len(unmapped) > 10 else ""))
+    reference = (run_params or {}).get("reference")
     if cells is None:
         migrate_business_metrics(engine, client_id)          # seed the transactions value once
-        cells = build_cells(engine, client_id)
+        cells = build_cells(engine, client_id, reference=reference)
     cells = [c for c in cells if c.is_current and c.cost > 0]
     if not cells:
         raise ValueError("no usable cells: need mapped campaign data with "
@@ -401,8 +489,14 @@ def create_run(engine, client_id, goal, budget, mode="greedy_marginal",
     if default_goal not in goals:
         default_goal = goals[0]
 
+    # Resolve the guard band per cell (hierarchy). Active when guard rules exist (or a flat
+    # max_change_pct is passed); otherwise the run is unguarded (back-compat).
+    guard_rows = get_guard_config(engine, client_id)
+    rp = dict(run_params or {})
+    if guard_rows:
+        rp["guard_bands"] = {c.key: resolve_guard_band(guard_rows, *c.key) for c in cells}
     scenarios = {g: run_allocation_v2(cells, curves, goal=g, budget=budget,
-                                      goal_config=gcfg, run_params=run_params) for g in goals}
+                                      goal_config=gcfg, run_params=rp) for g in goals}
     with engine.begin() as c:
         run_id = c.execute(insert(allocation_runs).values(
             client_id=client_id, run_at=_now(), created_by=created_by,
@@ -436,6 +530,9 @@ def get_run(engine, client_id, run_id):
     default = out.get("chosen_goal") or out.get("goal")
     out["results"] = scenarios.get(default) or next(iter(scenarios.values()), [])
     out["disagreements"] = _disagreements(scenarios)
+    # held-back reporting (V2 §5): what the change limit withheld, per goal.
+    out["held_back_total"] = {g: round(sum((r.get("held_back") or 0.0) for r in rs), 2)
+                              for g, rs in scenarios.items()}
     return out
 
 
@@ -479,3 +576,35 @@ def finalize_run(engine, client_id, run_id, goal=None, created_by="api"):
     from . import bq_mirror
     bq_mirror.mirror_finalized_run(run)   # fail-soft analytical mirror
     return run
+
+
+def override_run(engine, client_id, run_id, cell_key, spend, reason, actor, goal=None):
+    """Audited override (V2 §5): set rec_spend for one cell past the guard band, recompute its
+    held_back, and record the override in run.params.overrides[] with actor + reason — never
+    silent. (Decision-ledger action lands with the lifecycle hookup in PR4.) Returns the
+    updated result row. Raises LookupError/ValueError when the run or cell is missing."""
+    run = get_run(engine, client_id, run_id)
+    if not run:
+        raise LookupError(f"run {run_id} not found for client {client_id}")
+    if not reason or not actor:
+        raise ValueError("override requires an actor and a reason (never silent)")
+    g = goal or run.get("chosen_goal") or run.get("goal")
+    brand, region, category = cell_key
+    where = ((allocation_results.c.run_id == run_id) & (allocation_results.c.goal == g)
+             & (allocation_results.c.brand == brand) & (allocation_results.c.region == region)
+             & (allocation_results.c.category == category))
+    with engine.begin() as c:
+        res = c.execute(select(allocation_results).where(where)).mappings().first()
+        if not res:
+            raise ValueError(f"cell {cell_key} not in run {run_id} for goal {g}")
+        base = res["proposed_spend"] if res["proposed_spend"] is not None else res["rec_spend"]
+        c.execute(allocation_results.update().where(where).values(
+            rec_spend=spend, held_back=round(base - spend, 4)))
+        params = dict(run.get("params") or {})
+        params["overrides"] = list(params.get("overrides") or []) + [{
+            "goal": g, "cell": list(cell_key), "spend": spend, "reason": reason,
+            "actor": actor, "at": _now().isoformat()}]
+        c.execute(allocation_runs.update().where(
+            allocation_runs.c.id == run_id).values(params=params))
+    return {"run_id": run_id, "goal": g, "cell": list(cell_key), "rec_spend": spend,
+            "held_back": round(base - spend, 4), "reason": reason, "actor": actor}

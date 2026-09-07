@@ -70,6 +70,19 @@ goal_values = Table(
     Column("updated_at", DateTime),
 )
 
+# V2 guard (§5): per-cell change limit, resolved most-specific-first
+# (category > region > brand > client). '' means "any" on a dimension. Default 0.30
+# when no row matches. No redistribution after clamping — held-back is reported.
+guard_config = Table(
+    "bi_guard_config", metadata,
+    Column("client_id", String(64), primary_key=True),
+    Column("brand", String(64), primary_key=True),      # '' = any
+    Column("region", String(64), primary_key=True),     # '' = any
+    Column("category", String(64), primary_key=True),   # '' = any
+    Column("max_change_pct", Float),
+    Column("updated_at", DateTime),
+)
+
 curve_fits = Table(
     "bi_curve_fits", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
@@ -124,6 +137,10 @@ allocation_results = Table(
     Column("category", String(64), primary_key=True),
     Column("spend_saturation", Float),     # V2: goal-independent curve freeze point
     Column("data_source", String(64)),     # V2: which rung fed the run + where it came from
+    Column("proposed_spend", Float),       # V2 §5: pre-guard allocation (before the change limit)
+    Column("held_back", Float),            # V2 §5: proposed − rec (>0 clamped down, <0 clamped up)
+    Column("guard_band_pct", Float),       # V2 §5: the change limit resolved for this cell
+    Column("weeks_to_target", Float),      # V2 §5: weeks of guarded steps to reach the cap
     Column("opp_score", Float),
     Column("lw_spend", Float), Column("rec_spend", Float),
     Column("spend_cap", Float), Column("spend_floor", Float),
@@ -156,7 +173,9 @@ predictions = Table(
 _V2_COLUMNS = {
     "bi_allocation_runs": [("goals_computed", "JSON"), ("chosen_goal", "VARCHAR(32)")],
     "bi_allocation_results": [("goal", "VARCHAR(32) DEFAULT ''"),
-                              ("spend_saturation", "FLOAT"), ("data_source", "VARCHAR(64)")],
+                              ("spend_saturation", "FLOAT"), ("data_source", "VARCHAR(64)"),
+                              ("proposed_spend", "FLOAT"), ("held_back", "FLOAT"),
+                              ("guard_band_pct", "FLOAT"), ("weeks_to_target", "FLOAT")],
     "bi_predictions": [("goal", "VARCHAR(32) DEFAULT ''")],
 }
 

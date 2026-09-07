@@ -8,11 +8,24 @@ Two allocator modes:
                      goal-metric on its curve; same caps/floors. Default for new
                      work; invariant-tested, not golden-tested.
 """
+import math
+
 from .model import (Cell, MasterCurves, project, max_roi_point,
                     expected_is_for_spend, scores, goal_score, goal_cap,
                     spend_saturation, GOAL_TO_SCORE)
 
 EPS = 1e-9
+
+
+def _weeks_to_target(lw, cap, band):
+    """Weeks of ±band steps to move last-week spend to the cap (V2 §5):
+    ceil(|log(cap/lw)| / log(1+band)). None when the band or bases can't be stepped;
+    0 when already there."""
+    if lw <= 0 or cap <= 0 or not band or band <= 0:
+        return None
+    if abs(cap - lw) < 1e-9:
+        return 0.0
+    return float(math.ceil(abs(math.log(cap / lw)) / math.log(1 + band)))
 
 
 def _proportional_pass(pool, score_by_key, alloc, caps, floors):
@@ -244,12 +257,21 @@ def run_allocation_v2(cells, curves: MasterCurves, goal, budget, goal_config,
     spend_by_key = {k: surfaces[k].spend for k in surfaces}
     final = _greedy_marginal_curves(spend_by_key, metric, caps, floors, budget)
 
-    max_change = rp.get("max_change_pct")                  # held-back accounting lands in PR3
-    if max_change is not None:
-        for key, cell in cell_by_key.items():
-            if cell.cost > 0:
-                lo, hi = cell.cost * (1 - max_change), cell.cost * (1 + max_change)
-                final[key] = min(max(final[key], lo), hi)
+    # Guard (V2 §5): clamp each cell's week-over-week change to its resolved band, then
+    # report what the limit held back — never re-run the allocator. Per-cell bands come from
+    # bi_guard_config (service resolves the hierarchy); a flat max_change_pct is the fallback.
+    guard_bands = rp.get("guard_bands") or {}
+    flat = rp.get("max_change_pct")
+    proposed = dict(final)                                  # pre-guard allocation
+    band_of, held, weeks = {}, {}, {}
+    for key, cell in cell_by_key.items():
+        band = guard_bands.get(key, flat)
+        band_of[key] = band
+        if band is not None and cell.cost > 0:
+            lo, hi = cell.cost * (1 - band), cell.cost * (1 + band)
+            final[key] = min(max(final[key], lo), hi)
+        held[key] = proposed[key] - final[key]
+        weeks[key] = _weeks_to_target(cell.cost, caps[key], band)
 
     valued = (cfg.get(goal) or {}).get("value_per_unit") is not None
     data_source = f"{goal} · {curve_source}" if curve_source else goal
@@ -263,6 +285,8 @@ def run_allocation_v2(cells, curves: MasterCurves, goal, budget, goal_config,
             opp_score=score_by_key[key], data_source=data_source,
             spend_saturation=round(sats[key], 4),
             lw_spend=cell.cost, rec_spend=spend,
+            proposed_spend=round(proposed[key], 4), held_back=round(held[key], 4),
+            guard_band_pct=band_of[key], weeks_to_target=weeks[key],
             spend_cap=caps[key], spend_floor=floors[key],
             expected_is=t, lw_is=cell.is_share * 100,
             expected_cpa=s.cpl[i], lw_cpa=cell.cpa,

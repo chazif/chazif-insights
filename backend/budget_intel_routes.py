@@ -193,3 +193,29 @@ def finalize(client_id: str, run_id: int, body: dict | None = None, created_by: 
         return bi.finalize_run(engine(), client_id, run_id, goal=goal, created_by=created_by)
     except LookupError as e:
         raise HTTPException(404, str(e))
+
+
+@router.post("/runs/{run_id}/override")
+def override(client_id: str, run_id: int, body: dict):
+    """V2 §5 audited override: {cell_key:[brand,region,category], spend, reason, actor, goal?}.
+    Sets rec_spend past the guard band, records the override on the run. Never silent."""
+    try:
+        return bi.override_run(
+            engine(), client_id, run_id, cell_key=tuple(body["cell_key"]),
+            spend=float(body["spend"]), reason=body.get("reason"),
+            actor=body.get("actor"), goal=body.get("goal"))
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except (ValueError, KeyError) as e:
+        raise HTTPException(422, str(e))
+
+
+@router.get("/guard")
+def get_guard(client_id: str):
+    return {"rules": bi.get_guard_config(engine(), client_id)}
+
+
+@router.put("/guard")
+def put_guard(client_id: str, rows: List[dict]):
+    n = bi.upsert_guard_config(engine(), client_id, rows)
+    return {"saved": n}
