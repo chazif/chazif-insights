@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Segment Pacing Board — Feature Plan</title>
+<style>
+  :root{
+    --ink:#1a1a1a; --ink-soft:#33373b; --muted:#6b7280; --faint:#9aa1a9;
+    --line:#e6e8eb; --line-strong:#d0d4d9; --bg:#ffffff; --panel:#f7f8f9;
+    --accent:#1e3a8a; --accent-soft:#eef2ff;
+    --lime:#cfff04; --pos:#15803d; --pos-bg:#e9f6ee; --warn:#b45309; --warn-bg:#fdf3e7;
+    --neg:#dc2626; --neg-bg:#fdecec;
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--panel);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.62;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:920px;margin:0 auto;background:var(--bg);
+    box-shadow:0 1px 3px rgba(16,24,40,.06),0 12px 40px rgba(16,24,40,.06)}
+  .pad{padding:44px 56px}
+  @media(max-width:680px){.pad{padding:28px 22px}}
+
+  /* header */
+  header.doc{background:var(--ink);color:#fff;padding:40px 56px 34px}
+  header.doc .kicker{font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--lime);font-weight:700;margin:0 0 12px}
+  header.doc h1{margin:0;font-size:30px;line-height:1.15;letter-spacing:-.015em;font-weight:700}
+  header.doc p.sub{margin:12px 0 0;color:#c7ccd2;font-size:15px;max-width:60ch}
+  .meta{display:flex;flex-wrap:wrap;gap:22px;margin-top:24px;padding-top:20px;
+    border-top:1px solid rgba(255,255,255,.14)}
+  .meta div{font-size:12.5px;color:#aeb4bc}
+  .meta b{display:block;color:#fff;font-size:13px;font-weight:600;margin-top:2px}
+
+  h2{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);
+    font-weight:700;margin:40px 0 6px;display:flex;align-items:center;gap:10px}
+  h2 .n{font-family:var(--mono);font-size:11px;color:#fff;background:var(--accent);
+    width:22px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center}
+  h2 + .lede{margin:0 0 18px;font-size:18px;line-height:1.4;color:var(--ink);font-weight:600;letter-spacing:-.01em}
+  h3{font-size:15px;margin:26px 0 8px;font-weight:700;color:var(--ink)}
+  p{margin:0 0 14px}
+  .muted{color:var(--muted)}
+  strong{font-weight:650}
+  code{font-family:var(--mono);font-size:.86em;background:var(--panel);border:1px solid var(--line);
+    border-radius:4px;padding:1px 5px;color:var(--accent)}
+  a{color:var(--accent)}
+  .section{border-top:1px solid var(--line)}
+
+  ul,ol{margin:0 0 16px;padding-left:22px}
+  li{margin:5px 0}
+  li::marker{color:var(--faint)}
+
+  /* callouts */
+  .call{border:1px solid var(--line-strong);border-left:4px solid var(--accent);
+    background:var(--accent-soft);border-radius:8px;padding:14px 18px;margin:18px 0;font-size:14px}
+  .call.decide{border-left-color:var(--warn);background:var(--warn-bg)}
+  .call.scope{border-left-color:var(--muted);background:var(--panel)}
+  .call .lab{font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;
+    color:var(--accent);margin:0 0 4px}
+  .call.decide .lab{color:var(--warn)}
+  .call.scope .lab{color:var(--muted)}
+  .call p:last-child{margin-bottom:0}
+
+  /* tables */
+  .tbl{width:100%;border-collapse:collapse;margin:6px 0 20px;font-size:13.5px}
+  .tbl th,.tbl td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .tbl thead th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+    font-weight:700;border-bottom:2px solid var(--line-strong)}
+  .tbl tr:last-child td{border-bottom:none}
+  .tbl td code{white-space:nowrap}
+  .yes{color:var(--pos);font-weight:700}
+  .no{color:var(--neg);font-weight:700}
+  .scroll{overflow-x:auto}
+
+  /* board mock */
+  .board{border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;margin:14px 0 8px}
+  .board .cap{background:var(--panel);border-bottom:1px solid var(--line);padding:8px 14px;
+    font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.02em}
+  table.mock{width:100%;border-collapse:collapse;font-size:11.5px;font-family:var(--mono)}
+  table.mock th,table.mock td{padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right}
+  table.mock th{background:#fbfcfd;color:var(--muted);font-weight:700;font-size:10px;
+    text-transform:uppercase;letter-spacing:.04em;text-align:right;border-bottom:2px solid var(--line-strong)}
+  table.mock td.lbl,table.mock th.lbl{text-align:left;font-family:var(--sans);font-weight:600}
+  table.mock tr.tot td{font-weight:700;background:#fbfcfd;border-top:2px solid var(--line-strong)}
+  table.mock td.pos{color:var(--pos)}table.mock td.neg{color:var(--neg)}
+  .h-good{background:#dff0e4}.h-ok{background:#eef6f0}.h-warn{background:#fdeede}.h-bad{background:#fbe0e0}.h-fut{background:#f4f5f6;color:#c2c7cd}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin:10px 0 22px;font-size:12px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,.06);display:inline-block}
+
+  /* flow */
+  .flow{margin:12px 0 8px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .flow .step{display:flex;gap:14px;padding:14px 16px;border-bottom:1px solid var(--line);align-items:flex-start}
+  .flow .step:last-child{border-bottom:none}
+  .flow .q{font-family:var(--mono);font-size:11px;font-weight:700;color:#fff;background:var(--ink);
+    min-width:26px;height:26px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;margin-top:1px}
+  .flow .step.stop .q{background:var(--accent)}
+  .flow .body b{display:block;font-size:14px;margin-bottom:2px}
+  .flow .body span{font-size:13px;color:var(--muted)}
+  .arrow{color:var(--faint);font-weight:700}
+
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:14px 0}
+  @media(max-width:680px){.two{grid-template-columns:1fr}}
+  .card{border:1px solid var(--line);border-radius:10px;padding:16px 18px;background:var(--bg)}
+  .card h4{margin:0 0 6px;font-size:14px}
+  .card p{margin:0;font-size:13.5px;color:var(--ink-soft)}
+
+  footer{padding:26px 56px 42px;color:var(--faint);font-size:12px;border-top:1px solid var(--line)}
+  @media(max-width:680px){footer{padding:22px}}
+  @media print{body{background:#fff}.wrap{box-shadow:none;max-width:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="doc">
+    <p class="kicker">Feature Methodology · SearchNex Insights</p>
+    <h1>Segment Pacing Board</h1>
+    <p class="sub">One consistent pacing view for every client — a single row for small
+      accounts, one row per allocated segment for large ones. Same columns, same daily heat
+      calendar; only the number of rows flexes.</p>
+    <div class="meta">
+      <div>Tab<b>Pacing (existing)</b></div>
+      <div>Branch<b>feature/ads-api</b></div>
+      <div>Status<b>Plan — pre-build</b></div>
+      <div>Date<b>September 2026</b></div>
+    </div>
+  </header>
+
+  <div class="pad">
+
+    <!-- 1 -->
+    <h2><span class="n">1</span>The idea</h2>
+    <p class="lede">Take each client's budget, break it into however many segments that client
+      actually works at, and show — for each — how spend is pacing against a <em>daily</em> target.</p>
+    <p>The reference is a spreadsheet "pacing board": every row is a budget segment, and across it
+      you see the segment's monthly budget, its daily-average budget, trailing-window spend
+      (month-to-date, yesterday, last 3 days, last 7 days) each measured against pace, a
+      rest-of-month suggestion, and a day-by-day heat calendar of spend. We are rebuilding that
+      inside the app's <strong>Pacing</strong> tab, driven by live data instead of a manual sheet.</p>
+
+    <div class="call">
+      <p class="lab">The one principle</p>
+      <p><strong>The view never changes — only the number of rows does.</strong> A small client
+        whose budget is too small to split shows <strong>one row</strong> (the whole account). A
+        large client whose budget has been allocated across segments shows <strong>one row per
+        segment plus a Total</strong>. Identical columns, identical math, identical calendar.</p>
+    </div>
+
+    <!-- 2 -->
+    <div class="section"></div>
+    <h2><span class="n">2</span>What it looks like</h2>
+    <p class="lede">The same board at two client sizes.</p>
+
+    <div class="board">
+      <div class="cap">Large client — budget allocated into segments · multiple rows + Total</div>
+      <div class="scroll">
+      <table class="mock">
+        <thead>
+          <tr>
+            <th class="lbl">Segment</th><th>Month&nbsp;Bg</th><th>Daily&nbsp;Avg</th>
+            <th>MTD</th><th>Diff&nbsp;%</th><th>Yest.</th><th>L3</th><th>L7</th>
+            <th>Left</th><th>Sugg/day</th>
+            <th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="lbl">NY · Search</td><td>$18,000</td><td>$600</td><td>$4,190</td><td class="pos">+3%</td><td>$640</td><td>$1,880</td><td>$4,300</td><td>$13,810</td><td>$592</td>
+            <td class="h-ok">610</td><td class="h-good">580</td><td class="h-ok">625</td><td class="h-warn">705</td><td class="h-ok">600</td><td class="h-good">560</td><td class="h-fut">·</td></tr>
+          <tr><td class="lbl">NY · Shopping</td><td>$9,000</td><td>$300</td><td>$1,980</td><td class="neg">−12%</td><td>$210</td><td>$740</td><td>$1,740</td><td>$7,020</td><td>$312</td>
+            <td class="h-warn">355</td><td class="h-ok">290</td><td class="h-bad">120</td><td class="h-ok">305</td><td class="h-ok">300</td><td class="h-ok">280</td><td class="h-fut">·</td></tr>
+          <tr><td class="lbl">NJ · Search</td><td>$15,000</td><td>$500</td><td>$3,520</td><td class="pos">+1%</td><td>$505</td><td>$1,540</td><td>$3,480</td><td>$11,480</td><td>$496</td>
+            <td class="h-ok">500</td><td class="h-good">470</td><td class="h-ok">515</td><td class="h-ok">505</td><td class="h-warn">560</td><td class="h-ok">490</td><td class="h-fut">·</td></tr>
+          <tr class="tot"><td class="lbl">Total</td><td>$42,000</td><td>$1,400</td><td>$9,690</td><td class="neg">−3%</td><td>$1,355</td><td>$4,160</td><td>$9,520</td><td>$32,310</td><td>$1,400</td>
+            <td>1,465</td><td>1,340</td><td>1,260</td><td>1,515</td><td>1,460</td><td>1,330</td><td class="h-fut">·</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="board">
+      <div class="cap">Small client — one total budget, no segmentation · single row (no Total needed)</div>
+      <div class="scroll">
+      <table class="mock">
+        <thead>
+          <tr>
+            <th class="lbl">Segment</th><th>Month&nbsp;Bg</th><th>Daily&nbsp;Avg</th>
+            <th>MTD</th><th>Diff&nbsp;%</th><th>Yest.</th><th>L3</th><th>L7</th>
+            <th>Left</th><th>Sugg/day</th>
+            <th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="lbl">Whole account</td><td>$3,000</td><td>$100</td><td>$690</td><td class="pos">+2%</td><td>$104</td><td>$305</td><td>$700</td><td>$2,310</td><td>$103</td>
+            <td class="h-ok">102</td><td class="h-good">95</td><td class="h-ok">108</td><td class="h-ok">100</td><td class="h-ok">98</td><td class="h-warn">115</td><td class="h-fut">·</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+    <div class="legend">
+      <span><span class="sw" style="background:#dff0e4"></span>under / on pace</span>
+      <span><span class="sw" style="background:#eef6f0"></span>near target</span>
+      <span><span class="sw" style="background:#fdeede"></span>running warm</span>
+      <span><span class="sw" style="background:#fbe0e0"></span>off pace</span>
+      <span><span class="sw" style="background:#f4f5f6"></span>future day</span>
+    </div>
+    <p class="muted" style="font-size:13px">Illustrative numbers. The real board carries all four
+      windows (MTD / Yesterday / Last-3 / Last-7) each with Diff&nbsp;$ and Diff&nbsp;%, plus a full
+      month of day columns that scroll horizontally.</p>
+
+    <!-- 3 -->
+    <div class="section"></div>
+    <h2><span class="n">3</span>Where the rows come from</h2>
+    <p class="lede">The app picks the finest budget breakdown a client actually has — asking four
+      questions in order and stopping at the first "yes."</p>
+
+    <div class="flow">
+      <div class="step stop">
+        <span class="q">1</span>
+        <div class="body"><b>Has the Budget Allocation engine been run?</b>
+          <span>→ Use its segments as the rows (e.g. 12 Brand/Region/Category cells → 12 rows). This is what "the breakout is a function of the allocation engine" means.</span></div>
+      </div>
+      <div class="step stop">
+        <span class="q">2</span>
+        <div class="body"><b>If not — did they upload committed budget lines split into segments?</b>
+          <span>→ Use those lines as the rows (e.g. 4 budget lines → 4 rows).</span></div>
+      </div>
+      <div class="step stop">
+        <span class="q">3</span>
+        <div class="body"><b>If not — is there a single total monthly budget?</b>
+          <span>→ One row = the whole account. This is the small-client case.</span></div>
+      </div>
+      <div class="step">
+        <span class="q">4</span>
+        <div class="body"><b>If there's no budget at all?</b>
+          <span>→ Still one row, showing spend only (no Diff, since there's nothing to pace against).</span></div>
+      </div>
+    </div>
+    <p>Nobody configures this. Each client lands on exactly one branch automatically, and the board
+      renders 1…N rows accordingly. A Total row appears only when there is more than one row.
+      <strong>The single-row case is account-level pacing</strong> — same code, same layout, one line.</p>
+
+    <!-- 4 -->
+    <div class="section"></div>
+    <h2><span class="n">4</span>The pacing math</h2>
+    <p class="lede">Everything compares to the <em>daily-average</em> budget, scaled to each window —
+      never a flat monthly average.</p>
+
+    <table class="tbl">
+      <thead><tr><th>Quantity</th><th>Definition</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Daily-avg budget</strong></td><td><code>Month budget ÷ days in month</code></td></tr>
+        <tr><td><strong>Expected (per window)</strong></td><td><code>Daily-avg × N</code> — where N = 1 (Yesterday), 3 (Last-3), 7 (Last-7), or days-elapsed (MTD)</td></tr>
+        <tr><td><strong>Diff $</strong></td><td><code>Actual spend − Expected</code></td></tr>
+        <tr><td><strong>Diff %</strong></td><td><code>Diff $ ÷ Expected</code></td></tr>
+        <tr><td><strong>Rest of month — Left</strong></td><td><code>Month budget − MTD spend</code></td></tr>
+        <tr><td><strong>Rest of month — Suggested/day</strong></td><td><code>Left ÷ days remaining</code></td></tr>
+      </tbody>
+    </table>
+
+    <div class="call">
+      <p class="lab">Anchored to data, not the wall clock</p>
+      <p>"Days elapsed", "Yesterday", and the trailing windows are measured from the <strong>last
+        day that actually has data</strong>, not today's calendar date — matching the app's existing
+        pacing logic. This stops a stale upload from raising a false "under-pacing" alarm. ("Days
+        remaining" = <code>days in month − days elapsed</code>, a small new addition.)</p>
+    </div>
+
+    <!-- 5 -->
+    <div class="section"></div>
+    <h2><span class="n">5</span>What already exists vs. what we build</h2>
+    <p class="lede">Most of the plumbing is already in the codebase — the genuinely new work is one aggregation.</p>
+    <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Building block</th><th>Status</th><th>Where</th></tr></thead>
+      <tbody>
+        <tr><td>Per-row calendar date (day precision, indexed)</td><td class="yes">Exists</td><td><code>raw_rows.date_norm</code></td></tr>
+        <tr><td>Daily cost source</td><td class="yes">Exists</td><td><code>campaign_performance</code> rows by day</td></tr>
+        <tr><td>Campaign → Brand / Region / Category resolver</td><td class="yes">Exists</td><td><code>engine/mapping.py</code></td></tr>
+        <tr><td>Per-segment monthly budget</td><td class="yes">Exists</td><td>allocation run <code>rec_spend</code> · <code>budget_lines</code></td></tr>
+        <tr><td>Account-wide daily pacing (MTD / target / projection)</td><td class="yes">Exists</td><td><code>_pacing_daily</code> — model to copy</td></tr>
+        <tr><td>Per-segment <em>monthly</em> rollups</td><td class="yes">Exists</td><td><code>_regions</code>, <code>_nb_categories</code></td></tr>
+        <tr><td><strong>Day × Segment aggregation (the grid itself)</strong></td><td class="no">New</td><td>the core new function</td></tr>
+        <tr><td>Per-segment <em>daily</em> budget target</td><td class="no">New</td><td>segment budget ÷ days</td></tr>
+        <tr><td>"Days remaining in month"</td><td class="no">New</td><td>trivial addition</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p>In short: <code>_pacing_daily</code> already has the <em>day</em> axis; <code>_regions</code>
+      already has the <em>segment</em> axis. The new function simply crosses the two.</p>
+
+    <!-- 6 -->
+    <div class="section"></div>
+    <h2><span class="n">6</span>How it's built</h2>
+
+    <h3>Backend — a new <code>_pacing_grid()</code>, emitted as <code>pacing_grid</code> in the bundle</h3>
+    <ol>
+      <li>Anchor the current month; compute days-in-month, <code>data_through</code> (last day with data), days-elapsed, days-remaining.</li>
+      <li>Resolve the per-segment monthly budget via the four-question fallback in §3.</li>
+      <li>Build the resolver; read <code>campaign_performance</code> for the month; accumulate <code>spend[segment][day]</code>. Campaigns with no mapping fall into an <code>(unmapped)</code> row so totals always reconcile.</li>
+      <li>Per row, compute the daily-avg budget, the four windows with Diff $/%, rest-of-month, and the <code>days: [{date, spend}]</code> array for the calendar.</li>
+      <li>Return <code>rows</code> + a grand <code>totals</code> row.</li>
+    </ol>
+
+    <h3>Frontend — extend the Pacing screen</h3>
+    <ol>
+      <li>A single <strong>PacingGrid</strong> component: the summary columns (Segment · Month Bg · Daily Avg · MTD · Yesterday · Last-3 · Last-7 · Rest-of-Month), with Region/Brand grouping + subtotals and a Total row when rows &gt; 1.</li>
+      <li>A <strong>daily heat calendar</strong> beside it: one column per day, each cell colored by spend vs the row's daily target (calm near target, red over, amber under; future days neutral). Horizontally scrollable.</li>
+      <li>Types added to <code>types.ts</code>; the existing account-level pacing chart folds into the one-row case.</li>
+    </ol>
+
+    <div class="two">
+      <div class="card"><h4>Consistency</h4><p>One component renders every client. The small-client view is not a special case — it's the same grid with a single row.</p></div>
+      <div class="card"><h4>Reconciliation</h4><p>Row spend always sums to the Total; unmapped campaigns are shown, never dropped, so the numbers foot.</p></div>
+    </div>
+
+    <!-- 7 -->
+    <div class="section"></div>
+    <h2><span class="n">7</span>Data dependency &amp; graceful degradation</h2>
+    <p class="lede">The board self-adjusts to what a client has — it never breaks.</p>
+    <ul>
+      <li><strong>Daily calendar needs daily campaign data.</strong> The account-level "pacing" export has no campaign breakdown and can't be segmented. If a client only has monthly campaign data, we show the summary columns at month grain and hide the calendar (with a small note) rather than error.</li>
+      <li><strong>Unmapped campaigns</strong> → an <code>(unmapped)</code> row, so totals still reconcile.</li>
+      <li><strong>No budget at all</strong> → spend-only row(s), no Diff — never an error.</li>
+    </ul>
+    <p class="muted" style="font-size:13.5px">This mirrors the "self-activating, nothing breaks"
+      approach used for the interactive Map feature.</p>
+
+    <!-- 8 -->
+    <div class="section"></div>
+    <h2><span class="n">8</span>Out of scope</h2>
+    <div class="call scope">
+      <p class="lab">Not building (for now)</p>
+      <p><strong>Sub-Region and Store Count.</strong> These appear in the reference spreadsheet but
+        are retail-specific attributes that do not exist anywhere in our data model — no column,
+        table, or ingestion path. Adding them would be a greenfield dimension (new ingestion +
+        resolver support) and is deferred until there is a data source for them. Segmentation uses
+        the budget engine's own dimensions: <strong>Brand / Region / Category</strong>.</p>
+    </div>
+
+    <!-- 9 -->
+    <div class="section"></div>
+    <h2><span class="n">9</span>Open item to confirm</h2>
+    <div class="call decide">
+      <p class="lab">Decision</p>
+      <p><strong>Per-segment budget source.</strong> Default per §3: use the latest
+        <strong>Budget Allocation run</strong> (<code>rec_spend</code>) as each segment's monthly
+        budget, falling back to committed <strong>budget lines</strong>, then a single total.
+        Confirm this ordering — or say if larger clients should pace against committed budget lines
+        rather than the allocation engine's recommendation.</p>
+    </div>
+
+    <h3>Build sequence</h3>
+    <ol>
+      <li>Backend <code>_pacing_grid()</code> + bundle field + types.</li>
+      <li>Frontend PacingGrid summary columns (grouping, subtotals, Total).</li>
+      <li>Daily heat calendar.</li>
+      <li>Graceful-degradation states (monthly-only, unmapped, no-budget).</li>
+      <li>Unit tests (pace math, window anchoring, unmapped bucket, single- vs multi-row) + live verification.</li>
+    </ol>
+
+  </div>
+
+  <footer>
+    SearchNex Insights — Segment Pacing Board · feature methodology · September 2026 ·
+    lives in <code>docs/</code> alongside the Map and Ads-API plans.
+  </footer>
+
+</div>
+</body>
+</html>

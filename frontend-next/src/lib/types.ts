@@ -560,6 +560,44 @@ export interface BudgetPacing {
   daily?: PacingDaily | null;
 }
 
+// ---- Segment pacing board ----
+export interface PacingWindow {
+  spend: number;
+  expected: number | null;
+  diff: number | null;
+  diff_pct: number | null;
+  status: string;               // over | under | on-track | n/a
+}
+export interface PacingGridRow {
+  brand: string | null;
+  region: string | null;
+  category: string | null;
+  label: string;
+  month_budget: number | null;
+  daily_budget: number | null;
+  mtd: PacingWindow;
+  yesterday: PacingWindow | null;
+  last3: PacingWindow | null;
+  last7: PacingWindow | null;
+  rest: { left: number | null; daily_sugg: number | null };
+  days: { date: string; spend: number }[];
+}
+export interface PacingGrid {
+  month: string;
+  ym: string;
+  source: "allocation" | "lines" | "total" | "none";
+  segmented: boolean;
+  days_in_month: number;
+  has_daily: boolean;
+  data_through: string | null;
+  elapsed: number | null;
+  days_left: number | null;
+  days_with_data: number;
+  calendar: string[];           // every ISO day of the month, for the heat columns
+  rows: PacingGridRow[];
+  totals: PacingGridRow | null; // present only when segmented (multiple rows)
+}
+
 // ---- Findings + Recommendations (Today / Brief) ----
 export interface Finding {
   topic: string;
@@ -871,6 +909,7 @@ export interface Bundle {
   auction_insights_section?: AuctionSection | null;
   budget_section?: BudgetSection | null;
   budget_pacing?: BudgetPacing | null;
+  pacing_grid?: PacingGrid | null;
   recommendations?: Recommendation[];
   findings?: Finding[];
   [k: string]: unknown;

@@ -602,6 +602,175 @@ def _budget(engine, client_id, cm, config, keep=None, dateless=False):
             "daily": _pacing_daily(engine, client_id, config, keep)}
 
 
+def _pacing_segments(engine, client_id, config):
+    """Per-segment monthly budget via the confirmed cascade, stopping at the first that
+    yields rows: (1) the latest Budget Allocation run's rec_spend per (brand,region,category),
+    (2) committed budget_lines, (3) a single total budget, (4) none. Returns
+    (segments, source, segmented): each segment is {brand,region,category,label,budget}
+    (budget None only when source is 'none'); `segmented` is True for a real per-segment
+    breakout (allocation/lines), False for the single whole-account row."""
+    def seg(brand, region, category, budget, label=None):
+        parts = [str(p).strip() for p in (region, category, brand) if p and str(p).strip()]
+        return {"brand": brand or None, "region": region or None, "category": category or None,
+                "label": label or (" · ".join(parts) if parts else "Whole account"),
+                "budget": (round(_num(budget), 2) if budget is not None else None)}
+    # (1) latest allocation run — "the breakout is a function of the allocation engine"
+    try:
+        from ..budget_intel.tables import allocation_runs, allocation_results
+        with engine.connect() as c:
+            run_id = c.execute(select(func.max(allocation_runs.c.id)).where(
+                allocation_runs.c.client_id == client_id)).scalar()
+            if run_id:
+                rows = c.execute(select(
+                    allocation_results.c.brand, allocation_results.c.region,
+                    allocation_results.c.category, allocation_results.c.rec_spend
+                ).where(allocation_results.c.run_id == run_id)).all()
+                segs = [seg(b, r, cat, rs) for (b, r, cat, rs) in rows if _num(rs) > 0]
+                if segs:
+                    return segs, "allocation", True
+    except Exception:
+        pass                                   # bi tables absent / not initialized -> fall through
+    # (2) committed budget lines
+    lines = config.get("budget_lines") or []
+    segs = [seg(l.get("brand"), l.get("region"), l.get("category"), l.get("monthly"))
+            for l in lines if _num(l.get("monthly")) > 0]
+    if segs:
+        return segs, "lines", True
+    # (3) single total budget, else (4) none — one whole-account row either way
+    total = _effective_budget(config)
+    return [seg(None, None, None, total, label="Whole account")], ("total" if total else "none"), False
+
+
+def _pacing_win(actual, expected):
+    """One window cell: actual spend and, when a target exists, its Diff $/% vs pace."""
+    actual = round(actual, 2)
+    if expected is None:
+        return {"spend": actual, "expected": None, "diff": None, "diff_pct": None, "status": "n/a"}
+    diff = actual - expected
+    return {"spend": actual, "expected": round(expected, 2), "diff": round(diff, 2),
+            "diff_pct": round(diff / expected, 4) if expected else None,
+            "status": _budget_status(expected, actual)}
+
+
+def _pacing_grid(engine, client_id, config, res, keep=None):
+    """Per-segment daily pacing board for the latest month — the same view at every client
+    size, flexing only the number of rows. One row per budget segment when the budget is
+    broken out (allocation run / budget lines), else a single 'whole account' row. Each row
+    carries the monthly + daily-average budget, MTD / Yesterday / Last-3 / Last-7 spend each
+    vs the daily-average pace, rest-of-month (left + suggested daily), and a per-day spend
+    series for the heat calendar.
+
+    Windows are anchored to the last day that HAS data (never the wall clock), like
+    _pacing_daily, so a stale upload can't fake an over/under-pace alarm. When the export
+    carries no day-level data, the calendar and short windows are omitted and MTD falls back
+    to the month total (the summary still renders). None when there's no campaign data."""
+    keep = keep or (lambda d: True)
+    cm = _latest_complete_month(engine, client_id)
+    if not cm:
+        return None
+    y, mo = cm["year"], cm["month"]
+    dim = calendar.monthrange(y, mo)[1]
+
+    segments, source, segmented = _pacing_segments(engine, client_id, config)
+    _n = lambda s: (str(s).strip().lower() if s else "")
+    seg_index = {(_n(s["brand"]), _n(s["region"]), _n(s["category"])): i for i, s in enumerate(segments)}
+    UNMAPPED = -1
+
+    # Segmented budgets MUST attribute spend per campaign, so read campaign_performance; a
+    # non-segmented account with only the daily "pacing" export falls back to account_spend.
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT date_norm, date, campaign, cost FROM raw_rows WHERE client_id=:c "
+            "AND report_type='campaign_performance'"), {"c": client_id}).all()
+    if not rows:
+        return None
+    order = _slash_order(r[1] for r in rows)
+
+    seg_daily = defaultdict(lambda: defaultdict(float))   # seg_i -> {date -> spend}
+    seg_month = defaultdict(float)                         # seg_i -> current-month total (daily-less fallback)
+    for dn, date, camp, cost in rows:
+        if not keep({"campaign": camp}):
+            continue
+        si = 0 if not segmented else seg_index.get((_n(res.brand(camp)), _n(res.region(camp)), _n(res.category(camp))), UNMAPPED)
+        d = _as_date(dn)
+        if d is not None and d.year == y and d.month == mo:
+            seg_daily[si][d] += _num(cost)
+        mk = _month_key(date, order)
+        if mk and mk[:2] == (y, mo):
+            seg_month[si] += _num(cost)
+
+    has_daily = any(seg_daily.values())
+    # A non-segmented account with no day-level campaign data: use the account_spend export.
+    if not segmented and not has_daily:
+        with engine.connect() as c:
+            acct = c.execute(text(
+                "SELECT date_norm, cost FROM raw_rows WHERE client_id=:c "
+                "AND report_type='account_spend' AND date_norm IS NOT NULL"), {"c": client_id}).all()
+        for dn, cost in acct:
+            d = _as_date(dn)
+            if d is not None and d.year == y and d.month == mo:
+                seg_daily[0][d] += _num(cost)
+        has_daily = any(seg_daily.values())
+
+    all_days = sorted({d for m in seg_daily.values() for d in m})
+    data_through = all_days[-1] if all_days else None
+    elapsed = data_through.day if data_through else None
+    days_left = (dim - elapsed) if elapsed is not None else None
+
+    def build_row(meta, daily_map, month_total):
+        budget = meta["budget"]
+        daily_budget = round(budget / dim, 2) if budget else None
+        if has_daily and data_through is not None:
+            mtd = sum(daily_map.values())
+            def win(n):
+                n_eff = min(n, elapsed)
+                spend = sum(daily_map.get(data_through - datetime.timedelta(days=k), 0.0) for k in range(n_eff))
+                return _pacing_win(spend, daily_budget * n_eff if daily_budget is not None else None)
+            windows = {"yesterday": win(1), "last3": win(3), "last7": win(7)}
+            mtd_cell = _pacing_win(mtd, daily_budget * elapsed if daily_budget is not None else None)
+            days = [{"date": d.isoformat(), "spend": round(v, 2)} for d, v in sorted(daily_map.items())]
+        else:                                  # daily-less fallback: month totals, no short windows
+            mtd = month_total
+            windows = {"yesterday": None, "last3": None, "last7": None}
+            mtd_cell = _pacing_win(mtd, None)
+            days = []
+        left = round(budget - mtd, 2) if budget is not None else None
+        return {"brand": meta["brand"], "region": meta["region"], "category": meta["category"],
+                "label": meta["label"], "month_budget": budget, "daily_budget": daily_budget,
+                "mtd": mtd_cell, **windows,
+                "rest": {"left": left,
+                         "daily_sugg": round(left / days_left, 2) if (left is not None and days_left) else None},
+                "days": days}
+
+    out_rows = [build_row(s, seg_daily.get(i, {}), seg_month.get(i, 0.0)) for i, s in enumerate(segments)]
+    if segmented and (seg_daily.get(UNMAPPED) or seg_month.get(UNMAPPED)):
+        out_rows.append(build_row(
+            {"brand": None, "region": None, "category": None, "label": "(unmapped)", "budget": None},
+            seg_daily.get(UNMAPPED, {}), seg_month.get(UNMAPPED, 0.0)))
+
+    totals = None
+    if segmented:
+        comb_daily = defaultdict(float)
+        for m in seg_daily.values():
+            for d, v in m.items():
+                comb_daily[d] += v
+        comb_month = sum(seg_month.values())
+        budgets = [s["budget"] for s in segments if s["budget"] is not None]
+        totals = build_row(
+            {"brand": None, "region": None, "category": None, "label": "Total",
+             "budget": round(sum(budgets), 2) if budgets else None},
+            comb_daily, comb_month)
+
+    return {
+        "month": cm["abbr"], "ym": cm["ym"], "source": source, "segmented": segmented,
+        "days_in_month": dim, "has_daily": has_daily,
+        "data_through": data_through.isoformat() if data_through else None,
+        "elapsed": elapsed, "days_left": days_left, "days_with_data": len(all_days),
+        "calendar": [datetime.date(y, mo, dd).isoformat() for dd in range(1, dim + 1)],
+        "rows": out_rows, "totals": totals,
+    }
+
+
 QS_BUCKETS = [("Poor (1-3)", 1, 3, "#dc2626"), ("Below Average (4-5)", 4, 5, "#f59e0b"),
               ("Average (6-7)", 6, 7, "#9CA3AF"), ("Strong (8-10)", 8, 10, "#2F7D4F")]
 
@@ -2368,6 +2537,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         "campaigns": (lambda: _campaigns(engine, client_id, cm, keep, dateless)) if cm else _none,
         "geo": lambda: _geo(engine, client_id, keep, d_from, d_to),
         "budget": (lambda: _budget(engine, client_id, cm, config, keep, dateless)) if cm else _none,
+        "pacing_grid": (lambda: _pacing_grid(engine, client_id, config, res, keep)) if cm else _none,
         "reconciliation": (lambda: _budget_reconciliation(engine, client_id, cm, config, dateless)) if cm else _none,
         "qscore": lambda: _quality_score(engine, client_id, cm, config, keep, d_from, d_to),
         "qs_break": lambda: _qs_breakdown(engine, client_id, cm, config, keep, d_from, d_to),
@@ -2542,6 +2712,7 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
         "campaigns": campaigns,
         "geo_performance": geo,
         "budget_pacing": budget,
+        "pacing_grid": R["pacing_grid"],
         "budget_section": budget_sec,
         "quality_score": qscore,
         "keyword_section": keyword,
