@@ -143,7 +143,7 @@ function MccUpload() {
         <div className="flex flex-wrap items-center gap-3">
           <input ref={fileRef} type="file" multiple accept=".csv,.csv.gz,.gz" className={fileInput} />
           <button onClick={runPreview} disabled={doPreview.isPending} className="rounded-[7px] border border-border-strong px-3 py-1.5 text-[13px] hover:border-ink disabled:opacity-50">
-            {doPreview.isPending ? "Reading…" : "Preview accounts"}
+            {doPreview.isPending ? "Uploading…" : "Upload"}
           </button>
           {doPreview.isError && <span className="text-[12.5px] text-negative">{(doPreview.error as Error).message}</span>}
         </div>
