@@ -219,3 +219,15 @@ def get_guard(client_id: str):
 def put_guard(client_id: str, rows: List[dict]):
     n = bi.upsert_guard_config(engine(), client_id, rows)
     return {"saved": n}
+
+
+@router.get("/calibration")
+def calibration(client_id: str):
+    """V2 §6: predicted-vs-actual per cell/goal (MAPE + bias) and simulator-vs-actual."""
+    return bi.calibration_report(engine(), client_id)
+
+
+@router.post("/calibration/reconcile")
+def reconcile(client_id: str):
+    """Measure actuals for finalized runs whose next period has arrived (also runs on ingest)."""
+    return {"written": bi.reconcile_predictions(engine(), client_id)}

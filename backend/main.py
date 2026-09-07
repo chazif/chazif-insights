@@ -94,6 +94,11 @@ def _sync_mappings(*client_ids):
             campaign_mapping.sync(_engine, cid, service.get_config(cid, engine=_engine) or {})
         except Exception:   # noqa: BLE001
             pass
+        try:
+            from engine.budget_intel import service as _bi
+            _bi.reconcile_predictions(_engine, cid)   # V2 §6: close the calibration loop on new data
+        except Exception:   # noqa: BLE001 — calibration must never fail an ingest
+            pass
 
 
 def _run_job(job_id, fn):

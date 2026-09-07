@@ -282,6 +282,25 @@ def assign(engine, client_id, key, owner=None, note=None, actor="web"):
     return _merge(rec, _current_row(engine, client_id, key), today)
 
 
+def create_action(engine, client_id, key, title, category=None, priority="Medium",
+                  module=None, evidence=None, actor="system", note=None):
+    """Create a lifecycle action if none exists for `key` yet — idempotent per (client, key).
+    For producers OUTSIDE the bundle recommendation stream (e.g. Budget Intelligence run
+    finalization) that want an action tracked in the same ledger. Returns True if newly
+    created, False if it already existed."""
+    ts = now()
+    with engine.begin() as conn:
+        if _load_rows(conn, client_id).get(key) is not None:
+            return False
+        conn.execute(insert(actions).values(
+            client_id=client_id, action_key=key, status="proposed", created_at=ts,
+            first_seen_at=ts, last_seen_at=ts, updated_at=ts, still_detected="yes",
+            title=title, category=category, priority=priority, module=module,
+            last_evidence=evidence))
+        _event(conn, client_id, key, "created", None, "proposed", actor, note=note, evidence=evidence)
+    return True
+
+
 def _current_row(engine, client_id, key):
     with engine.connect() as conn:
         r = conn.execute(select(actions).where(

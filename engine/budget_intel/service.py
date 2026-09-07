@@ -569,7 +569,8 @@ def finalize_run(engine, client_id, run_id, goal=None, created_by="api"):
                 run_id=run_id, goal=chosen, brand=r["brand"], region=r["region"],
                 category=r["category"],
                 predicted={"is": r["expected_is"], "cpa": r["expected_cpa"],
-                           "cars": r["expected_cars"], "spend": r["rec_spend"]}))
+                           "units": r["expected_cars"], "spend": r["rec_spend"]}))
+    _create_lifecycle_actions(engine, client_id, run_id, chosen, results)   # V2 §6
     run["status"] = "final"
     run["chosen_goal"] = chosen
     run["results"] = results
@@ -606,5 +607,139 @@ def override_run(engine, client_id, run_id, cell_key, spend, reason, actor, goal
             "actor": actor, "at": _now().isoformat()}]
         c.execute(allocation_runs.update().where(
             allocation_runs.c.id == run_id).values(params=params))
+    # Also record the override in the decision ledger (V2 §5, wired with the §6 lifecycle).
+    try:
+        from ..decisions.service import create_action
+        from ..decisions.keys import action_key
+        cell = "/".join(cell_key)
+        create_action(engine, client_id, action_key(client_id, {"key": f"bi:run{run_id}:{g}:{cell}:override"}),
+                      title=f"Override {cell} spend to ${spend:,.0f} — {reason}",
+                      category="Budget", module="budget_intel", actor=actor,
+                      evidence={"cell": list(cell_key), "spend": spend, "reason": reason, "actor": actor})
+    except Exception:
+        pass                                    # ledger write is best-effort; the audit lives on the run
     return {"run_id": run_id, "goal": g, "cell": list(cell_key), "rec_spend": spend,
             "held_back": round(base - spend, 4), "reason": reason, "actor": actor}
+
+
+# ---- calibration loop (V2 §6): close predicted vs actual, measure optimism ---
+
+LIFECYCLE_THRESHOLD = 0.05          # |Δspend|/lw above which finalize files a decision action
+
+
+def _create_lifecycle_actions(engine, client_id, run_id, goal, results, threshold=LIFECYCLE_THRESHOLD):
+    """On finalize, file a decision action for each cell whose spend move exceeds `threshold`
+    (default 5%), plus a second action for its tCPA move — into the existing decision system,
+    idempotent per (run_id, goal, cell). V2 §6. Fully fail-soft: a ledger hiccup (or an
+    uninitialized decisions schema) must never fail a finalize."""
+    try:
+        from ..decisions.service import create_action
+        from ..decisions.keys import action_key
+        for r in results:
+            lw = r.get("lw_spend") or 0.0
+            if lw <= 0 or abs(r["rec_spend"] - lw) / lw <= threshold:
+                continue
+            cell = f'{r["brand"]}/{r["region"]}/{r["category"]}'
+            base = f"bi:run{run_id}:{goal}:{cell}"
+            up = r["rec_spend"] > lw
+            create_action(engine, client_id, action_key(client_id, {"key": base + ":spend"}),
+                          title=f'{"Increase" if up else "Decrease"} {cell} spend ${lw:,.0f} → ${r["rec_spend"]:,.0f}',
+                          category="Budget", module="budget_intel", evidence=r)
+            tc, tr = r.get("tcpa_current") or 0.0, r.get("tcpa_recommended") or 0.0
+            if abs(tr - tc) > 1e-9:
+                create_action(engine, client_id, action_key(client_id, {"key": base + ":tcpa"}),
+                              title=f'Adjust {cell} tCPA ${tc:,.2f} → ${tr:,.2f}',
+                              category="Bidding", module="budget_intel", evidence=r)
+    except Exception:   # noqa: BLE001
+        pass
+
+
+def _shift_reference(reference):
+    """The period immediately following a run's reference window (same length). None when the
+    run has no explicit period_start (a trailing/all-data window can't be shifted here)."""
+    if not reference:
+        return None
+    ps = _as_date(reference.get("period_start"))
+    if not ps:
+        return None
+    weeks = int(reference.get("weeks") or 1)
+    nxt = ps + datetime.timedelta(days=7 * weeks)
+    return {"mode": "week", "period_start": nxt.isoformat(), "weeks": weeks}
+
+
+def reconcile_predictions(engine, client_id):
+    """For every finalized run whose predictions still lack an actual, measure the period
+    FOLLOWING the run's reference window (build_cells) and write {is, cpa, units, spend} +
+    measured_at (V2 §6). Never overwrites an existing actual. Returns rows written."""
+    with engine.connect() as c:
+        runs = c.execute(select(allocation_runs).where(
+            (allocation_runs.c.client_id == client_id)
+            & (allocation_runs.c.status == "final"))).mappings().all()
+    written = 0
+    for run in runs:
+        with engine.connect() as c:
+            preds = c.execute(select(predictions).where(
+                (predictions.c.run_id == run["id"]) & (predictions.c.actual.is_(None)))).mappings().all()
+        if not preds:
+            continue
+        nxt = _shift_reference((run["params"] or {}).get("reference"))
+        actuals = {cell.key: cell for cell in build_cells(engine, client_id, reference=nxt)}
+        goal = run["chosen_goal"] or run["goal"]
+        for p in preds:
+            key = (p["brand"], p["region"], p["category"])
+            cell = actuals.get(key)
+            if not cell:
+                continue
+            units = cell.main_conv if goal == "main_conv" else (cell.goal_units or {}).get(goal, cell.main_conv)
+            actual = {"is": round(cell.is_share * 100, 4), "cpa": round(cell.cpa, 4),
+                      "units": round(units, 4), "spend": round(cell.cost, 4)}
+            with engine.begin() as c:
+                res = c.execute(predictions.update().where(
+                    (predictions.c.run_id == p["run_id"]) & (predictions.c.goal == p["goal"])
+                    & (predictions.c.brand == key[0]) & (predictions.c.region == key[1])
+                    & (predictions.c.category == key[2]) & (predictions.c.actual.is_(None))
+                ).values(actual=actual, measured_at=_now()))
+                written += res.rowcount or 0
+    return written
+
+
+def _mape_bias(pairs):
+    """pairs: [(predicted, actual)]. (MAPE, bias) over non-zero actuals, or (None, None).
+    bias > 0 means predicted ran high (optimistic)."""
+    errs = [(pd - ac) / ac for pd, ac in pairs if ac]
+    if not errs:
+        return None, None
+    return round(sum(abs(e) for e in errs) / len(errs), 4), round(sum(errs) / len(errs), 4)
+
+
+def calibration_report(engine, client_id):
+    """Predicted-vs-actual per cell/goal with MAPE + bias, plus simulator-vs-actual — the curve
+    is simulator-fit, so the units bias measures Google's optimism (V2 §6)."""
+    with engine.connect() as c:
+        rows = c.execute(select(
+            predictions.c.run_id, predictions.c.goal, predictions.c.brand,
+            predictions.c.region, predictions.c.category, predictions.c.predicted,
+            predictions.c.actual
+        ).select_from(predictions.join(allocation_runs, predictions.c.run_id == allocation_runs.c.id))
+         .where((allocation_runs.c.client_id == client_id)
+                & (predictions.c.actual.isnot(None)))).mappings().all()
+    by_cell = defaultdict(list)
+    for r in rows:
+        by_cell[(r["goal"], r["brand"], r["region"], r["category"])].append(
+            {"run_id": r["run_id"], "predicted": r["predicted"], "actual": r["actual"]})
+    cells, all_units = [], []
+    for (goal, b, rg, cat), hist in sorted(by_cell.items()):
+        metrics = {}
+        for m in ("is", "cpa", "units", "spend"):
+            pairs = [(h["predicted"].get(m), h["actual"].get(m)) for h in hist
+                     if h["predicted"] and h["actual"]
+                     and h["predicted"].get(m) is not None and h["actual"].get(m) is not None]
+            mape, bias = _mape_bias(pairs)
+            metrics[m] = {"mape": mape, "bias": bias, "n": len(pairs)}
+            if m == "units":
+                all_units += pairs
+        cells.append({"goal": goal, "brand": b, "region": rg, "category": cat,
+                      "history": hist, "metrics": metrics})
+    sim_mape, sim_bias = _mape_bias(all_units)
+    return {"cells": cells,
+            "simulator_vs_actual": {"units_mape": sim_mape, "units_bias": sim_bias}}
