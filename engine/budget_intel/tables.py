@@ -56,6 +56,20 @@ goal_config = Table(
     Column("updated_at", DateTime),
 )
 
+# V2 goal ladder observed units (§2): business outcomes at the grain they arrive.
+# Campaign-grain rows roll up to cells through bi_campaign_mappings; account-level
+# rows use campaign='' and distribute proportional to main_conv across the cells.
+goal_values = Table(
+    "bi_goal_values", metadata,
+    Column("client_id", String(64), primary_key=True),
+    Column("campaign", String(512), primary_key=True),  # '' = account-level (PK-safe vs NULL)
+    Column("period_start", Date, primary_key=True),
+    Column("goal_key", String(32), primary_key=True),   # transactions|customers|new_customers|revenue
+    Column("units", Float),
+    Column("source", String(16)),                       # upload | api | manual
+    Column("updated_at", DateTime),
+)
+
 curve_fits = Table(
     "bi_curve_fits", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
@@ -94,15 +108,22 @@ allocation_runs = Table(
     Column("params", JSON),                # overrides: floors, caps, change limits, score config
     Column("status", String(16)),          # draft | final
     Column("notes", String(512)),
+    Column("goals_computed", JSON),        # V2: list of goal_keys this run scored as scenarios
+    Column("chosen_goal", String(32)),     # V2: goal picked at finalize (predictions stamped for it)
     Index("ix_bi_runs_client", "client_id"),
 )
 
 allocation_results = Table(
     "bi_allocation_results", metadata,
     Column("run_id", Integer, primary_key=True),
+    # V2: one allocation per goal per run — goal is part of the identity. '' for
+    # legacy single-goal runs so old rows/paths keep a stable key.
+    Column("goal", String(32), primary_key=True, default=""),
     Column("brand", String(64), primary_key=True),
     Column("region", String(64), primary_key=True),
     Column("category", String(64), primary_key=True),
+    Column("spend_saturation", Float),     # V2: goal-independent curve freeze point
+    Column("data_source", String(64)),     # V2: which rung fed the run + where it came from
     Column("opp_score", Float),
     Column("lw_spend", Float), Column("rec_spend", Float),
     Column("spend_cap", Float), Column("spend_floor", Float),
@@ -118,6 +139,7 @@ allocation_results = Table(
 predictions = Table(
     "bi_predictions", metadata,
     Column("run_id", Integer, primary_key=True),
+    Column("goal", String(32), primary_key=True, default=""),   # V2: predictions are per chosen goal
     Column("brand", String(64), primary_key=True),
     Column("region", String(64), primary_key=True),
     Column("category", String(64), primary_key=True),
@@ -127,8 +149,30 @@ predictions = Table(
 )
 
 
+# add-column-if-missing migrations for the V2 columns (SQLite + Postgres both take
+# this form). Fresh DBs get the full schema from create_all; existing pre-production
+# DBs gain the new non-PK columns here. The PK additions (goal on results/predictions)
+# apply to fresh tables; existing rows key off the app logic, which always sets goal.
+_V2_COLUMNS = {
+    "bi_allocation_runs": [("goals_computed", "JSON"), ("chosen_goal", "VARCHAR(32)")],
+    "bi_allocation_results": [("goal", "VARCHAR(32) DEFAULT ''"),
+                              ("spend_saturation", "FLOAT"), ("data_source", "VARCHAR(64)")],
+    "bi_predictions": [("goal", "VARCHAR(32) DEFAULT ''")],
+}
+
+
 def init_db(engine):
+    from sqlalchemy import inspect, text
     metadata.create_all(engine)
+    insp = inspect(engine)
+    for table, cols in _V2_COLUMNS.items():
+        if not insp.has_table(table):
+            continue
+        have = {c["name"] for c in insp.get_columns(table)}
+        for name, ddl in cols:
+            if name not in have:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
 
 
 def now():

@@ -617,18 +617,28 @@ def _pacing_segments(engine, client_id, config):
         return {"brand": brand or None, "region": region or None, "category": category or None,
                 "label": label or (" · ".join(parts) if parts else "Whole account"),
                 "budget": (round(_num(budget), 2) if budget is not None else None)}
-    # (1) latest allocation run — "the breakout is a function of the allocation engine"
+    # (1) latest allocation run — "the breakout is a function of the allocation engine".
+    # V2 stores one scenario per goal per run, so pick a single goal (the finalized
+    # chosen_goal, else the run's requested default) to get one row per cell.
     try:
         from ..budget_intel.tables import allocation_runs, allocation_results
         with engine.connect() as c:
-            run_id = c.execute(select(func.max(allocation_runs.c.id)).where(
-                allocation_runs.c.client_id == client_id)).scalar()
-            if run_id:
-                rows = c.execute(select(
-                    allocation_results.c.brand, allocation_results.c.region,
-                    allocation_results.c.category, allocation_results.c.rec_spend
-                ).where(allocation_results.c.run_id == run_id)).all()
-                segs = [seg(b, r, cat, rs) for (b, r, cat, rs) in rows if _num(rs) > 0]
+            latest = c.execute(select(
+                allocation_runs.c.id, allocation_runs.c.chosen_goal, allocation_runs.c.goal
+            ).where(allocation_runs.c.client_id == client_id)
+             .order_by(allocation_runs.c.id.desc()).limit(1)).first()
+            if latest:
+                run_id, chosen_goal, run_goal = latest
+                goal = chosen_goal or run_goal
+                q = select(allocation_results.c.brand, allocation_results.c.region,
+                           allocation_results.c.category, allocation_results.c.rec_spend,
+                           allocation_results.c.goal).where(allocation_results.c.run_id == run_id)
+                rows = c.execute(q).all()
+                # keep a single goal's rows (legacy runs stored goal='' / NULL)
+                goals_present = {r[4] for r in rows}
+                pick = goal if goal in goals_present else (next(iter(goals_present)) if len(goals_present) == 1 else None)
+                segs = [seg(b, r, cat, rs) for (b, r, cat, rs, g) in rows
+                        if _num(rs) > 0 and (pick is None or g == pick)]
                 if segs:
                     return segs, "allocation", True
     except Exception:

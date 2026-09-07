@@ -185,8 +185,11 @@ def get_run(client_id: str, run_id: int):
 
 
 @router.post("/runs/{run_id}/finalize")
-def finalize(client_id: str, run_id: int, created_by: str = "api"):
+def finalize(client_id: str, run_id: int, body: dict | None = None, created_by: str = "api"):
+    """V2: pick a goal to finalize (predictions stamped for it). Body {"goal": "..."};
+    defaults to the run's requested view when omitted."""
+    goal = (body or {}).get("goal")
     try:
-        return bi.finalize_run(engine(), client_id, run_id, created_by=created_by)
+        return bi.finalize_run(engine(), client_id, run_id, goal=goal, created_by=created_by)
     except LookupError as e:
         raise HTTPException(404, str(e))

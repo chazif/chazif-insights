@@ -258,3 +258,18 @@ GOAL_TO_SCORE = {
     "gp": "gp",
     "revenue": "revenue",
 }
+
+
+def goal_score(cell: Cell, goal_key, value_weight=1.0, p=2, headroom_cap=0.75):
+    """V2 parameterized opportunity score (§4): one shape for every rung —
+    efficiency (units/cost)^p × propensity (units/impr) × headroom (unclaimed IS,
+    capped) × value_weight. `units` is the cell's observed units for the rung
+    (main_conv for the main rung). Zero-guarded. Replaces the four hand-written
+    legacy variants for new runs; the legacy `scores()` stays for golden parity."""
+    if not cell.impr or not cell.cost:
+        return 0.0
+    units = cell.main_conv if goal_key == "main_conv" else (cell.goal_units or {}).get(goal_key, 0.0)
+    if not units:
+        return 0.0
+    headroom = max(headroom_cap - cell.is_share, 0.01)
+    return (units / cell.impr) * (units / cell.cost) ** p * headroom * (value_weight or 1.0)

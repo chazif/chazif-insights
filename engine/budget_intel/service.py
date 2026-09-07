@@ -7,14 +7,23 @@ All queries are client_id-isolated. No LLM anywhere in this module.
 """
 import datetime
 import json
+from collections import defaultdict
 
 from sqlalchemy import select, insert, delete, text
 
 from .model import Cell, mround
 from .tables import (campaign_mappings, business_metrics, simulator_snapshots,
-                     allocation_runs, allocation_results, predictions)
+                     allocation_runs, allocation_results, predictions,
+                     goal_config, goal_values)
 from .curves import get_active_curves
-from .allocate import run_allocation
+from .allocate import run_allocation, run_allocation_v2
+
+# Google conversion rungs (always available; present on every campaign row) and the
+# business rungs (available per client only when data exists). main_conv is the curve.
+GOOGLE_RUNGS = ("main_conv", "all_conv")
+BUSINESS_RUNGS = ("transactions", "customers", "new_customers", "revenue")
+# Legacy goal names accepted by create_run, mapped onto V2 rungs (back-compat).
+LEGACY_GOAL_ALIAS = {"car_count": "transactions", "gp": "transactions", "revenue": "revenue"}
 
 
 def _now():
@@ -123,6 +132,89 @@ def get_business_metrics(engine, client_id):
     return out
 
 
+# ---- goal ladder (V2 §2): observed units per rung + a value on every rung -----
+
+def upsert_goal_values(engine, client_id, rows):
+    """rows: [{campaign?, period_start(iso), goal_key, units, source?}]. campaign omitted
+    or '' = account-level (distributes proportional to main_conv). Full-row replace per key."""
+    now = _now()
+    with engine.begin() as c:
+        for r in rows:
+            period = r.get("period_start")
+            if isinstance(period, str):
+                period = datetime.date.fromisoformat(period)
+            camp = r.get("campaign") or ""
+            where = ((goal_values.c.client_id == client_id)
+                     & (goal_values.c.campaign == camp)
+                     & (goal_values.c.period_start == period)
+                     & (goal_values.c.goal_key == r["goal_key"]))
+            c.execute(delete(goal_values).where(where))
+            c.execute(insert(goal_values).values(
+                client_id=client_id, campaign=camp, period_start=period,
+                goal_key=r["goal_key"], units=r.get("units"),
+                source=r.get("source", "upload"), updated_at=now))
+    return len(rows)
+
+
+def get_goal_values(engine, client_id):
+    with engine.connect() as c:
+        rows = c.execute(select(goal_values).where(
+            goal_values.c.client_id == client_id)).mappings().all()
+    out = []
+    for r in rows:
+        d = dict(r)
+        if isinstance(d.get("period_start"), (datetime.date, datetime.datetime)):
+            d["period_start"] = d["period_start"].isoformat()
+        out.append(d)
+    return out
+
+
+def upsert_goal_config(engine, client_id, rows):
+    """rows: [{goal_key, value_per_unit?, margin_pct?, label?}]. A null value_per_unit
+    leaves the rung volume-maximizing."""
+    now = _now()
+    with engine.begin() as c:
+        for r in rows:
+            where = ((goal_config.c.client_id == client_id)
+                     & (goal_config.c.goal_key == r["goal_key"]))
+            c.execute(delete(goal_config).where(where))
+            c.execute(insert(goal_config).values(
+                client_id=client_id, goal_key=r["goal_key"],
+                value_per_unit=r.get("value_per_unit"), margin_pct=r.get("margin_pct"),
+                label=r.get("label"), updated_at=now))
+    return len(rows)
+
+
+def get_goal_config(engine, client_id):
+    """{goal_key: {value_per_unit, margin_pct, label}} — the value on every rung."""
+    with engine.connect() as c:
+        rows = c.execute(select(goal_config).where(
+            goal_config.c.client_id == client_id)).mappings().all()
+    return {r["goal_key"]: {"value_per_unit": r["value_per_unit"],
+                            "margin_pct": r["margin_pct"], "label": r["label"]} for r in rows}
+
+
+def migrate_business_metrics(engine, client_id):
+    """One-time bridge (V2 §2): seed bi_goal_config['transactions'] from the client's
+    business metrics — value_per_unit = avg revenue_per_conv, margin_pct = avg gp_pct — so
+    the `transactions` rung (fed by car_count in build_cells) becomes a valued goal without
+    manual config. Idempotent: only writes when transactions isn't already configured."""
+    cfg = get_goal_config(engine, client_id)
+    if "transactions" in cfg and cfg["transactions"].get("value_per_unit") is not None:
+        return False
+    bms = get_business_metrics(engine, client_id)
+    rpc = [b["revenue_per_conv"] for b in bms if b.get("revenue_per_conv")]
+    gpp = [b["gp_pct"] for b in bms if b.get("gp_pct") is not None]
+    if not rpc:
+        return False
+    upsert_goal_config(engine, client_id, [{
+        "goal_key": "transactions", "label": "Transactions",
+        "value_per_unit": sum(rpc) / len(rpc),
+        "margin_pct": (sum(gpp) / len(gpp)) if gpp else None,
+    }])
+    return True
+
+
 # ---- simulator snapshots ----------------------------------------------------
 
 def add_snapshot(engine, client_id, points, source="manual", campaign=None):
@@ -162,13 +254,19 @@ def build_cells(engine, client_id):
             continue
         key = (m["brand"], m["region"], m["category"])
         a = agg.setdefault(key, dict(impr=0.0, clicks=0.0, cost=0.0, conv=0.0,
-                                     eligible=0.0, tcpa_wsum=0.0, tcpa_w=0.0))
+                                     eligible=0.0, tcpa_wsum=0.0, tcpa_w=0.0, all_conv=0.0))
         j = _jrow(r["row"])
         impr = r["impressions"] or 0.0
         a["impr"] += impr
         a["clicks"] += r["clicks"] or 0.0
         a["cost"] += r["cost"] or 0.0
         a["conv"] += r["conversions"] or 0.0
+        try:
+            allc = j.get("all_conv")
+            if allc is not None:
+                a["all_conv"] += float(allc)
+        except (TypeError, ValueError):
+            pass
         is_frac = j.get("search_impr_share")
         try:
             is_frac = float(is_frac) if is_frac is not None else None
@@ -192,6 +290,24 @@ def build_cells(engine, client_id):
         if key not in bm or (r["period_start"] or "") > (bm[key]["period_start"] or ""):
             bm[key] = r
 
+    # V2 goal ladder units per cell: uploaded per-campaign business outcomes roll up to
+    # cells via the mappings; account-level rows (campaign='') distribute proportional to
+    # main_conv. (Reference-period windowing lands in PR3 — here we aggregate what's loaded.)
+    sum_main = sum(a["conv"] for a in agg.values()) or 1.0
+    per_cell_goals = {key: {} for key in agg}
+    account_goals = defaultdict(float)
+    for gv in get_goal_values(engine, client_id):
+        gk, u, camp = gv["goal_key"], (gv["units"] or 0.0), gv["campaign"]
+        if camp:
+            m = mappings.get(camp)
+            if not m or not m.get("brand"):
+                continue
+            k = (m["brand"], m["region"], m["category"])
+            if k in per_cell_goals:
+                per_cell_goals[k][gk] = per_cell_goals[k].get(gk, 0.0) + u
+        else:
+            account_goals[gk] += u
+
     cells = []
     for key, a in sorted(agg.items()):
         brand, region, category = key
@@ -201,6 +317,13 @@ def build_cells(engine, client_id):
         car_count = b.get("car_count") or conv          # fallback: conv == car
         rev_per_car = b.get("revenue_per_conv") or 0.0
         gp_pct = b.get("gp_pct") or 0.0
+        goals = dict(per_cell_goals.get(key, {}))
+        for gk, total in account_goals.items():         # distribute account-level by main_conv
+            goals[gk] = goals.get(gk, 0.0) + total * (conv / sum_main)
+        if b.get("car_count"):                          # migration: car_count -> transactions rung
+            goals["transactions"] = b["car_count"]
+        if a.get("all_conv"):                           # Google all-conv rung
+            goals["all_conv"] = a["all_conv"]
         cells.append(Cell(
             brand=brand, region=region, category=category,
             impr=a["impr"], clicks=a["clicks"], cost=cost, main_conv=conv,
@@ -212,40 +335,89 @@ def build_cells(engine, client_id):
             cost_per_car=cost / car_count if car_count else 0.0,
             car_count=car_count,
             is_current=max(1, min(100, mround(is_share * 100))) if is_share else 0,
+            goal_units=goals,
         ))
     return cells
 
 
 # ---- allocation runs ----------------------------------------------------------
 
+def available_goals(cells):
+    """The rungs a run can score, DERIVED FROM DATA (never configured, V2 §2): main_conv
+    always; all_conv and each business rung only when some cell carries units for it.
+    Ordered Google-first, then business."""
+    present = set()
+    for c in cells:
+        present |= set((c.goal_units or {}).keys())
+    goals = ["main_conv"]
+    if "all_conv" in present:
+        goals.append("all_conv")
+    goals += [g for g in BUSINESS_RUNGS if g in present]
+    return goals
+
+
+def _disagreements(scenarios):
+    """Cells whose recommended direction (sign of rec_spend − lw_spend) differs across the
+    computed goals — the 'this goal says up, that goal says down' conflicts — sorted by the
+    largest spend move (V2 §4)."""
+    dirs, mag = defaultdict(dict), defaultdict(float)
+    for g, results in scenarios.items():
+        for r in results:
+            key = (r["brand"], r["region"], r["category"])
+            d = r["rec_spend"] - r["lw_spend"]
+            dirs[key][g] = 1 if d > 1e-6 else -1 if d < -1e-6 else 0
+            mag[key] = max(mag[key], abs(d))
+    out = []
+    for key, by_goal in dirs.items():
+        if len({s for s in by_goal.values() if s != 0}) > 1:
+            out.append({"brand": key[0], "region": key[1], "category": key[2],
+                        "directions": by_goal, "magnitude": round(mag[key], 2)})
+    out.sort(key=lambda x: -x["magnitude"])
+    return out
+
+
 def create_run(engine, client_id, goal, budget, mode="greedy_marginal",
                run_params=None, created_by="api", notes=None, cells=None):
-    """Build cells (unless supplied), resolve curves, allocate, persist run +
-    results. Returns (run_id, results). Raises ValueError when unmapped
-    campaigns exist or inputs are unusable — actionable messages throughout."""
+    """Build cells (unless supplied), resolve curves, and compute ONE allocation per
+    available goal (V2 §4 scenarios), persisting them all. `goal` becomes the requested
+    default view (legacy names aliased onto V2 rungs). Returns (run_id, results) where
+    results is the default goal's scenario. Raises ValueError on unmapped campaigns or
+    unusable inputs."""
     unmapped = unmapped_campaigns(engine, client_id)
     if unmapped and cells is None:
         raise ValueError(f"unmapped campaigns block the run: {unmapped[:10]}"
                          + (f" (+{len(unmapped)-10} more)" if len(unmapped) > 10 else ""))
-    cells = cells if cells is not None else build_cells(engine, client_id)
+    if cells is None:
+        migrate_business_metrics(engine, client_id)          # seed the transactions value once
+        cells = build_cells(engine, client_id)
     cells = [c for c in cells if c.is_current and c.cost > 0]
     if not cells:
         raise ValueError("no usable cells: need mapped campaign data with "
                          "impression share > 0")
     curves = get_active_curves(engine, client_id)
-    results = run_allocation(cells, curves, goal=goal, budget=budget, mode=mode,
-                             run_params=run_params)
+    gcfg = get_goal_config(engine, client_id)
+    goals = available_goals(cells)
+    default_goal = LEGACY_GOAL_ALIAS.get(goal, goal)
+    if default_goal not in goals:
+        default_goal = goals[0]
+
+    scenarios = {g: run_allocation_v2(cells, curves, goal=g, budget=budget,
+                                      goal_config=gcfg, run_params=run_params) for g in goals}
     with engine.begin() as c:
         run_id = c.execute(insert(allocation_runs).values(
             client_id=client_id, run_at=_now(), created_by=created_by,
-            goal=goal, budget=budget, mode=mode, params=run_params or {},
-            status="draft", notes=notes)).inserted_primary_key[0]
-        for r in results:
-            c.execute(insert(allocation_results).values(run_id=run_id, **r))
-    return run_id, results
+            goal=default_goal, budget=budget, mode=mode, params=run_params or {},
+            status="draft", notes=notes, goals_computed=goals, chosen_goal=None
+        )).inserted_primary_key[0]
+        for results in scenarios.values():
+            for r in results:
+                c.execute(insert(allocation_results).values(run_id=run_id, **r))
+    return run_id, scenarios[default_goal]
 
 
 def get_run(engine, client_id, run_id):
+    """The run plus its per-goal scenarios and cross-goal disagreements. `results` is the
+    chosen (or requested-default) goal's scenario, for callers that want one view."""
     with engine.connect() as c:
         run = c.execute(select(allocation_runs).where(
             (allocation_runs.c.id == run_id)
@@ -257,7 +429,13 @@ def get_run(engine, client_id, run_id):
     out = dict(run)
     if isinstance(out.get("run_at"), datetime.datetime):
         out["run_at"] = out["run_at"].isoformat()
-    out["results"] = [dict(r) for r in rows]
+    scenarios = defaultdict(list)
+    for r in rows:
+        scenarios[r.get("goal") or ""].append(dict(r))
+    out["scenarios"] = dict(scenarios)
+    default = out.get("chosen_goal") or out.get("goal")
+    out["results"] = scenarios.get(default) or next(iter(scenarios.values()), [])
+    out["disagreements"] = _disagreements(scenarios)
     return out
 
 
@@ -275,23 +453,29 @@ def list_runs(engine, client_id, limit=20):
     return out
 
 
-def finalize_run(engine, client_id, run_id, created_by="api"):
-    """Mark a run final and stamp predictions for the calibration loop (B5)."""
+def finalize_run(engine, client_id, run_id, goal=None, created_by="api"):
+    """Pick a goal (V2 §4), mark the run final, and stamp predictions FOR THAT GOAL ONLY for
+    the calibration loop. `goal` defaults to the run's requested view; predictions are keyed
+    by goal so scenarios don't collide. Idempotent."""
     run = get_run(engine, client_id, run_id)
     if not run:
         raise LookupError(f"run {run_id} not found for client {client_id}")
     if run["status"] == "final":
         return run
+    chosen = goal or run.get("chosen_goal") or run.get("goal")
+    results = run["scenarios"].get(chosen) or run["results"]
     with engine.begin() as c:
         c.execute(allocation_runs.update().where(
-            allocation_runs.c.id == run_id).values(status="final"))
-        for r in run["results"]:
+            allocation_runs.c.id == run_id).values(status="final", chosen_goal=chosen))
+        for r in results:
             c.execute(insert(predictions).values(
-                run_id=run_id, brand=r["brand"], region=r["region"],
+                run_id=run_id, goal=chosen, brand=r["brand"], region=r["region"],
                 category=r["category"],
                 predicted={"is": r["expected_is"], "cpa": r["expected_cpa"],
                            "cars": r["expected_cars"], "spend": r["rec_spend"]}))
     run["status"] = "final"
+    run["chosen_goal"] = chosen
+    run["results"] = results
     from . import bq_mirror
     bq_mirror.mirror_finalized_run(run)   # fail-soft analytical mirror
     return run
