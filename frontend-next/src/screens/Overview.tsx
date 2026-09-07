@@ -31,10 +31,19 @@ export function Overview() {
   const delta = (frac: number | null, betterUp = true) =>
     frac == null ? undefined : { text: `${signedPct(frac)} ${cmp}`, good: betterUp ? frac >= 0 : frac <= 0 };
 
+  // Projected full-month totals (run-rate) — only when the current month is still partial.
+  const hasProj = kpis.some((k) => k.Projected != null);
   const scoreCols: Column<KpiRow>[] = [
     { key: "metric", header: "Metric", sort: (r) => r.Metric, render: (r) => <span className="font-medium">{r.Metric}</span> },
-    { key: "prior", header: priorLabel, align: "right", render: (r) => smart(r.Metric, Number(r["Mar 2025"])) },
-    { key: "cur", header: curLabel, align: "right", render: (r) => smart(r.Metric, Number(r["Mar 2026"])) },
+    { key: "prior", header: priorLabel, align: "right", render: (r) => smart(r.Metric, Number(r["Mar 2025"])), csv: (r) => Number(r["Mar 2025"]) },
+    { key: "cur", header: curLabel, align: "right", render: (r) => smart(r.Metric, Number(r["Mar 2026"])), csv: (r) => Number(r["Mar 2026"]) },
+    ...(hasProj
+      ? [{
+          key: "proj", header: "Projected", align: "right" as const,
+          render: (r: KpiRow) => (r.Projected == null ? <span className="text-text-disabled">—</span> : <span className="font-medium">{smart(r.Metric, Number(r.Projected))}</span>),
+          csv: (r: KpiRow) => (r.Projected == null ? "" : Number(r.Projected)),
+        }]
+      : []),
     {
       key: "chg",
       header: cmp,
@@ -45,6 +54,7 @@ export function Overview() {
         ) : (
           <span className={(isCost(r.Metric) ? r.Change <= 0 : r.Change >= 0) ? "text-positive" : "text-negative"}>{signedPct(r.Change)}</span>
         ),
+      csv: (r) => (r.Change == null ? "" : r.Change),
     },
   ];
 

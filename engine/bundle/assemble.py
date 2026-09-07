@@ -2507,15 +2507,37 @@ def build_bundle(client_id, engine=None, date_from=None, date_to=None, filters=N
 
             def chg(cur, prev):
                 return round((cur - prev) / prev, 4) if prev else None
-            def krow(metric, cur, prev):
-                return {"Metric": metric, "Mar 2025": round(prev, 2), "Mar 2026": round(cur, 2), "Change": chg(cur, prev)}
+            def krow(metric, cur, prev, proj=None):
+                return {"Metric": metric, "Mar 2025": round(prev, 2), "Mar 2026": round(cur, 2),
+                        "Change": chg(cur, prev), "Projected": (round(proj, 2) if proj is not None else None)}
             cur_cpa = cc / ccv if ccv else 0; prior_cpa = pc / pcv if pcv else 0
             cur_cvr = ccv / ccl if ccl else 0; prior_cvr = pcv / pcl if pcl else 0
+            # Projected full-month totals for the current (open) month: a linear run-rate
+            # (days-in-month ÷ days-elapsed), anchored to the last day WITH data — same basis
+            # as the pacing projection. Additive metrics scale; the CPA/CVR ratios recompute
+            # from the projected components (so they hold at the current-month rate). Only for
+            # a whole-month view (a day-range selection has no "current month") and only while
+            # the month is still partial — a complete month has nothing to project.
+            p_spend = p_conv = p_cpa = p_cvr = None
+            if not (_has_day(date_from) or _has_day(date_to)):
+                y0, m0 = cur_mk[0], cur_mk[1]
+                dim0 = calendar.monthrange(y0, m0)[1]
+                last_dn = c.execute(text(
+                    "SELECT MAX(date_norm) FROM raw_rows WHERE client_id=:c "
+                    "AND report_type='campaign_performance' AND date_norm IS NOT NULL "
+                    "AND date_norm BETWEEN :lo AND :hi"),
+                    {"c": client_id, "lo": datetime.date(y0, m0, 1), "hi": datetime.date(y0, m0, dim0)}).scalar()
+                elapsed0 = _as_date(last_dn).day if last_dn else None
+                if elapsed0 and elapsed0 < dim0:
+                    f = dim0 / elapsed0
+                    p_spend, p_conv, p_clicks = cc * f, ccv * f, ccl * f
+                    p_cpa = p_spend / p_conv if p_conv else 0
+                    p_cvr = p_conv / p_clicks if p_clicks else 0
             kpis = [
-                krow("Total Spend", cc, pc),
-                krow("Main Conversions", ccv, pcv),
-                krow("CPA (Main Conv)", cur_cpa, prior_cpa),
-                krow("CVR (Main Conv)", cur_cvr, prior_cvr),
+                krow("Total Spend", cc, pc, p_spend),
+                krow("Main Conversions", ccv, pcv, p_conv),
+                krow("CPA (Main Conv)", cur_cpa, prior_cpa, p_cpa),
+                krow("CVR (Main Conv)", cur_cvr, prior_cvr, p_cvr),
             ]
 
         # ---- complexity profile ----

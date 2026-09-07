@@ -36,6 +36,7 @@ export interface CampaignsSection {
 export interface KpiRow {
   Metric: string;
   Change: number | null;
+  Projected?: number | null;   // run-rate full-month projection (current partial month only)
   [k: string]: unknown;
 }
 
