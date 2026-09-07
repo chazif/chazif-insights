@@ -87,9 +87,10 @@ curve_fits = Table(
     "bi_curve_fits", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("client_id", String(64), nullable=False),
-    Column("scope_brand", String(64)),     # all three null -> account-level fit
+    Column("scope_brand", String(64)),     # all four null -> account-level fit
     Column("scope_region", String(64)),
     Column("scope_category", String(64)),
+    Column("scope_campaign", String(512)), # V2 §6: per-campaign fit (finest scope)
     Column("fitted_at", DateTime),
     Column("params", JSON),                # {"leads":{"L","k","x0"},"cpl":{"a","b","c"}}
     Column("diagnostics", JSON),           # {"r2_leads","r2_cpl","window_start","window_end","n_points"}
@@ -106,6 +107,8 @@ simulator_snapshots = Table(
     Column("taken_at", DateTime),
     Column("source", String(16)),          # manual | api
     Column("points", JSON),                # [{"is_share","spend_week","leads_week","cpl"}]
+    Column("sim_type", String(16)),        # V2 §6: budget | target_cpa
+    Column("x_axis", String(16)),          # V2 §6: is_share | spend
     Index("ix_bi_sim_client", "client_id"),
 )
 
@@ -141,6 +144,7 @@ allocation_results = Table(
     Column("held_back", Float),            # V2 §5: proposed − rec (>0 clamped down, <0 clamped up)
     Column("guard_band_pct", Float),       # V2 §5: the change limit resolved for this cell
     Column("weeks_to_target", Float),      # V2 §5: weeks of guarded steps to reach the cap
+    Column("curve", JSON),                 # V2 §6: which curve produced this (scope/source/points/w)
     Column("opp_score", Float),
     Column("lw_spend", Float), Column("rec_spend", Float),
     Column("spend_cap", Float), Column("spend_floor", Float),
@@ -175,8 +179,11 @@ _V2_COLUMNS = {
     "bi_allocation_results": [("goal", "VARCHAR(32) DEFAULT ''"),
                               ("spend_saturation", "FLOAT"), ("data_source", "VARCHAR(64)"),
                               ("proposed_spend", "FLOAT"), ("held_back", "FLOAT"),
-                              ("guard_band_pct", "FLOAT"), ("weeks_to_target", "FLOAT")],
+                              ("guard_band_pct", "FLOAT"), ("weeks_to_target", "FLOAT"),
+                              ("curve", "JSON")],
     "bi_predictions": [("goal", "VARCHAR(32) DEFAULT ''")],
+    "bi_curve_fits": [("scope_campaign", "VARCHAR(512)")],
+    "bi_simulator_snapshots": [("sim_type", "VARCHAR(16)"), ("x_axis", "VARCHAR(16)")],
 }
 
 

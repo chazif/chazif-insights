@@ -15,7 +15,8 @@ from .model import Cell, mround
 from .tables import (campaign_mappings, business_metrics, simulator_snapshots,
                      allocation_runs, allocation_results, predictions,
                      goal_config, goal_values, guard_config)
-from .curves import get_active_curves
+from .curves import (get_active_curves, spend_curve_from_master,
+                     spend_curve_from_points, sum_curves, pool)
 from .allocate import run_allocation, run_allocation_v2
 
 # Google conversion rungs (always available; present on every campaign row) and the
@@ -293,13 +294,79 @@ def _resolve_window(dates, reference):
 
 # ---- simulator snapshots ----------------------------------------------------
 
-def add_snapshot(engine, client_id, points, source="manual", campaign=None):
+def add_snapshot(engine, client_id, points, source="manual", campaign=None,
+                 sim_type="budget", x_axis="is_share"):
     with engine.begin() as c:
         c.execute(insert(simulator_snapshots).values(
             client_id=client_id, campaign=campaign, taken_at=_now(),
-            source=source, points=points))
+            source=source, points=points, sim_type=sim_type, x_axis=x_axis))
     from . import bq_mirror
     bq_mirror.mirror_snapshot(client_id, points, source, campaign)  # fail-soft
+
+
+def get_snapshots(engine, client_id, campaigns=None, sim_type="budget"):
+    """Simulator snapshots for a client, optionally filtered to a set of campaigns and a
+    sim_type (default 'budget'; TARGET_CPA sims are stored but ignored by the model in V2)."""
+    with engine.connect() as c:
+        rows = c.execute(select(simulator_snapshots).where(
+            simulator_snapshots.c.client_id == client_id)).mappings().all()
+    out = []
+    for r in rows:
+        if sim_type and (r.get("sim_type") or "budget") != sim_type:
+            continue
+        if campaigns is not None and r["campaign"] not in campaigns:
+            continue
+        out.append(dict(r))
+    return out
+
+
+def _cell_campaigns(engine, client_id):
+    """{cell_key: [campaign, ...]} from the mappings — which campaigns roll up to each cell."""
+    out = defaultdict(list)
+    for m in get_mappings(engine, client_id):
+        if m.get("brand"):
+            out[(m["brand"], m["region"], m["category"])].append(m["campaign"])
+    return out
+
+
+def resolve_cell_curve(engine, client_id, cell_key, account_master, cell_campaigns=None,
+                       snapshots=None, k=8):
+    """Build a cell's response curve + diagnostics (V2 §6): sum the cell's per-campaign
+    BUDGET-simulator curves on a shared spend grid, then PARTIAL-POOL toward the account fit
+    (w = n/(n+k)); fall back to the account fit when the cell has no campaign points. Returns
+    (SpendCurve, diagnostics{scope, source, points, w, campaigns})."""
+    account_curve = spend_curve_from_master(account_master)
+    camps = set((cell_campaigns or _cell_campaigns(engine, client_id)).get(cell_key, []))
+    snaps = snapshots if snapshots is not None else get_snapshots(engine, client_id, camps)
+    camp_curves, n_points = [], 0
+    for s in snaps:
+        if s["campaign"] in camps and s.get("points"):
+            pts = s["points"] if isinstance(s["points"], list) else json.loads(s["points"])
+            sc = spend_curve_from_points(pts)
+            if sc.spend:
+                camp_curves.append(sc)
+                n_points += len(pts)
+    if camp_curves:
+        pooled, w = pool(sum_curves(camp_curves), account_curve, n_points, k=k)
+        return pooled, {"scope": "cell", "source": "simulator", "points": n_points,
+                        "w": round(w, 4), "campaigns": len(camp_curves)}
+    return account_curve, {"scope": "account", "source": "simulator", "points": 0,
+                           "w": 0.0, "campaigns": 0}
+
+
+def cell_curve_diagnostics(engine, client_id, cells, account_master):
+    """{cell_key: diagnostics} so every result can name the curve that produced it. Fail-soft."""
+    camp_map = _cell_campaigns(engine, client_id)
+    snaps = get_snapshots(engine, client_id)
+    out = {}
+    for cell in cells:
+        try:
+            _, diag = resolve_cell_curve(engine, client_id, cell.key, account_master,
+                                         cell_campaigns=camp_map, snapshots=snaps)
+        except Exception:   # noqa: BLE001
+            diag = None
+        out[cell.key] = diag
+    return out
 
 
 # ---- actuals builder (the programmatic Actuals sheet) ------------------------
@@ -497,6 +564,11 @@ def create_run(engine, client_id, goal, budget, mode="greedy_marginal",
         rp["guard_bands"] = {c.key: resolve_guard_band(guard_rows, *c.key) for c in cells}
     scenarios = {g: run_allocation_v2(cells, curves, goal=g, budget=budget,
                                       goal_config=gcfg, run_params=rp) for g in goals}
+    # Name the curve that produced each cell (V2 §6): per-campaign fits pooled toward account.
+    curve_diag = cell_curve_diagnostics(engine, client_id, cells, curves)
+    for results in scenarios.values():
+        for r in results:
+            r["curve"] = curve_diag.get((r["brand"], r["region"], r["category"]))
     with engine.begin() as c:
         run_id = c.execute(insert(allocation_runs).values(
             client_id=client_id, run_at=_now(), created_by=created_by,
