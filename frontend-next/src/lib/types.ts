@@ -873,6 +873,19 @@ export interface RunInput {
   notes?: string;
   created_by?: string;
 }
+export interface CalMetric { mape: number | null; bias: number | null; n: number }
+export interface CalCell {
+  goal: string;
+  brand: string;
+  region: string;
+  category: string;
+  history: { run_id: number; predicted: Record<string, number>; actual: Record<string, number> }[];
+  metrics: { is: CalMetric; cpa: CalMetric; units: CalMetric; spend: CalMetric };
+}
+export interface CalibrationReport {
+  cells: CalCell[];
+  simulator_vs_actual: { units_mape: number | null; units_bias: number | null };
+}
 export interface SnapshotPoint {
   is_share: number; // impression share (percent or fraction — backend normalizes)
   spend_week: number;

@@ -27,6 +27,7 @@ import { Ledger } from "../screens/Ledger";
 import { ClientView } from "../screens/ClientView";
 import { BudgetInput } from "../screens/BudgetInput";
 import { BudgetAllocation } from "../screens/BudgetAllocation";
+import { Calibration } from "../screens/Calibration";
 import { BusinessContext } from "../screens/BusinessContext";
 import { Locations } from "../screens/Locations";
 import { CampaignMapping } from "../screens/CampaignMapping";
@@ -63,6 +64,7 @@ export const SCREENS: Record<string, ComponentType> = {
   "geo-map": GeoMap,
   "auction-insights": AuctionInsights,
   "budget-allocation": BudgetAllocation,
+  calibration: Calibration,
   budget: Budget,
   pacing: Pacing,
   "budget-input": BudgetInput,
