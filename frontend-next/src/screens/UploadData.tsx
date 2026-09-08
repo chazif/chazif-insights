@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { uploadFiles, getUploadStatus, mccPreview, mccCommit, getMccStatus, getClients } from "../lib/api";
+import { uploadFiles, getUploadStatus, mccPreview, getMccPreviewStatus, mccCommit, getMccStatus, getClients } from "../lib/api";
 import type { UploadLoaded, MccPreview, MccCommitEntry } from "../lib/types";
 import { num } from "../lib/format";
 import { Panel } from "../components/ui/Panel";
@@ -92,16 +92,27 @@ function MccUpload() {
   const [preview, setPreview] = useState<MccPreview | null>(null);
   const [targets, setTargets] = useState<Record<string, string>>({}); // account key -> "skip" | "create" | client_id
   const [jobId, setJobId] = useState<string | null>(null);
+  const [previewJobId, setPreviewJobId] = useState<string | null>(null);
   const clients = useQuery({ queryKey: ["clients"], queryFn: getClients });
 
+  // Preview is a background job (large exports overran the request timeout → 502). Start it,
+  // poll, and set the accounts when it finishes.
   const doPreview = useMutation({
     mutationFn: (files: File[]) => mccPreview(files),
-    onSuccess: (p) => {
+    onSuccess: (r) => { setPreview(null); setJobId(null); setPreviewJobId(r.job_id); },
+  });
+  const previewStatus = useQuery({
+    queryKey: ["mcc-preview", previewJobId], queryFn: () => getMccPreviewStatus(previewJobId as string),
+    enabled: !!previewJobId, refetchInterval: (q) => (q.state.data?.status === "processing" ? 1500 : false),
+  });
+  useEffect(() => {
+    const p = previewStatus.data?.status === "done" ? previewStatus.data.result : undefined;
+    if (p) {
       setPreview(p);
       setTargets(Object.fromEntries(p.accounts.map((a) => [a.key, a.client_id ?? "create"])));
-      setJobId(null);
-    },
-  });
+    }
+  }, [previewStatus.data]);
+  const previewing = doPreview.isPending || previewStatus.data?.status === "processing";
   const commit = useMutation({
     mutationFn: () => {
       const mapping: Record<string, MccCommitEntry> = {};
@@ -134,7 +145,7 @@ function MccUpload() {
   const toIngest = preview?.accounts.filter((a) => targets[a.key] && targets[a.key] !== "skip").length ?? 0;
   const runPreview = () => {
     const files = Array.from(fileRef.current?.files ?? []);
-    if (files.length) { setJobId(null); doPreview.mutate(files); }
+    if (files.length) { setJobId(null); setPreviewJobId(null); setPreview(null); doPreview.mutate(files); }
   };
 
   return (
@@ -142,11 +153,13 @@ function MccUpload() {
       <Panel title="Upload a manager-account (MCC) export" sub="One export covering multiple accounts. We detect each account and you map it to a client — new clients can be created on the fly.">
         <div className="flex flex-wrap items-center gap-3">
           <input ref={fileRef} type="file" multiple accept=".csv,.csv.gz,.gz" className={fileInput} />
-          <button onClick={runPreview} disabled={doPreview.isPending} className="rounded-[7px] border border-border-strong px-3 py-1.5 text-[13px] hover:border-ink disabled:opacity-50">
-            {doPreview.isPending ? "Uploading…" : "Upload"}
+          <button onClick={runPreview} disabled={previewing} className="rounded-[7px] border border-border-strong px-3 py-1.5 text-[13px] hover:border-ink disabled:opacity-50">
+            {previewing ? "Reading…" : "Upload"}
           </button>
           {doPreview.isError && <span className="text-[12.5px] text-negative">{(doPreview.error as Error).message}</span>}
+          {previewStatus.data?.status === "error" && <span className="text-[12.5px] text-negative">Preview failed: {previewStatus.data.error}</span>}
         </div>
+        {previewing && !preview && <p className="mt-2 text-[12.5px] text-text-secondary">Reading the export and detecting accounts — a large file can take up to a minute…</p>}
       </Panel>
 
       {preview && (

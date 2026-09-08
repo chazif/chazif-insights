@@ -201,7 +201,11 @@ async function multipart<T>(path: string, files: File[]): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-export const mccPreview = (files: File[]) => multipart<MccPreview>("/api/upload/mcc/preview", files);
+// Preview is a background job now (a large export scan overran the request timeout): start it,
+// then poll getMccPreviewStatus until the accounts + batch_id come back.
+export const mccPreview = (files: File[]) => multipart<{ job_id: string; status: string }>("/api/upload/mcc/preview", files);
+export const getMccPreviewStatus = (jobId: string) =>
+  get<{ status: "processing" | "done" | "error"; result?: MccPreview; error?: string }>(`/api/upload/status/${jobId}`);
 export const mccCommit = (batchId: string, mapping: Record<string, MccCommitEntry>) =>
   send<{ job_id: string; status: string }>("/api/upload/mcc/commit", "POST", { batch_id: batchId, mapping });
 export const getMccStatus = (jobId: string) => get<MccStatus>(`/api/upload/status/${jobId}`);

@@ -328,10 +328,12 @@ MCC_STAGE = UPLOADS / "_mcc"
 
 
 @app.post("/api/upload/mcc/preview")
-async def mcc_preview(files: List[UploadFile] = File(...)):
-    """Stage an MCC export and report the accounts inside it (no writes). Returns a
-    batch_id to pass to /commit along with the confirmed account→client mapping."""
-    import uuid
+async def mcc_preview(background: BackgroundTasks, files: List[UploadFile] = File(...)):
+    """Stage an MCC export and report the accounts inside it (no writes). The scan streams the
+    whole file (constant memory) but a large export takes tens of seconds, which overran the
+    edge-proxy request timeout as a synchronous call (HTTP 502). So it runs as a background job
+    like commit: returns a job_id to poll at /api/upload/status/{job_id}; the finished result
+    carries the accounts + the batch_id to pass to /commit."""
     batch_id = uuid.uuid4().hex[:12]
     dest = MCC_STAGE / batch_id
     dest.mkdir(parents=True, exist_ok=True)
@@ -341,9 +343,15 @@ async def mcc_preview(files: List[UploadFile] = File(...)):
             saved += 1
     if saved == 0:
         raise HTTPException(400, "no .csv files in upload")
-    result = await run_in_threadpool(service.preview_mcc, str(dest), engine=_engine)
-    result["batch_id"] = batch_id
-    return result
+    job_id = uuid.uuid4().hex[:12]
+    _JOBS[job_id] = {"status": "processing"}
+
+    def _preview():
+        result = service.preview_mcc(str(dest), engine=_engine)
+        result["batch_id"] = batch_id
+        return result
+    background.add_task(_run_job, job_id, _preview)
+    return {"job_id": job_id, "status": "processing"}
 
 
 @app.post("/api/upload/mcc/commit")
