@@ -222,6 +222,11 @@ export const createRun = (clientId: string, body: RunInput) =>
 export const finalizeRun = (clientId: string, runId: number, goal?: string) =>
   send<AllocRun>(`${bi(clientId)}/runs/${runId}/finalize`, "POST", goal ? { goal } : {});
 
+export const overrideCell = (
+  clientId: string, runId: number,
+  body: { cell_key: [string, string, string]; spend: number; reason: string; actor: string; goal: string },
+) => send<{ rec_spend: number; held_back: number }>(`${bi(clientId)}/runs/${runId}/override`, "POST", body);
+
 export const getCalibration = (clientId: string) =>
   get<import("./types").CalibrationReport>(`${bi(clientId)}/calibration`);
 export const reconcileCalibration = (clientId: string) =>
