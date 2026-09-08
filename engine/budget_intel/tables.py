@@ -194,6 +194,14 @@ def init_db(engine):
     from sqlalchemy import inspect, text
     metadata.create_all(engine)
     insp = inspect(engine)
+    # PK migration (pre-production): V2 added `goal` to the results/predictions primary key,
+    # which cannot be ALTERed onto an existing SQLite table. These tables are DERIVED (runs
+    # are recomputable, predictions re-reconcile), so recreate them when their PK predates V2.
+    for tbl in (allocation_results, predictions):
+        if insp.has_table(tbl.name) and "goal" not in (insp.get_pk_constraint(tbl.name).get("constrained_columns") or []):
+            tbl.drop(engine)
+            tbl.create(engine)
+    insp = inspect(engine)                          # refresh after any recreate
     for table, cols in _V2_COLUMNS.items():
         if not insp.has_table(table):
             continue

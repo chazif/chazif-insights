@@ -819,6 +819,32 @@ export interface AllocResult {
   lw_cars: number | null;
   expected_revenue: number | null;
   expected_adroi: number | null;
+  // V2 fields (present on chained-scenario runs; absent on legacy rows)
+  goal?: string;
+  spend_saturation?: number | null;
+  proposed_spend?: number | null;
+  held_back?: number | null;
+  guard_band_pct?: number | null;
+  weeks_to_target?: number | null;
+  curve?: CurveDiag | null;
+  is_lost_budget?: number | null;
+  is_lost_rank?: number | null;
+  caution?: string | null;
+  data_source?: string | null;
+}
+export interface CurveDiag {
+  scope: string;      // cell | account | prior
+  source: string;
+  points: number;
+  w: number;          // pooling weight toward the cell fit
+  campaigns: number;
+}
+export interface Disagreement {
+  brand: string;
+  region: string;
+  category: string;
+  directions: Record<string, number>;   // goal -> +1 up / -1 down / 0
+  magnitude: number;
 }
 export interface AllocRun {
   id: number;
@@ -832,6 +858,12 @@ export interface AllocRun {
   status: string; // draft | final
   notes: string | null;
   results?: AllocResult[];
+  // V2 scenario fields
+  goals_computed?: string[];
+  chosen_goal?: string | null;
+  scenarios?: Record<string, AllocResult[]>;
+  disagreements?: Disagreement[];
+  held_back_total?: Record<string, number>;
 }
 export interface RunInput {
   goal: string;

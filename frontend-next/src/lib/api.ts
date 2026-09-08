@@ -219,8 +219,8 @@ export const getRuns = (clientId: string) => get<{ runs: AllocRun[] }>(`${bi(cli
 export const getRun = (clientId: string, runId: number) => get<AllocRun>(`${bi(clientId)}/runs/${runId}`);
 export const createRun = (clientId: string, body: RunInput) =>
   send<{ run_id: number; results: AllocResult[] }>(`${bi(clientId)}/runs`, "POST", body);
-export const finalizeRun = (clientId: string, runId: number) =>
-  send<AllocRun>(`${bi(clientId)}/runs/${runId}/finalize`, "POST", {});
+export const finalizeRun = (clientId: string, runId: number, goal?: string) =>
+  send<AllocRun>(`${bi(clientId)}/runs/${runId}/finalize`, "POST", goal ? { goal } : {});
 
 export const createClient = (name: string) => send<Client>("/api/clients", "POST", { name });
 export const getConfig = (clientId: string) => get<ClientConfig>(`${cid(clientId)}/config`);
