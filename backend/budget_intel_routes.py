@@ -227,7 +227,8 @@ def get_guard(client_id: str):
 
 @router.put("/guard")
 def put_guard(client_id: str, rows: List[dict]):
-    n = bi.upsert_guard_config(engine(), client_id, rows)
+    # full-set replace: the editor posts the complete rule set, so removals delete
+    n = bi.replace_guard_config(engine(), client_id, rows)
     return {"saved": n}
 
 

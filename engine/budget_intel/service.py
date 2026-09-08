@@ -251,6 +251,19 @@ def get_guard_config(engine, client_id):
     return [dict(r) for r in rows]
 
 
+def replace_guard_config(engine, client_id, rows):
+    """Replace the client's whole guard rule set (the editor sends the full desired set, so
+    removed rows are actually deleted). '' on a dimension means 'any'."""
+    now = _now()
+    with engine.begin() as c:
+        c.execute(delete(guard_config).where(guard_config.c.client_id == client_id))
+        for r in rows:
+            c.execute(insert(guard_config).values(
+                client_id=client_id, brand=r.get("brand") or "", region=r.get("region") or "",
+                category=r.get("category") or "", max_change_pct=r.get("max_change_pct"), updated_at=now))
+    return len(rows)
+
+
 def resolve_guard_band(guard_rows, brand, region, category, default=DEFAULT_GUARD_BAND):
     """Most-specific match wins (category > region > brand > client); `default` when none
     matches (V2 §5). A dimension left '' on a rule means 'any'."""

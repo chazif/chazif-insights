@@ -891,6 +891,12 @@ export interface CompareReport {
   target_cpa: { spend: number; conversions: number; cpa: number }[];
   available: boolean;
 }
+export interface GuardRule {
+  brand?: string;
+  region?: string;
+  category?: string;
+  max_change_pct: number | null;
+}
 export interface SnapshotPoint {
   is_share: number; // impression share (percent or fraction — backend normalizes)
   spend_week: number;

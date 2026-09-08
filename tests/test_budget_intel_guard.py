@@ -89,6 +89,16 @@ def test_guard_band_hierarchy_most_specific_wins():
     assert bi.resolve_guard_band([], "ZED", "WEST", "PMAX") == 0.30      # default
 
 
+def test_replace_guard_config_is_full_set(engine):
+    """The editor's PUT replaces the whole rule set — removed rows are deleted, not kept."""
+    bi.upsert_guard_config(engine, "acme", [
+        {"region": "EAST", "max_change_pct": 0.15}, {"brand": "ACME", "max_change_pct": 0.20}])
+    assert len(bi.get_guard_config(engine, "acme")) == 2
+    bi.replace_guard_config(engine, "acme", [{"category": "SRCH", "max_change_pct": 0.5}])
+    rules = bi.get_guard_config(engine, "acme")
+    assert len(rules) == 1 and rules[0]["category"] == "SRCH" and rules[0]["max_change_pct"] == 0.5
+
+
 def test_held_back_reconciles_to_proposed_minus_shipped(engine):
     _seed(engine)
     bi.upsert_guard_config(engine, "acme", [{"max_change_pct": 0.05}])   # tight -> clamps

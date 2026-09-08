@@ -228,6 +228,10 @@ export const reconcileCalibration = (clientId: string) =>
   send<{ written: number }>(`${bi(clientId)}/calibration/reconcile`, "POST", {});
 export const getCompare = (clientId: string) =>
   get<import("./types").CompareReport>(`${bi(clientId)}/simulations/compare`);
+export const getGuard = (clientId: string) =>
+  get<{ rules: import("./types").GuardRule[] }>(`${bi(clientId)}/guard`).then((r) => r.rules);
+export const putGuard = (clientId: string, rows: import("./types").GuardRule[]) =>
+  send<{ saved: number }>(`${bi(clientId)}/guard`, "PUT", rows);
 
 export const createClient = (name: string) => send<Client>("/api/clients", "POST", { name });
 export const getConfig = (clientId: string) => get<ClientConfig>(`${cid(clientId)}/config`);

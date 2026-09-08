@@ -8,6 +8,7 @@ import { Panel } from "../components/ui/Panel";
 import { Pill } from "../components/ui/Pill";
 import { DataTable, type Column } from "../components/ui/DataTable";
 import { CurveFitter } from "../components/CurveFitter";
+import { GuardEditor } from "../components/GuardEditor";
 import { Loading, ErrorState } from "../components/ui/States";
 
 // V2 goal ladder — the requested default VIEW; a run computes every available rung as a
@@ -217,6 +218,8 @@ export function BudgetAllocation() {
         </div>
         {create.isError && <p className="mt-2 text-[12.5px] text-negative">{(create.error as Error).message}</p>}
       </Panel>
+
+      <GuardEditor clientId={clientId} />
 
       {runId != null && (
         <div className="mt-6">
