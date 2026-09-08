@@ -886,6 +886,11 @@ export interface CalibrationReport {
   cells: CalCell[];
   simulator_vs_actual: { units_mape: number | null; units_bias: number | null };
 }
+export interface CompareReport {
+  budget: { spend: number; conversions: number; implied_cpa: number | null }[];
+  target_cpa: { spend: number; conversions: number; cpa: number }[];
+  available: boolean;
+}
 export interface SnapshotPoint {
   is_share: number; // impression share (percent or fraction — backend normalizes)
   spend_week: number;

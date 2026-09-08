@@ -393,18 +393,7 @@ def simulations_compare(engine, client_id, n=20):
     spend against the stored TARGET_CPA simulation. No model change — the calibration loop
     decides which to trust before either is used jointly. Returns
     {budget:[{spend,conversions,implied_cpa}], target_cpa:[{spend,conversions,cpa}], available}."""
-    budget = []
-    try:
-        acct = spend_curve_from_master(get_active_curves(engine, client_id))
-        if acct.spend:
-            hi = acct.max_spend
-            for i in range(n):
-                s = hi * (i + 1) / n
-                cv = acct.conv_at(s)
-                budget.append({"spend": round(s, 2), "conversions": round(cv, 2),
-                               "implied_cpa": round(s / cv, 4) if cv else None})
-    except LookupError:
-        pass
+    # target-CPA sim first, so the budget series can share its spend range when present
     tcpa = []
     for snap in get_snapshots(engine, client_id, sim_type="target_cpa"):
         pts = snap["points"] if isinstance(snap["points"], list) else json.loads(snap["points"])
@@ -419,6 +408,21 @@ def simulations_compare(engine, client_id, n=20):
             tcpa.append({"spend": round(float(spend), 2), "conversions": round(float(conv), 2),
                          "cpa": round(float(cpa), 4)})
     tcpa.sort(key=lambda x: x["spend"])
+
+    budget = []
+    try:
+        acct = spend_curve_from_master(get_active_curves(engine, client_id))
+        if acct.spend:
+            # When a tCPA sim exists, sample the budget curve over its spend range (so the two
+            # overlap legibly); otherwise across the whole curve. Never past the curve's cap.
+            hi = min(max(p["spend"] for p in tcpa) * 1.15, acct.max_spend) if tcpa else acct.max_spend
+            for i in range(n):
+                s = hi * (i + 1) / n
+                cv = acct.conv_at(s)
+                budget.append({"spend": round(s, 2), "conversions": round(cv, 2),
+                               "implied_cpa": round(s / cv, 4) if cv else None})
+    except LookupError:
+        pass
     return {"budget": budget, "target_cpa": tcpa, "available": bool(tcpa)}
 
 

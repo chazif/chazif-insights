@@ -226,6 +226,8 @@ export const getCalibration = (clientId: string) =>
   get<import("./types").CalibrationReport>(`${bi(clientId)}/calibration`);
 export const reconcileCalibration = (clientId: string) =>
   send<{ written: number }>(`${bi(clientId)}/calibration/reconcile`, "POST", {});
+export const getCompare = (clientId: string) =>
+  get<import("./types").CompareReport>(`${bi(clientId)}/simulations/compare`);
 
 export const createClient = (name: string) => send<Client>("/api/clients", "POST", { name });
 export const getConfig = (clientId: string) => get<ClientConfig>(`${cid(clientId)}/config`);
