@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Circle, CircleMarker, GeoJSON, MapContainer, Marker, Popup, TileLayer, Tooltip, useMapEvents } from "react-leaflet";
+import { Circle, CircleMarker, GeoJSON, MapContainer, Marker, Popup, TileLayer, Tooltip } from "react-leaflet";
 import L, { type Layer } from "leaflet";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import "leaflet/dist/leaflet.css";
@@ -58,38 +58,27 @@ const PIN = L.divIcon({
   popupAnchor: [0, -14],
 });
 
-// Level-of-detail: each geographic grain the bundle can carry, paired with its boundary
-// file and the zoom at which it takes over. Coarse → fine. A level renders only when the
-// export carries that grain AND its boundary file exists (metro/city have no polygons yet,
-// so they quietly fall back to the finest level that does). Zooming in reveals finer detail.
-const BOUNDARIES: { key: GeoLevelKey; file: string; minZoom: number }[] = [
-  { key: "state", file: "world-states.geojson", minZoom: 0 },
-  { key: "county", file: "us-counties.geojson", minZoom: 6 },
+// The geographic grains the bundle can carry, coarse → fine, each with its boundary file.
+// The map always renders the FINEST grain the export carries (no zoom-driven level switch),
+// so the most granular view shows at every zoom.
+const BOUNDARIES: { key: GeoLevelKey; file: string }[] = [
+  { key: "state", file: "world-states.geojson" },
+  { key: "county", file: "us-counties.geojson" },
 ];
 
 // The point grains — city and (finer) postal code — have no polygons, so they render as
-// geocoded bubbles once the user zooms in past the county fill. The finest present wins, so
-// a postal-code export drills to ZIP centroids; a city-only export stops at cities. Cap how
-// many we place (and geocode) per view.
+// geocoded bubbles. The finest present wins: a postal-code export shows ZIP centroids, a
+// city-only export shows cities. Cap how many we place (and geocode) per view.
 const POINT_LEVELS: GeoLevelKey[] = ["postal", "city"];   // finest-first
-const POINT_MIN_ZOOM = 8;
 const POINT_CAP = 200;
 
-// The finest boundary level that (a) has data and (b) whose minZoom the current zoom has
-// reached. Always resolves to something when `available` is non-empty (state at minZoom 0).
-function pickLevel(zoom: number, available: Set<string>): typeof BOUNDARIES[number] | undefined {
+// The finest boundary level with data (BOUNDARIES is coarse→fine, so the last match wins).
+function finestLevel(available: Set<string>): typeof BOUNDARIES[number] | undefined {
   let chosen: typeof BOUNDARIES[number] | undefined;
   for (const b of BOUNDARIES) {
-    if (!available.has(b.key)) continue;
-    if (!chosen || zoom >= b.minZoom) chosen = b;   // finest reached wins
+    if (available.has(b.key)) chosen = b;
   }
   return chosen;
-}
-
-// Reports live zoom changes out of the Leaflet map into React state.
-function ZoomWatcher({ onZoom }: { onZoom: (z: number) => void }) {
-  const map = useMapEvents({ zoomend: () => onZoom(map.getZoom()) });
-  return null;
 }
 
 export function GeoMap() {
@@ -110,12 +99,11 @@ export function GeoMap() {
     return s;
   }, [levelsMap]);
 
-  const [zoom, setZoom] = useState(4);
   const [metric, setMetric] = useState<MetricKey>("cost");
   const [showTargets, setShowTargets] = useState(true);
 
-  // Level-of-detail: the current zoom picks the grain; its boundary file loads lazily.
-  const active = hasGeo ? pickLevel(zoom, available) : undefined;
+  // Always render the finest polygon grain the export carries; its boundary file loads lazily.
+  const active = hasGeo ? finestLevel(available) : undefined;
   const activeRows: GeoRow[] = active ? (levelsMap[active.key]?.rows ?? []) : [];
 
   const geo = useQuery({
@@ -175,12 +163,11 @@ export function GeoMap() {
   }, [activeRows, metric, matchSet]);
 
   // ---- Point bubbles: the finest point grain present (postal code, else city), drawn as
-  // geocoded points once zoomed in past the county fill. ----
+  // geocoded points whenever the export carries them — at any zoom. ----
   const pointKey = POINT_LEVELS.find((k) => levelsMap[k]?.rows?.length);
   const pointLevel = pointKey ? levelsMap[pointKey] : undefined;
   const hasPoints = !!pointLevel?.rows?.length;
-  const pointActive = hasPoints && zoom >= POINT_MIN_ZOOM;
-  const pointDim = pointLevel?.dimension ?? "Location";
+  const pointActive = hasPoints;
   // The places we'll plot: the strongest by the current metric (bounds the geocoding).
   const pointRows = useMemo(() => {
     const rows = pointLevel?.rows;
@@ -211,15 +198,6 @@ export function GeoMap() {
   }, [pointRows, pointGeo.data, pointKey]);
   const pointMax = useMemo(() => pointPoints.reduce((mx, x) => Math.max(mx, x.row[metric] ?? 0), 0), [pointPoints, metric]);
   const pointPending = pointGeo.data?.pending ?? 0;
-
-  // The next finer grain the user hasn't zoomed into yet — drives the "zoom in for …" hint.
-  const nextDrill = useMemo(() => {
-    const targets = [
-      ...BOUNDARIES.filter((b) => b.key !== "state" && available.has(b.key)).map((b) => ({ minZoom: b.minZoom, label: levelsMap[b.key]?.dimension ?? b.key })),
-      ...(hasPoints ? [{ minZoom: POINT_MIN_ZOOM, label: pointDim }] : []),
-    ].sort((a, b) => a.minZoom - b.minZoom);
-    return targets.find((t) => zoom < t.minZoom);
-  }, [available, levelsMap, hasPoints, pointDim, zoom]);
 
   if (isLoading || locations.isLoading || (hasGeo && geo.isLoading && !geo.data)) return <Loading />;
   if (error) return <ErrorState msg={(error as Error).message} />;
@@ -299,7 +277,6 @@ export function GeoMap() {
           box so they can't paint over the sticky ContextBar's dropdowns above the map. */}
       <div className="relative isolate overflow-hidden rounded-[10px] border border-border" style={{ height: 580 }}>
         <MapContainer center={[39.5, -98.35]} zoom={4} scrollWheelZoom style={{ height: "100%", width: "100%" }}>
-          <ZoomWatcher onZoom={setZoom} />
           <TileLayer url={TILES.url} attribution={TILES.attribution} subdomains={TILES.subdomains} />
           {hasGeo && geo.data && <GeoJSON key={`${active?.key}:${geo.data.features.length}:${metric}:${showTargets}:${targetRegions.size}`} data={geo.data} style={styleFn} onEachFeature={onEach} />}
           {showTargets && radiusTargets.map((t, i) => (
@@ -335,12 +312,6 @@ export function GeoMap() {
             </Marker>
           ))}
         </MapContainer>
-        {/* zoom-to-drill hint — points at the next finer grain the user hasn't reached yet */}
-        {hasGeo && !pointActive && nextDrill && (
-          <div className="pointer-events-none absolute right-3 top-3 z-[500] rounded-full border border-border bg-surface/95 px-3 py-1 text-[11px] font-medium text-text-secondary shadow-sm">
-            Zoom in for {nextDrill.label} detail
-          </div>
-        )}
         {/* legend */}
         {hasGeo && (
           <div className="pointer-events-none absolute bottom-3 left-3 z-[500] rounded-[8px] border border-border bg-surface/95 px-3 py-2 text-[11px] shadow-sm">
