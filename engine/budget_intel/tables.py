@@ -132,8 +132,9 @@ allocation_runs = Table(
 allocation_results = Table(
     "bi_allocation_results", metadata,
     Column("run_id", Integer, primary_key=True),
-    # V2: one allocation per goal per run — goal is part of the identity. '' for
-    # legacy single-goal runs so old rows/paths keep a stable key.
+    # V2: one allocation per goal per run — goal is part of the identity. Rows moved
+    # off the pre-V2 key by scripts/migrate_bi_v2.py carry their run's chosen_goal (else
+    # the run's goal), which is exactly what the read paths look up.
     Column("goal", String(32), primary_key=True, default=""),
     Column("brand", String(64), primary_key=True),
     Column("region", String(64), primary_key=True),
@@ -173,9 +174,10 @@ predictions = Table(
 
 
 # add-column-if-missing migrations for the V2 columns (SQLite + Postgres both take
-# this form). Fresh DBs get the full schema from create_all; existing pre-production
-# DBs gain the new non-PK columns here. The PK additions (goal on results/predictions)
-# apply to fresh tables; existing rows key off the app logic, which always sets goal.
+# this form). Fresh DBs get the full schema from create_all; existing DBs gain the new
+# non-PK columns here. The PK addition (goal on results/predictions) cannot be ALTERed
+# onto an existing table: scripts/migrate_bi_v2.py moves those rows, and init_db refuses
+# to run until it has.
 _V2_COLUMNS = {
     "bi_allocation_runs": [("goals_computed", "JSON"), ("chosen_goal", "VARCHAR(32)")],
     "bi_allocation_results": [("goal", "VARCHAR(32) DEFAULT ''"),
@@ -194,14 +196,18 @@ def init_db(engine):
     from sqlalchemy import inspect, text
     metadata.create_all(engine)
     insp = inspect(engine)
-    # PK migration (pre-production): V2 added `goal` to the results/predictions primary key,
-    # which cannot be ALTERed onto an existing SQLite table. These tables are DERIVED (runs
-    # are recomputable, predictions re-reconcile), so recreate them when their PK predates V2.
-    for tbl in (allocation_results, predictions):
-        if insp.has_table(tbl.name) and "goal" not in (insp.get_pk_constraint(tbl.name).get("constrained_columns") or []):
-            tbl.drop(engine)
-            tbl.create(engine)
-    insp = inspect(engine)                          # refresh after any recreate
+    # V2 added `goal` to the results/predictions PRIMARY KEY. NEVER drop the tables to get
+    # there (M0-A1): on a pre-V2 database they hold finalized allocations and reconciled
+    # predictions. Refuse — before any ALTER — until scripts/migrate_bi_v2.py has copied
+    # the rows onto the V2 key.
+    stale = [t.name for t in (allocation_results, predictions)
+             if insp.has_table(t.name)
+             and "goal" not in (insp.get_pk_constraint(t.name).get("constrained_columns") or [])]
+    if stale:
+        raise RuntimeError(
+            f"{', '.join(stale)} still use the pre-V2 primary key. Run "
+            "`python scripts/migrate_bi_v2.py --commit` against this database first "
+            "(it copies every row onto the V2 key; nothing is dropped).")
     for table, cols in _V2_COLUMNS.items():
         if not insp.has_table(table):
             continue
