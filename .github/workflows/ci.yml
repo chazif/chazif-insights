@@ -1,0 +1,56 @@
+name: CI
+
+# Cheap gate that catches breakage before it reaches a Railway environment (M0-A6):
+# the full pytest suite on the production Python, and the React console's typecheck +
+# build on the production Node (both versions match the Dockerfile).
+on:
+  push:
+    branches: [main, feature/ads-api, chazif/m0-ads-housekeeping]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-tests:
+    name: api · pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"          # Dockerfile: python:3.11-slim
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend deps (+ test-only pytest, httpx for TestClient)
+        run: pip install -r backend/requirements.txt pytest httpx
+      - name: pytest
+        # No secrets and no DATABASE_URL: every test uses a throwaway SQLite database,
+        # and no LLM / Google Ads / BigQuery call leaves the runner.
+        run: python -m pytest tests -q
+
+  web-build:
+    name: web · typecheck + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend-next
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20                # Dockerfile: node:20-slim
+          cache: npm
+          cache-dependency-path: frontend-next/package-lock.json
+      - name: Install web deps
+        run: npm ci
+      - name: TypeScript typecheck
+        run: npm run typecheck
+      - name: Production build
+        run: npm run build
