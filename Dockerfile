@@ -1,6 +1,6 @@
 # Build for the REDESIGN Railway environment (redesign branch).
 # Stage 1 builds the React app (frontend-next → dist); stage 2 is the Python runtime
-# that runs FastAPI and serves that build at /next. The production (main) environment
+# that runs FastAPI and serves that build at /. The production (main) environment
 # builds with Nixpacks and has no Dockerfile, so this affects the redesign env only.
 
 # ---- stage 1: build the React frontend ----

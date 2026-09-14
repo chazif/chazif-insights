@@ -11,11 +11,11 @@ function ViewRouter() {
   return <Screen />;
 }
 
-// Served under /next, so React Router uses that basename. URLs are addressable:
-//   /next/c/:clientId/:view   (and /next/c/:clientId → brief)
+// Served at / by FastAPI (the legacy /next prefix redirects). URLs are addressable:
+//   /c/:clientId/:view   (and /c/:clientId → brief)
 export default function App() {
   return (
-    <BrowserRouter basename="/next">
+    <BrowserRouter>
       <Routes>
         <Route path="/" element={<ResolveClient />} />
         <Route path="/c/:clientId" element={<AppShell />}>

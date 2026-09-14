@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "SearchNex Ads — redesigned frontend (React + TypeScript). Served by FastAPI at /next.",
+  "description": "SearchNex Ads — redesigned frontend (React + TypeScript). Served by FastAPI at /.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

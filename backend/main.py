@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """SearchNex AE — production backend (Railway target).
 
-Serves the static frontend, the per-client DATA bundle, and the admin API
-(clients, upload, inventory). SQLite locally / Postgres via DATABASE_URL.
+Serves the React console (frontend-next/dist) at /, the per-client DATA bundle, and
+the admin API (clients, upload, inventory). SQLite locally / Postgres via DATABASE_URL.
 
 Run locally:  py -m uvicorn backend.main:app --reload --port 8000
 Railway:      Procfile -> uvicorn backend.main:app --host 0.0.0.0 --port $PORT
@@ -15,8 +15,7 @@ from pathlib import Path
 from typing import Optional, List
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form, Request, BackgroundTasks
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
@@ -32,9 +31,8 @@ from backend import decision_routes
 from backend.decision_routes import router as decision_router
 
 ROOT = Path(__file__).resolve().parent.parent
-FRONTEND = ROOT / "frontend"
-CLIENTS = ROOT / "data" / "clients"
 UPLOADS = ROOT / "data" / "uploads"
+WEB_DIST = ROOT / "frontend-next" / "dist"      # the React console build (npm run build)
 
 app = FastAPI(title="SearchNex Ads", version="0.3.0")
 app.include_router(budget_intel_router)
@@ -641,21 +639,18 @@ def inventory(client: str = Query(...)):
 
 # ---- bundle --------------------------------------------------------------
 @app.get("/api/bundle")
-def bundle(client: str = Query("mavis"), period: str = Query("2026-03"),
+def bundle(client: str = Query(...),
            date_from: str = Query(None, alias="from"), date_to: str = Query(None, alias="to"),
            seg: str = Query("all"), campaign: str = Query("all"), region: str = Query("all"),
            category: str = Query("all"), brand: str = Query("all"), type: str = Query("all"),
            compare: str = Query("yoy"), cfrom: str = Query(None), cto: str = Query(None)):
-    _safe_seg(client, period)
+    # Always computed from the warehouse (M0-A3): no default client, and no pre-baked
+    # bundle file is ever read from disk at request time.
+    _safe_seg(client)
     filters = {"seg": seg, "campaign": campaign, "region": region, "category": category,
                "brand": brand, "type": type}
-    has_filter = any(v and v != "all" for v in filters.values())
-    # Pre-baked bundle (e.g. the Mavis demo) wins if present (ignores date range + filters).
-    path = CLIENTS / client / period / "bundle.json"
-    if path.is_file() and not (date_from or date_to or has_filter or compare != "yoy"):
-        return FileResponse(path, media_type="application/json")
     # Serve an unexpired cached build for these exact params (instant reload / filter re-toggle).
-    key = (client, period, date_from, date_to, seg, campaign, region, category, brand, type, compare, cfrom, cto)
+    key = (client, date_from, date_to, seg, campaign, region, category, brand, type, compare, cfrom, cto)
     cached = _bundle_cache_get(key)
     if cached is not None:
         return JSONResponse(cached)
@@ -668,24 +663,28 @@ def bundle(client: str = Query("mavis"), period: str = Query("2026-03"),
     return JSONResponse(computed)
 
 
-# ---- Redesign (React) build, served at /next -----------------------------
-# Present only when frontend-next has been built (frontend-next/dist). One catch-all
-# route serves the hashed static assets and falls back to index.html for client-side
-# (SPA) routes so deep links / refreshes work. Registered before the "/" mount so it wins.
-NEXT_DIST = ROOT / "frontend-next" / "dist"
-
+# ---- React console (frontend-next/dist), served at / ------------------------
+# The legacy vanilla-JS app (frontend/) is retired (M0-A3). The React build is the only
+# frontend. The old /next prefix redirects so bookmarks keep working.
 
 @app.get("/next")
 @app.get("/next/{path:path}")
-def next_app(path: str = ""):
-    if not NEXT_DIST.is_dir():
-        raise HTTPException(404, "redesign build not present (run `npm run build` in frontend-next)")
-    root = NEXT_DIST.resolve()
-    target = (NEXT_DIST / path).resolve()
-    if target.is_file() and root in target.parents:      # real asset (traversal-guarded)
+def next_redirect(request: Request, path: str = ""):
+    qs = request.url.query
+    return RedirectResponse(f"/{path}" + (f"?{qs}" if qs else ""), status_code=308)
+
+
+# Registered LAST so every API route (and /docs, /openapi.json) wins. Serves the hashed
+# static assets and falls back to index.html for client-side (SPA) routes, so deep links
+# and refreshes work. Never answers an /api/* path with HTML.
+@app.get("/{path:path}", include_in_schema=False)
+def web_app(path: str = ""):
+    if path == "api" or path.startswith("api/"):
+        raise HTTPException(404, "Not Found")
+    if not WEB_DIST.is_dir():
+        raise HTTPException(404, "frontend build not present (run `npm run build` in frontend-next)")
+    root = WEB_DIST.resolve()
+    target = (WEB_DIST / path).resolve()
+    if path and target.is_file() and root in target.parents:   # real asset (traversal-guarded)
         return FileResponse(target)
-    return FileResponse(NEXT_DIST / "index.html")         # SPA fallback
-
-
-# Static frontend (current app) mounted last so /api/* and /next win.
-app.mount("/", StaticFiles(directory=str(FRONTEND), html=True), name="frontend")
+    return FileResponse(WEB_DIST / "index.html")               # SPA fallback

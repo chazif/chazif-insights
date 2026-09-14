@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { getClients } from "../lib/api";
 import { DEFAULT_VIEW } from "../nav/model";
 
-// Landing at /next with no client: resolve the most recently-updated client that has data
+// Landing at / with no client: resolve the most recently-updated client that has data
 // and redirect to it, so the app always opens on a real account.
 export function ResolveClient() {
   const { data, error } = useQuery({ queryKey: ["clients"], queryFn: getClients });

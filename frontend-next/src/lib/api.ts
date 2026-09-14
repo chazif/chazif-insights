@@ -1,5 +1,5 @@
 // Typed fetch layer over the existing FastAPI backend. Same-origin in production
-// (FastAPI serves this app at /next); Vite proxies /api to the backend in dev.
+// (FastAPI serves this app at /); Vite proxies /api to the backend in dev.
 
 export interface Client {
   client_id: string;

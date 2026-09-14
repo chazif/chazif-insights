@@ -11,13 +11,15 @@ what exists today (**Phase 0**).
 
 ## Layout
 ```
-backend/        FastAPI app (main.py) + zero-dep dev server (dev_server.py)
-frontend/       index.html (shell + bundle loader) + app.js (views/render)
-data/clients/<client>/<period>/bundle.json   render-ready DATA bundle (generated)
-engine/         analyzers (Phase 2)
-tools/          split_dashboard.py — externalize a single-file dashboard export
-docs/           DATA_BUNDLE_SCHEMA.md, PHASE0_SETUP.md
+backend/        FastAPI app (main.py): the JSON API, and serves the React console at /
+frontend-next/  the React console (Vite + React + TypeScript), built to frontend-next/dist
+engine/         ingestion, warehouse (Postgres/BigQuery), bundle assembler, analyzers
+tests/          pytest suite
+tools/          split_dashboard.py (legacy: regenerates the retired Mavis demo fixture)
+docs/           DATA_BUNDLE_SCHEMA.md, PHASE0_SETUP.md, specs
 ```
+The legacy vanilla-JS app (`frontend/`) and its zero-dependency `dev_server.py` were
+retired in M0-A3. The React console is the only frontend, and `/next` redirects to `/`.
 
 ## Architecture in one line
 `upload → normalized store → engine → DATA bundle (JSON) + recommendations → web console`
@@ -26,21 +28,20 @@ The engine never hands account credentials to a model; deterministic code owns t
 
 ## Run locally
 
-**Option A — zero dependencies (verifies the seam):**
-```
-py backend/dev_server.py
-# open http://localhost:8000  (demo sign-in is prefilled)
-```
-
-**Option B — production stack (FastAPI, matches Railway):**
 ```
 py -m venv .venv && .venv\Scripts\activate
 pip install -r backend/requirements.txt
-uvicorn backend.main:app --reload --port 8000
+uvicorn backend.main:app --reload --port 8000        # API on :8000
 ```
+Then, in a second terminal: `cd frontend-next && npm ci && npm run dev` (the console on
+:5173, proxying `/api` to :8000). Or run `npm run build` in `frontend-next` once and open
+http://localhost:8000, where FastAPI serves the console at `/`.
 
-Both serve the frontend and resolve `GET /api/bundle?client=<c>&period=<p>` from
-`data/clients/<c>/<p>/bundle.json`.
+`GET /api/bundle?client=<id>` is always computed from the warehouse: there is no
+default client and no pre-baked file.
+
+Verify: `python -m pytest tests -q`, and in `frontend-next` run
+`npm run typecheck && npm run build`.
 
 ## Regenerate the Mavis demo bundle
 The Mavis fixture is derived from the original single-file dashboard and is
