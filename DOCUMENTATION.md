@@ -79,7 +79,7 @@ Parallel to the main pipeline, **Module 2 — Budget Intelligence** reads the sa
 | Analytics warehouse (optional) | Google BigQuery (behind `USE_BIGQUERY`) |
 | Frontend | Static HTML + vanilla JS (no framework/bundler); Chart.js 4.4.1 (CDN); Google Fonts |
 | Math deps | `scipy` (curve fitting, lazy), `numpy` |
-| AI (optional) | DeepSeek (priority) or Anthropic; only for search-term relevance |
+| AI (optional) | Anthropic (priority); DeepSeek only as explicit opt-in (its key set, no Anthropic key); only for search-term relevance |
 
 **Deployment (Railway):**
 - `Procfile`: `web: uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
@@ -391,9 +391,9 @@ Note: analyzers sum in sorted order and use deterministic tie-breaks so formatte
 
 `engine/llm/relevance.py` — the **only** AI touchpoint, and it sees only search-term *text* + business context (never account data or credentials).
 
-`get_or_classify(engine, client_id, terms, context)` is cache-first: it reads `term_relevance`, classifies only the missing terms (capped at `MAX_TERMS=40`), and writes results back. Provider priority: **DeepSeek** (if `DEEPSEEK_API_KEY`) → **Anthropic** (`ANTHROPIC_API_KEY`, default model `claude-haiku-4-5-20251001`) → **heuristic**. Any LLM/network error falls back to the heuristic (brand-substring → brand; conquest-substring → competitor; product-category keyword overlap → product; else unrelated). The prompt requests a strict JSON array `[{term, relevant, category, reason}]`; dropped terms are back-filled by the heuristic.
+`get_or_classify(engine, client_id, terms, context)` is cache-first: it reads `term_relevance`, classifies only the missing terms (capped at `MAX_TERMS=40`), and writes results back. Provider priority (M0-A5): **Anthropic** (`ANTHROPIC_API_KEY`, default model `claude-haiku-4-5-20251001`) → **DeepSeek** only as explicit opt-in (`DEEPSEEK_API_KEY` set and no Anthropic key; search terms can contain PII) → **heuristic**. Any LLM/network error falls back to the heuristic, never to another LLM, and is logged as a warning (provider + error type only; logs never contain terms, context, or keys) (brand-substring → brand; conquest-substring → competitor; product-category keyword overlap → product; else unrelated). The prompt requests a strict JSON array `[{term, relevant, category, reason}]`; dropped terms are back-filled by the heuristic.
 
-*(ROADMAP note: DeepSeek is currently priority; the roadmap calls for routing Anthropic-first.)*
+*(ROADMAP note: the Anthropic-first routing fix landed in M0-A5.)*
 
 ---
 
@@ -626,7 +626,7 @@ engine/
   analyze/
     analyzers.py              8 deterministic analyzers → findings/recommendations
   llm/
-    relevance.py              search-term relevance (DeepSeek/Anthropic/heuristic), cached
+    relevance.py              search-term relevance (Anthropic/DeepSeek opt-in/heuristic), cached
   budget/
     parse.py                  budget-file (.csv/.xlsx) parsing
   budget_intel/

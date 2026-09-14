@@ -5,20 +5,28 @@ The one scoped-AI step: given only the search-term TEXT + the business context
 (what they sell, brand, competitors) — never account data or credentials — decide
 whether each term is relevant to the business, for negative-keyword decisions.
 
-Backends:
-  * LLM (Anthropic) when ANTHROPIC_API_KEY is set — the real classifier.
-  * Deterministic heuristic otherwise — keyword overlap with the product categories.
-Results are cached per (client, term) so the LLM is called at most once per term.
+Backends, in priority order (M0-A5):
+  * Anthropic when ANTHROPIC_API_KEY is set: the default classifier.
+  * DeepSeek only when DEEPSEEK_API_KEY is set AND no Anthropic key is: setting that key
+    is the explicit opt-in. Client search terms can contain PII, so they never go to
+    DeepSeek while Anthropic is configured, not even when the Anthropic call fails.
+  * Deterministic heuristic otherwise, and after any LLM/network error: keyword overlap
+    with the product categories.
+Results are cached per (client, term) so the LLM is called at most once per term. Each
+classification logs which path ran; logs never contain term text, context, or keys.
 """
 import os
 import re
 import json
+import logging
 import datetime
 import urllib.request
 from sqlalchemy import select, insert
 from ..ingest.store import term_relevance
 
-# Providers, in priority order: DeepSeek (OpenAI-compatible) -> Anthropic -> heuristic.
+log = logging.getLogger(__name__)
+
+# Providers, in priority order: Anthropic -> DeepSeek (explicit opt-in) -> heuristic.
 ANTHROPIC_MODEL = os.environ.get("RELEVANCE_MODEL", "claude-haiku-4-5-20251001")
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 DEEPSEEK_URL = os.environ.get("DEEPSEEK_URL", "https://api.deepseek.com/chat/completions")
@@ -26,10 +34,10 @@ MAX_TERMS = 40  # bound the classification set per build (cost/latency)
 
 
 def _provider():
-    if os.environ.get("DEEPSEEK_API_KEY"):
-        return "deepseek"
     if os.environ.get("ANTHROPIC_API_KEY"):
         return "anthropic"
+    if os.environ.get("DEEPSEEK_API_KEY"):
+        return "deepseek"
     return None
 
 
@@ -121,12 +129,17 @@ def _classify_anthropic(terms, context):
 def classify_terms(terms, context):
     p = _provider()
     try:
-        if p == "deepseek":
-            return _classify_deepseek(terms, context)
         if p == "anthropic":
+            log.info("term relevance: %d term(s) via anthropic", len(terms))
             return _classify_anthropic(terms, context)
-    except Exception:
-        pass  # any LLM / network error -> deterministic fallback
+        if p == "deepseek":
+            log.info("term relevance: %d term(s) via deepseek", len(terms))
+            return _classify_deepseek(terms, context)
+    except Exception as e:  # any LLM / network error -> deterministic fallback, never another LLM
+        log.warning("term relevance: %s call failed (%s); %d term(s) via heuristic",
+                    p, type(e).__name__, len(terms))
+        return _classify_heuristic(terms, context)
+    log.info("term relevance: %d term(s) via heuristic (no LLM key set)", len(terms))
     return _classify_heuristic(terms, context)
 
 
