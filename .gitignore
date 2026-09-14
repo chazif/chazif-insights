@@ -15,7 +15,7 @@ node_modules/
 Thumbs.db
 
 # Data — generated bundles are large and produced by the engine, not source.
-# The Mavis demo fixture is regenerated with tools/split_dashboard.py.
+# The legacy Mavis demo fixture was untracked in M0-A4; nothing reads data/clients at runtime.
 data/clients/**/bundle.json
 
 # Uploaded CSVs (user data, not source)

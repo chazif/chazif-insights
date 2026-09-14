@@ -15,11 +15,13 @@ backend/        FastAPI app (main.py): the JSON API, and serves the React consol
 frontend-next/  the React console (Vite + React + TypeScript), built to frontend-next/dist
 engine/         ingestion, warehouse (Postgres/BigQuery), bundle assembler, analyzers
 tests/          pytest suite
-tools/          split_dashboard.py (legacy: regenerates the retired Mavis demo fixture)
 docs/           DATA_BUNDLE_SCHEMA.md, PHASE0_SETUP.md, specs
 ```
 The legacy vanilla-JS app (`frontend/`) and its zero-dependency `dev_server.py` were
 retired in M0-A3. The React console is the only frontend, and `/next` redirects to `/`.
+The 20 MB Mavis demo fixture and its generator (`tools/split_dashboard.py`) were removed
+from the repo in M0-A4. Generated bundles are never committed (`data/clients/**/bundle.json`
+is git-ignored, and `tests/test_repo_hygiene.py` enforces it).
 
 ## Architecture in one line
 `upload → normalized store → engine → DATA bundle (JSON) + recommendations → web console`
@@ -42,13 +44,6 @@ default client and no pre-baked file.
 
 Verify: `python -m pytest tests -q`, and in `frontend-next` run
 `npm run typecheck && npm run build`.
-
-## Regenerate the Mavis demo bundle
-The Mavis fixture is derived from the original single-file dashboard and is
-git-ignored (it's large + generated). Recreate it with:
-```
-py tools/split_dashboard.py --src "PATH\TO\Mavis_Tire_Dashboard_March_2026.html" --client mavis --period 2026-03
-```
 
 ## Deploy (Railway)
 See `docs/PHASE0_SETUP.md`. `Procfile` / `railway.json` are the start config;
