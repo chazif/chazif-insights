@@ -1,7 +1,7 @@
-# Build for the REDESIGN Railway environment (redesign branch).
-# Stage 1 builds the React app (frontend-next → dist); stage 2 is the Python runtime
-# that runs FastAPI and serves that build at /. The production (main) environment
-# builds with Nixpacks and has no Dockerfile, so this affects the redesign env only.
+# SearchNex Ads — the production image. railway.json selects this Dockerfile
+# (builder=DOCKERFILE), so EVERY Railway environment builds it, production included.
+# Stage 1 builds the React console (frontend-next → dist); stage 2 is the Python runtime
+# that runs FastAPI and serves that build at /.
 
 # ---- stage 1: build the React frontend ----
 FROM node:20-slim AS webbuild
@@ -9,6 +9,9 @@ WORKDIR /app/frontend-next
 COPY frontend-next/package.json frontend-next/package-lock.json ./
 RUN npm ci
 COPY frontend-next/ ./
+# Vite bakes VITE_* values into the JS at build time. Railway passes a service variable to
+# the build only when it is declared as an ARG. Unset -> the map uses OpenStreetMap tiles.
+ARG VITE_MAPTILER_KEY
 RUN npm run build            # -> /app/frontend-next/dist
 
 # ---- stage 2: python runtime ----

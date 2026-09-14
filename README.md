@@ -46,8 +46,10 @@ Verify: `python -m pytest tests -q`, and in `frontend-next` run
 `npm run typecheck && npm run build`.
 
 ## Deploy (Railway)
-See `docs/PHASE0_SETUP.md`. `Procfile` / `railway.json` are the start config;
-Railway builds from `backend/requirements.txt` via Nixpacks.
+`railway.json` selects the multi-stage `Dockerfile` (builder=DOCKERFILE) for every
+environment: it builds the React console, installs `backend/requirements.txt`, and starts
+uvicorn on `$PORT`. All settings are listed in `.env.example`. (The old `Procfile` /
+Nixpacks setup was removed in M0-A7.)
 
 ## Status — Phase 0
 - [x] Externalize the embedded `DATA` into a fetched bundle (engine↔frontend seam)

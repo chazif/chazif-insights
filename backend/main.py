@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""SearchNex AE — production backend (Railway target).
+"""SearchNex Ads — production backend (Railway target).
 
 Serves the React console (frontend-next/dist) at /, the per-client DATA bundle, and
 the admin API (clients, upload, inventory). SQLite locally / Postgres via DATABASE_URL.
 
 Run locally:  py -m uvicorn backend.main:app --reload --port 8000
-Railway:      Procfile -> uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+Railway:      Dockerfile (railway.json builder=DOCKERFILE) -> uvicorn backend.main:app --port $PORT
 """
 import os
 import time
@@ -127,7 +127,7 @@ async def revalidate_assets(request: Request, call_next):
 @app.get("/api/health")
 def health():
     backend = _engine.dialect.name  # "postgresql" or "sqlite"
-    return {"ok": True, "service": "chazif-insights", "version": "0.3.0",
+    return {"ok": True, "service": "searchnex-ads", "version": "0.3.0",
             "db": backend, "persistent": backend != "sqlite"}
 
 

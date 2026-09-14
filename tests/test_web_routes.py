@@ -81,6 +81,7 @@ def test_api_paths_never_fall_back_to_html(client, dist):
 def test_api_routes_still_win(client, dist):
     r = client.get("/api/health")
     assert r.status_code == 200 and r.json()["ok"] is True
+    assert r.json()["service"] == "searchnex-ads"          # M0-A7 naming
 
 
 def test_missing_build_is_a_clear_404(client, main, tmp_path, monkeypatch):

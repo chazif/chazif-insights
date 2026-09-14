@@ -82,10 +82,10 @@ Parallel to the main pipeline, **Module 2 — Budget Intelligence** reads the sa
 | AI (optional) | Anthropic (priority); DeepSeek only as explicit opt-in (its key set, no Anthropic key); only for search-term relevance |
 
 **Deployment (Railway):**
-- `Procfile`: `web: uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
-- `railway.json`: NIXPACKS builder; `restartPolicyType: ON_FAILURE`, max 3 retries.
+- `Dockerfile` (multi-stage: builds `frontend-next`, then the Python 3.11 runtime) starts `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`. The old `Procfile` was removed in M0-A7.
+- `railway.json`: DOCKERFILE builder (every environment, production included); `restartPolicyType: ON_FAILURE`, max 3 retries.
 - **Single uvicorn worker** — the app relies on in-process singletons (`_JOBS`, `_BUNDLE_CACHE`, the BigQuery client, curve caches), so it must run as one process. The background-job pattern (§13) is designed around this.
-- Dependencies install from `backend/requirements.txt` via Nixpacks.
+- Dependencies install from `backend/requirements.txt` inside the Dockerfile. All settings are listed in `.env.example`.
 
 **`get_engine()` (`engine/ingest/store.py`):** `url = DATABASE_URL` if set else `sqlite:///data/dev.db`. Driver normalization: `postgres://` and `postgresql://` are rewritten to `postgresql+psycopg://` (psycopg v3). Always `create_engine(url, future=True)`.
 
@@ -651,7 +651,7 @@ docs/
 tests/
   test_budget_intel_golden.py, test_budget_intel_service.py
 ROADMAP_V2.md                 phased plan (analyst console → operator platform)
-Procfile, railway.json        deployment
+Dockerfile, railway.json      deployment
 ```
 
 ---
